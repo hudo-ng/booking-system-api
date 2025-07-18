@@ -21,6 +21,8 @@ model User {
   role       Role
   createdAt  DateTime     @default(now())
   Appoinment Appointment[]
+  workingHours WorkingHours[]
+  timeOff TimeOff[]
 }
 
 model Appointment {
@@ -35,6 +37,23 @@ model Appointment {
   startTime DateTime?
   endTime DateTime?
   createdAt DateTime? @default(now())
+}
+
+model WorkingHours {
+  id String @id @default(uuid())
+  employee User @relation(fields: [employeeId], references: [id])
+  employeeId String
+  weekday Int
+  startTime String
+  endTime String
+}
+
+model TimeOff {
+  id String @id @default(uuid())
+  employee User @relation(fields: [employeeId], references: [id])
+  employeeId String
+  date DateTime
+  reason String?
 }
 
 enum AppointmentStatus {
