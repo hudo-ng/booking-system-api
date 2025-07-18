@@ -6,33 +6,44 @@
 
 generator client {
   provider = "prisma-client-js"
-  output   = "../generated/prisma"
 }
 
-// datasource db {
-//   provider = "postgresql"
-//   url      = env("DATABASE_URL")
-// }
-
-// prisma/schema.prisma
-// prisma/schema.prisma
 datasource db {
-  provider  = "postgresql"
-  url  	    = env("DATABASE_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
-  id String @id @default(uuid())
-  email String @unique
-  password String
-  name String
-  role Role
-  createdAt DateTime @default(now())
+  id         String       @id @default(uuid())
+  email      String       @unique
+  password   String
+  name       String
+  role       Role
+  createdAt  DateTime     @default(now())
+  Appoinment Appointment[]
+}
+
+model Appointment {
+  id         String @id @default(uuid())
+  employeeId String
+  employee   User   @relation(fields: [employeeId], references: [id])
+  customerName String
+  email String
+  phone String
+  detail String
+  status AppointmentStatus @default(pending)
+  startTime DateTime?
+  endTime DateTime?
+  createdAt DateTime? @default(now())
+}
+
+enum AppointmentStatus {
+  pending
+  accepted
+  declined
 }
 
 enum Role {
   admin
   employee
 }
-
-
