@@ -20,12 +20,12 @@ export const setWorkingHours = async (req: Request, res: Response) => {
   res.json(entry);
 };
 
-export const getTimeOff = async (req: Request, res: Response) => {
+export const getWorkingHours = async (req: Request, res: Response) => {
   const { userId } = (req as any).user;
-  const offs = await prisma.timeOff.findMany({
+  const hours = await prisma.workingHours.findMany({
     where: { employeeId: userId },
-    orderBy: { date: "desc" },
+    orderBy: { weekday: "asc" },
   });
 
-  res.json(offs);
+  res.json(hours);
 };
