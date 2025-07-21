@@ -14,7 +14,7 @@ export const setTimeOff = async (req: Request, res: Response) => {
 };
 
 export const getTimeOff = async (req: Request, res: Response) => {
-  const userId = (req as any).user;
+  const { userId } = (req as any).user;
   const offs = await prisma.timeOff.findMany({
     where: { employeeId: userId },
     orderBy: { date: "desc" },

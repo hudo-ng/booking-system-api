@@ -36,13 +36,13 @@ export const requestBooking = async (req: Request, res: Response) => {
       .status(404)
       .json({ message: "No working hours set for this day" });
   }
-  const workStart = dayjs(`${date}T${hours.startTime}`);
-  const workEnd = dayjs(`${date}T${hours.endTime}`);
-  if (start.isBefore(workStart) || start.isAfter(workEnd.subtract(1, "hour"))) {
-    return res
-      .status(400)
-      .json({ message: "Requested time is outside of working hours" });
-  }
+  // const workStart = dayjs(`${date}T${hours.startTime}`);
+  // const workEnd = dayjs(`${date}T${hours.endTime}`);
+  // if (start.isBefore(workStart) || start.isAfter(workEnd.subtract(1, "hour"))) {
+  //   return res
+  //     .status(400)
+  //     .json({ message: "Requested time is outside of working hours" });
+  // }
   // exclude full day time off
   const off = await prisma.timeOff.findFirst({
     where: { employeeId, date: start.startOf("day").toDate() },

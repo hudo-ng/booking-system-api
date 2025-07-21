@@ -12,6 +12,11 @@ export const getAppointments = async (req: Request, res: Response) => {
   const appointments = await prisma.appointment.findMany({
     where: roleToSearch,
     orderBy: { createdAt: "desc" },
+    include: {
+      employee: {
+        select: { id: true, name: true },
+      },
+    },
   });
   res.json(appointments);
 };

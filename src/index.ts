@@ -7,6 +7,8 @@ import appointmentRoutes from "./routes/appointment.routes";
 import workingHoursRoutes from "./routes/workingHours.routes";
 import timeOffRoutes from "./routes/timeOff.routes";
 import availabilityRoutes from "./routes/availability.routes";
+import bookingRoutes from "./routes/booking.routes";
+import employeesRoutes from "./routes/employees.routes";
 
 const app = express();
 app.use(cors());
@@ -21,6 +23,10 @@ app.use("/working-hours", workingHoursRoutes);
 app.use("/availability", availabilityRoutes);
 
 app.use("/time-off", timeOffRoutes);
+
+app.use("/employee", bookingRoutes);
+
+app.use("/employees", employeesRoutes);
 
 app.get("/", (req: Request, res: Response) => {
   res.send("Hello from express");
