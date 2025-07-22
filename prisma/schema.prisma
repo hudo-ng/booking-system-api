@@ -23,6 +23,8 @@ model User {
   Appoinment Appointment[]
   workingHours WorkingHours[]
   timeOff TimeOff[]
+  photo_url    String?        
+  start_price  Float?         
 }
 
 model Appointment {
