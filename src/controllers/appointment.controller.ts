@@ -46,3 +46,52 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
   });
   res.json(updated);
 };
+
+export const updateAppointment = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { startTime, endTime, status } = req.body;
+
+  if (!startTime || !endTime) {
+    return res.status(400).json({ message: "Start and end time required." });
+  }
+
+  const appointment = await prisma.appointment.findUnique({ where: { id } });
+  if (!appointment)
+    return res.status(404).json({ message: "Appointment not found." });
+
+  const employeeId = appointment.employeeId;
+  const newStart = new Date(startTime);
+  const newEnd = new Date(endTime);
+
+  // Conflict check for accepted appointments
+  const conflict = await prisma.appointment.findFirst({
+    where: {
+      id: { not: id },
+      employeeId,
+      status: "accepted",
+      startTime: { lt: newEnd },
+      endTime: { gt: newStart },
+    },
+  });
+
+  if (conflict) {
+    return res.status(400).json({
+      message: "This time overlaps with another accepted appointment.",
+    });
+  }
+
+  try {
+    const updated = await prisma.appointment.update({
+      where: { id },
+      data: {
+        startTime: newStart,
+        endTime: newEnd,
+        status,
+      },
+    });
+    res.json(updated);
+  } catch (err) {
+    console.error("Update failed", err);
+    res.status(500).json({ message: "Failed to update appointment" });
+  }
+};
