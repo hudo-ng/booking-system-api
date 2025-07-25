@@ -21,6 +21,34 @@ export const getAppointments = async (req: Request, res: Response) => {
   res.json(appointments);
 };
 
+export const getAppointmentById = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params; // appointment ID from URL param
+
+    if (!id) {
+      return res.status(400).json({ message: "Appointment ID is required" });
+    }
+
+    const appointment = await prisma.appointment.findUnique({
+      where: { id },
+      include: {
+        employee: {
+          select: { id: true, name: true },
+        },
+      },
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ message: "Appointment not found" });
+    }
+
+    return res.json(appointment);
+  } catch (error) {
+    console.error("getAppointmentById error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
 export const updateAppointmentStatus = async (req: Request, res: Response) => {
   const { id } = req.params;
   const { status, startTime, endTime } = req.body as {

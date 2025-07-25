@@ -30,10 +30,20 @@ export const getAvailability = async (req: Request, res: Response) => {
   }
 
   // time off exclusion
-  const isOff = await prisma.timeOff.findFirst({
-    where: { employeeId, date: target.toDate() },
+  const startOfDay = target.startOf("day").toDate();
+  const endOfDay = target.endOf("day").toDate();
+
+  const exists = await prisma.timeOff.findFirst({
+    where: {
+      employeeId,
+      date: {
+        gte: startOfDay,
+        lte: endOfDay,
+      },
+    },
   });
-  if (isOff) return res.json([]);
+
+  if (exists) return res.json([]);
 
   // accepted appointments exclusion
   const appts = await prisma.appointment.findMany({
@@ -56,5 +66,5 @@ export const getAvailability = async (req: Request, res: Response) => {
 
   // free slots
   const freeSlots = slots.filter((s) => !occupied.has(s));
-  res.json(freeSlots);
+  return res.json(freeSlots);
 };
