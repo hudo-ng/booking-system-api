@@ -23,7 +23,7 @@ export const getAvailability = async (req: Request, res: Response) => {
   //build one hour slots
   const slots: string[] = [];
   let cursor = target.hour(Number(hours?.startTime.split(":")[0])).minute(0);
-  const endHour = Number(hours?.endTime.split(":")[0]);
+  const endHour = Number(hours?.endTime?.split(":")[0]);
   while (cursor.hour() < endHour) {
     slots.push(cursor.toISOString());
     cursor = cursor.add(1, "hour");

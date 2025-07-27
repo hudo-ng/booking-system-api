@@ -65,3 +65,19 @@ export const getWorkingHours = async (req: Request, res: Response) => {
     return res.status(500).json({ message: "Error fetching working hours" });
   }
 };
+
+export const getAllWorkingHours = async (req: Request, res: Response) => {
+  const { userId } = (req as any).user;
+
+  try {
+    const hours = await prisma.workingHours.findMany({
+      where: { employeeId: userId },
+      orderBy: [{ weekday: "asc" }, { startTime: "asc" }],
+    });
+
+    res.json(hours);
+  } catch (err) {
+    console.error("Error loading all working hours:", err);
+    res.status(500).json({ message: "Failed to load working hours." });
+  }
+};

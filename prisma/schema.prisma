@@ -48,7 +48,7 @@ model WorkingHours {
   weekday Int
   startTime String
   endTime String?
-  @@unique([employeeId, weekday], name: "employeeId_weekday")
+  @@index([employeeId, weekday], name: "employeeId_weekday")
 }
 
 model TimeOff {
