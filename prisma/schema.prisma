@@ -47,7 +47,7 @@ model WorkingHours {
   employeeId String
   weekday Int
   startTime String
-  endTime String
+  endTime String?
   @@unique([employeeId, weekday], name: "employeeId_weekday")
 }
 
