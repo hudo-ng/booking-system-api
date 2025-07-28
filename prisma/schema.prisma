@@ -39,6 +39,19 @@ model Appointment {
   startTime DateTime?
   endTime DateTime?
   createdAt DateTime? @default(now())
+
+  AppointmentHistory AppointmentHistory[]
+}
+
+model AppointmentHistory {
+  id String @id @default(uuid())
+  appointmentId String
+  appointment Appointment @relation(references: [id], fields: [appointmentId])
+  fieldChanged String
+  oldValue String
+  newValue String
+  changedAt DateTime @default(now())
+  changedBy String
 }
 
 model WorkingHours {
