@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { PrismaClient, AppointmentStatus } from "@prisma/client";
+import dayjs from "dayjs";
 
 const prisma = new PrismaClient();
 
@@ -18,6 +19,49 @@ export const getAppointments = async (req: Request, res: Response) => {
       },
     },
   });
+  res.json(appointments);
+};
+
+export const getAllAppointments = async (req: Request, res: Response) => {
+  const { userId } = (req as any).user as { userId?: string };
+  const { year, month } = req.query as { year?: string; month?: string };
+
+  if (!userId) {
+    return res.json([]);
+  }
+
+  let dateFilter = {};
+
+  if (year && month) {
+    // Convert query params to integers
+    const y = parseInt(year, 10);
+    const m = parseInt(month, 10); // 1-based month
+
+    const startOfMonth = dayjs(`${y}-${m}-01`).startOf("month").toDate();
+    const endOfMonth = dayjs(`${y}-${m}-01`).endOf("month").toDate();
+
+    // If you want appointments overlapping the month:
+    dateFilter = {
+      AND: [
+        { startTime: { lte: endOfMonth } },
+        { endTime: { gte: startOfMonth } },
+      ],
+    };
+  }
+
+  const appointments = await prisma.appointment.findMany({
+    where: {
+      employeeId: userId,
+      ...dateFilter,
+    },
+    orderBy: { createdAt: "desc" },
+    include: {
+      employee: {
+        select: { id: true, name: true },
+      },
+    },
+  });
+
   res.json(appointments);
 };
 
