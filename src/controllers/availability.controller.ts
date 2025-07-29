@@ -19,6 +19,7 @@ export const getAvailability = async (req: Request, res: Response) => {
   const isOff = await prisma.timeOff.findFirst({
     where: { employeeId, date: target.startOf("day").toDate() },
   });
+  console.log(isOff);
   if (isOff) return res.json([]);
 
   // Get all intervals for the weekday

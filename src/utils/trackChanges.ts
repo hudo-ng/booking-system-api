@@ -8,7 +8,7 @@ const prisma = new PrismaClient();
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-export async function trackAppoinmentHistory(
+export async function trackAppointmentHistory(
   appointmentId: string,
   oldData: Record<string, any>,
   newData: Record<string, any>,
@@ -21,26 +21,33 @@ export async function trackAppoinmentHistory(
     const oldValue = oldData[field];
     const newValue = newData[field];
 
-    if (!newValue || oldValue === undefined) continue;
+    if (newValue === undefined) continue;
+    let oldString = "";
+    let newString = "";
 
-    const oldString =
-      oldValue instanceof Date
-        ? dayjs.utc(oldValue).local().format("MMM D, YYYY h:mm A")
-        : String(oldValue);
-    const newString =
-      newValue instanceof Date
-        ? dayjs.utc(newValue).local().format("MMM D, YYYY h:mm A")
-        : String(newValue);
+    if (field === "startTime" || field === "endTime") {
+      const oldDate = dayjs(oldValue);
+      const newDate = dayjs(newValue);
 
-    if (oldString !== newString) {
-      changes.push({
-        appointmentId,
-        fieldChanged: field,
-        oldValue: oldString,
-        newValue: newString,
-        changedBy,
-      });
+      if (!oldDate.isValid() || !newDate.isValid()) continue;
+
+      if (oldDate.valueOf() === newDate.valueOf()) continue;
+
+      oldString = oldDate.local().format("MMM D, YYYY h:mm A");
+      newString = newDate.local().format("MMM D, YYYY h:mm A");
+    } else {
+      if (oldValue === newValue) continue;
+      oldString = String(oldValue);
+      newString = String(newValue);
     }
+
+    changes.push({
+      appointmentId,
+      fieldChanged: field,
+      oldValue: oldString,
+      newValue: newString,
+      changedBy,
+    });
   }
 
   if (changes.length > 0) {
