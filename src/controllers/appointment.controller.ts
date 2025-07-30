@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { PrismaClient, AppointmentStatus } from "@prisma/client";
 import { trackAppointmentHistory } from "../utils/trackChanges";
+import dayjs from "dayjs";
 
 const prisma = new PrismaClient();
 
@@ -20,6 +21,77 @@ export const getAppointments = async (req: Request, res: Response) => {
     },
   });
   res.json(appointments);
+};
+
+export const getAllAppointments = async (req: Request, res: Response) => {
+  const { userId } = (req as any).user as { userId?: string };
+  const { year, month } = req.query as { year?: string; month?: string };
+
+  if (!userId) {
+    return res.json([]);
+  }
+
+  let dateFilter = {};
+
+  if (year && month) {
+    // Convert query params to integers
+    const y = parseInt(year, 10);
+    const m = parseInt(month, 10); // 1-based month
+
+    const startOfMonth = dayjs(`${y}-${m}-01`).startOf("month").toDate();
+    const endOfMonth = dayjs(`${y}-${m}-01`).endOf("month").toDate();
+
+    // If you want appointments overlapping the month:
+    dateFilter = {
+      AND: [
+        { startTime: { lte: endOfMonth } },
+        { endTime: { gte: startOfMonth } },
+      ],
+    };
+  }
+
+  const appointments = await prisma.appointment.findMany({
+    where: {
+      employeeId: userId,
+      ...dateFilter,
+    },
+    orderBy: { createdAt: "desc" },
+    include: {
+      employee: {
+        select: { id: true, name: true },
+      },
+    },
+  });
+
+  res.json(appointments);
+};
+
+export const getAppointmentById = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params; // appointment ID from URL param
+
+    if (!id) {
+      return res.status(400).json({ message: "Appointment ID is required" });
+    }
+
+    const appointment = await prisma.appointment.findUnique({
+      where: { id },
+      include: {
+        employee: {
+          select: { id: true, name: true },
+        },
+      },
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ message: "Appointment not found" });
+    }
+
+    return res.json(appointment);
+  } catch (error) {
+    console.error("getAppointmentById error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
 };
 
 export const updateAppointmentStatus = async (req: Request, res: Response) => {

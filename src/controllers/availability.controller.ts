@@ -15,12 +15,22 @@ export const getAvailability = async (req: Request, res: Response) => {
 
   const weekday = target.day();
 
-  // Time off check
-  const isOff = await prisma.timeOff.findFirst({
-    where: { employeeId, date: target.startOf("day").toDate() },
+
+  // time off exclusion
+  const startOfDay = target.startOf("day").toDate();
+  const endOfDay = target.endOf("day").toDate();
+
+  const exists = await prisma.timeOff.findFirst({
+    where: {
+      employeeId,
+      date: {
+        gte: startOfDay,
+        lte: endOfDay,
+      },
+    },
   });
-  console.log(isOff);
-  if (isOff) return res.json([]);
+
+  if (exists) return res.json([]);
 
   // Get all intervals for the weekday
   const hours = await prisma.workingHours.findMany({
@@ -48,23 +58,9 @@ export const getAvailability = async (req: Request, res: Response) => {
     }
   }
 
-  const slots: string[] = [];
 
-  for (const interval of hours) {
-    const start = dayjs(`${date}T${interval.startTime}`);
-    const end = interval.endTime
-      ? dayjs(`${date}T${interval.endTime}`)
-      : dayjs(`${date}T23:59`);
+  // free slots
+  const freeSlots = slots.filter((s) => !occupied.has(s));
+  return res.json(freeSlots);
 
-    let current = start;
-    while (current.add(1, "minute").isBefore(end)) {
-      const iso = current.toISOString();
-      if (!occupied.has(iso) && current.isAfter(dayjs())) {
-        slots.push(iso);
-      }
-      current = current.add(1, "hour");
-    }
-  }
-
-  return res.json(slots);
 };
