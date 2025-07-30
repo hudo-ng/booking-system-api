@@ -15,7 +15,6 @@ export const getAvailability = async (req: Request, res: Response) => {
 
   const weekday = target.day();
 
-
   // time off exclusion
   const startOfDay = target.startOf("day").toDate();
   const endOfDay = target.endOf("day").toDate();
@@ -58,9 +57,8 @@ export const getAvailability = async (req: Request, res: Response) => {
     }
   }
 
-
+  const slots: string[] = [];
   // free slots
   const freeSlots = slots.filter((s) => !occupied.has(s));
   return res.json(freeSlots);
-
 };
