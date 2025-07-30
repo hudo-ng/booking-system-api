@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { PrismaClient, AppointmentStatus } from "@prisma/client";
+import { trackAppointmentHistory } from "../utils/trackChanges";
 import dayjs from "dayjs";
 
 const prisma = new PrismaClient();
@@ -112,6 +113,20 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
     data.startTime = new Date(startTime!);
     data.endTime = new Date(endTime!);
   }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { name: true },
+  });
+  if (!user) throw new Error("User not found");
+  const changedBy = user.name;
+  await trackAppointmentHistory(
+    id,
+    appt,
+    { startTime, endTime, status },
+    changedBy
+  );
+
   const updated = await prisma.appointment.update({
     where: { id },
     data,
@@ -122,6 +137,11 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
 export const updateAppointment = async (req: Request, res: Response) => {
   const { id } = req.params;
   const { startTime, endTime, status } = req.body;
+
+  const { userId, role } = (req as any).user as {
+    userId: string;
+    role: string;
+  };
 
   if (!startTime || !endTime) {
     return res.status(400).json({ message: "Start and end time required." });
@@ -152,6 +172,19 @@ export const updateAppointment = async (req: Request, res: Response) => {
     });
   }
 
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { name: true },
+  });
+  if (!user) throw new Error("User not found");
+  const changedBy = user.name;
+  await trackAppointmentHistory(
+    id,
+    appointment,
+    { startTime, endTime, status },
+    changedBy
+  );
+
   try {
     const updated = await prisma.appointment.update({
       where: { id },
@@ -165,5 +198,19 @@ export const updateAppointment = async (req: Request, res: Response) => {
   } catch (err) {
     console.error("Update failed", err);
     res.status(500).json({ message: "Failed to update appointment" });
+  }
+};
+
+export const getAppointmentHistory = async (req: Request, res: Response) => {
+  const { id: appointmentId } = req.params;
+  try {
+    const history = await prisma.appointmentHistory.findMany({
+      where: { appointmentId },
+      orderBy: { changedAt: "desc" },
+    });
+    res.json(history);
+  } catch (err) {
+    console.error("Failed to fetch appointment history:", err);
+    res.status(500).json({ message: "Failed to fetch appointment history" });
   }
 };

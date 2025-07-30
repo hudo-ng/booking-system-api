@@ -13,21 +13,8 @@ export const getAvailability = async (req: Request, res: Response) => {
     return res.status(400).json({ message: "Invalid or past date" });
   }
 
-  //get weekday's hours
   const weekday = target.day();
-  const hours = await prisma.workingHours.findFirst({
-    where: { employeeId, weekday },
-  });
-  if (!hours) res.json([]);
 
-  //build one hour slots
-  const slots: string[] = [];
-  let cursor = target.hour(Number(hours?.startTime.split(":")[0])).minute(0);
-  const endHour = Number(hours?.endTime.split(":")[0]);
-  while (cursor.hour() < endHour) {
-    slots.push(cursor.toISOString());
-    cursor = cursor.add(1, "hour");
-  }
 
   // time off exclusion
   const startOfDay = target.startOf("day").toDate();
@@ -45,18 +32,25 @@ export const getAvailability = async (req: Request, res: Response) => {
 
   if (exists) return res.json([]);
 
-  // accepted appointments exclusion
+  // Get all intervals for the weekday
+  const hours = await prisma.workingHours.findMany({
+    where: { employeeId, weekday },
+  });
+
+  if (!hours.length) return res.json([]);
+
+  // Get accepted appointments on this day
   const appts = await prisma.appointment.findMany({
     where: {
       employeeId,
       status: "accepted",
-      startTime: { gte: target.startOf("day").toDate() },
-      endTime: { lte: target.endOf("day").toDate() },
+      startTime: { lt: target.endOf("day").toDate() },
+      endTime: { gt: target.startOf("day").toDate() },
     },
   });
 
   const occupied = new Set<string>();
-  for (let a of appts) {
+  for (const a of appts) {
     let current = dayjs(a.startTime);
     while (current.isBefore(a.endTime)) {
       occupied.add(current.toISOString());
@@ -64,7 +58,9 @@ export const getAvailability = async (req: Request, res: Response) => {
     }
   }
 
+
   // free slots
   const freeSlots = slots.filter((s) => !occupied.has(s));
   return res.json(freeSlots);
+
 };

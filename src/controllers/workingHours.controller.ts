@@ -5,27 +5,79 @@ const prisma = new PrismaClient();
 
 export const setWorkingHours = async (req: Request, res: Response) => {
   const { userId } = (req as any).user;
-  const { weekday, startTime, endTime } = req.body;
+  const { weekday, intervals } = req.body;
 
-  const entry = await prisma.workingHours.upsert({
-    where: { employeeId_weekday: { employeeId: userId, weekday } },
-    update: { startTime, endTime },
-    create: {
-      employeeId: userId,
-      weekday,
-      startTime,
-      endTime,
-    },
-  });
-  res.json(entry);
+  if (!Array.isArray(intervals) || intervals.length === 0) {
+    return res
+      .status(400)
+      .json({ message: "Intervals must be a non-empty array" });
+  }
+
+  if (typeof weekday !== "number" || weekday < 0 || weekday > 6) {
+    return res.status(400).json({ message: "Invalid weekday (0–6 expected)" });
+  }
+
+  for (const interval of intervals) {
+    if (!interval.startTime || typeof interval.startTime !== "string") {
+      return res.status(400).json({ message: "Missing or invalid startTime" });
+    }
+    if (interval.endTime && typeof interval.endTime !== "string") {
+      return res.status(400).json({ message: "Invalid endTime format" });
+    }
+  }
+
+  try {
+    await prisma.workingHours.deleteMany({
+      where: { employeeId: userId, weekday },
+    });
+    await prisma.workingHours.createMany({
+      data: intervals.map((i: any) => ({
+        employeeId: userId,
+        weekday,
+        startTime: i.startTime,
+        endTime: i.endTime ?? null,
+      })),
+    });
+    res.status(200).json({ message: "Working hours saved" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Failed to save working hours" });
+  }
 };
 
 export const getWorkingHours = async (req: Request, res: Response) => {
   const { userId } = (req as any).user;
-  const hours = await prisma.workingHours.findMany({
-    where: { employeeId: userId },
-    orderBy: { weekday: "asc" },
-  });
+  const weekday = parseInt(req.params.weekday);
 
-  res.json(hours);
+  if (isNaN(weekday) || weekday < 0 || weekday > 6) {
+    return res.status(400).json({ message: "Invalid weekday" });
+  }
+
+  try {
+    const hours = await prisma.workingHours.findMany({
+      where: { employeeId: userId, weekday },
+      orderBy: { weekday: "asc" },
+    });
+
+    res.json(hours);
+  } catch (error) {
+    console.error("Error getting working hours", error);
+    return res.status(500).json({ message: "Error fetching working hours" });
+  }
+};
+
+export const getAllWorkingHours = async (req: Request, res: Response) => {
+  const { userId } = (req as any).user;
+
+  try {
+    const hours = await prisma.workingHours.findMany({
+      where: { employeeId: userId },
+      orderBy: [{ weekday: "asc" }, { startTime: "asc" }],
+    });
+
+    res.json(hours);
+  } catch (err) {
+    console.error("Error loading all working hours:", err);
+    res.status(500).json({ message: "Failed to load working hours." });
+  }
 };
