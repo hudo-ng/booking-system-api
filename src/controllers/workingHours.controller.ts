@@ -5,39 +5,68 @@ const prisma = new PrismaClient();
 
 export const setWorkingHours = async (req: Request, res: Response) => {
   const { userId } = (req as any).user;
-  const { weekday, intervals } = req.body;
-
-  if (!Array.isArray(intervals) || intervals.length === 0) {
-    return res
-      .status(400)
-      .json({ message: "Intervals must be a non-empty array" });
-  }
+  const { type, weekday, startTime, endTime, intervalLength, intervals } =
+    req.body;
 
   if (typeof weekday !== "number" || weekday < 0 || weekday > 6) {
     return res.status(400).json({ message: "Invalid weekday (0–6 expected)" });
   }
 
-  for (const interval of intervals) {
-    if (!interval.startTime || typeof interval.startTime !== "string") {
-      return res.status(400).json({ message: "Missing or invalid startTime" });
-    }
-    if (interval.endTime && typeof interval.endTime !== "string") {
-      return res.status(400).json({ message: "Invalid endTime format" });
-    }
+  if (!type || !["fixed", "interval", "custom"].includes(type)) {
+    return res.status(400).json({ message: "Invalid type" });
   }
 
   try {
     await prisma.workingHours.deleteMany({
       where: { employeeId: userId, weekday },
     });
-    await prisma.workingHours.createMany({
-      data: intervals.map((i: any) => ({
-        employeeId: userId,
-        weekday,
-        startTime: i.startTime,
-        endTime: i.endTime ?? null,
-      })),
-    });
+
+    if (type === "custom") {
+      if (!Array.isArray(intervals) || intervals.length === 0) {
+        return res
+          .status(400)
+          .json({ message: "Intervals must be a non-empty array" });
+      }
+
+      for (const interval of intervals) {
+        if (!interval.startTime || typeof interval.startTime !== "string") {
+          return res
+            .status(400)
+            .json({ message: "Missing or invalid startTime" });
+        }
+        if (interval.endTime && typeof interval.endTime !== "string") {
+          return res.status(400).json({ message: "Invalid endTime format" });
+        }
+      }
+
+      await prisma.workingHours.createMany({
+        data: intervals.map((i: any) => ({
+          employeeId: userId,
+          weekday,
+          startTime: i.startTime,
+          endTime: i.endTime ?? null,
+          type: "custom",
+        })),
+      });
+    } else if (type === "fixed" || type === "interval") {
+      if (!startTime || !endTime) {
+        return res
+          .status(400)
+          .json({ message: "startTime and endTime are required" });
+      }
+
+      await prisma.workingHours.create({
+        data: {
+          employeeId: userId,
+          weekday,
+          startTime,
+          endTime,
+          intervalLength: type === "interval" ? intervalLength ?? 60 : null,
+          type,
+        },
+      });
+    }
+
     res.status(200).json({ message: "Working hours saved" });
   } catch (err) {
     console.error(err);

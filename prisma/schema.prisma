@@ -60,8 +60,10 @@ model WorkingHours {
   employee User @relation(fields: [employeeId], references: [id])
   employeeId String
   weekday Int
-  startTime String
+  startTime String?
   endTime String?
+  intervalLength Int?
+  type String @default("fixed")
   @@index([employeeId, weekday], name: "employeeId_weekday")
 }
 
