@@ -7,6 +7,7 @@ import {
   updateAppointment,
   updateAppointmentStatus,
   getAppointmentHistory,
+  createAppointment,
 } from "../controllers/appointment.controller";
 
 const router = Router();
@@ -19,5 +20,6 @@ router.get("/:id/history", getAppointmentHistory);
 router.patch("/:id/status", updateAppointmentStatus);
 router.patch("/:id", updateAppointment);
 router.get("/:id", getAppointmentById);
+router.post("/create", createAppointment);
 
 export default router;

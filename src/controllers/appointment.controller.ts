@@ -23,6 +23,52 @@ export const getAppointments = async (req: Request, res: Response) => {
   res.json(appointments);
 };
 
+export const createAppointment = async (req: Request, res: Response) => {
+  const { userId } = (req as any).user as { userId?: string };
+  if (!userId) {
+    return res.json([]);
+  }
+
+  try {
+    const { customerName, email, phone, detail, startTime, endTime } = req.body;
+
+    // Validate time order
+    if (startTime && endTime) {
+      const start = new Date(startTime);
+      const end = new Date(endTime);
+
+      if (end <= start) {
+        return res.status(400).json({
+          message: "End time must be after start time",
+        });
+      }
+    }
+
+    const newAppointment = await prisma.appointment.create({
+      data: {
+        employeeId: userId,
+        customerName,
+        email,
+        phone,
+        detail,
+        status: "accepted",
+        startTime: startTime ? new Date(startTime) : null,
+        endTime: endTime ? new Date(endTime) : null,
+      },
+      include: {
+        employee: {
+          select: { id: true, name: true },
+        },
+      },
+    });
+
+    res.status(201).json(newAppointment);
+  } catch (error) {
+    console.error("Failed to create appointment", error);
+    res.status(500).json({ message: "Failed to create appointment" });
+  }
+};
+
 export const getAllAppointments = async (req: Request, res: Response) => {
   const { userId } = (req as any).user as { userId?: string };
   const { year, month } = req.query as { year?: string; month?: string };
@@ -58,7 +104,7 @@ export const getAllAppointments = async (req: Request, res: Response) => {
     orderBy: { createdAt: "desc" },
     include: {
       employee: {
-        select: { id: true, name: true },
+        select: { id: true, name: true, colour: true },
       },
     },
   });
