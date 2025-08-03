@@ -8,6 +8,7 @@ import {
   updateAppointmentStatus,
   getAppointmentHistory,
   createAppointment,
+  getAllAppointmentsBySelectedDate,
 } from "../controllers/appointment.controller";
 
 const router = Router();
@@ -15,6 +16,7 @@ const router = Router();
 router.use(authenticate, authorize(["admin", "employee"]));
 
 router.get("/all", getAllAppointments);
+router.get("/all/by-date", getAllAppointmentsBySelectedDate);
 router.get("/", getAppointments);
 router.get("/:id/history", getAppointmentHistory);
 router.patch("/:id/status", updateAppointmentStatus);

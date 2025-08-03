@@ -71,11 +71,20 @@ export const createAppointment = async (req: Request, res: Response) => {
 
 export const getAllAppointments = async (req: Request, res: Response) => {
   const { userId } = (req as any).user as { userId?: string };
-  const { year, month } = req.query as { year?: string; month?: string };
-
   if (!userId) {
-    return res.json([]);
+    return res.status(401).json({ error: "Unauthorized" });
   }
+
+  // Query the current user
+  const currentUser = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+
+  if (!currentUser) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  const { year, month } = req.query as { year?: string; month?: string };
 
   let dateFilter = {};
 
@@ -98,7 +107,6 @@ export const getAllAppointments = async (req: Request, res: Response) => {
 
   const appointments = await prisma.appointment.findMany({
     where: {
-      employeeId: userId,
       ...dateFilter,
     },
     orderBy: { createdAt: "desc" },
@@ -110,6 +118,51 @@ export const getAllAppointments = async (req: Request, res: Response) => {
   });
 
   res.json(appointments);
+};
+
+export const getAllAppointmentsBySelectedDate = async (
+  req: Request,
+  res: Response
+) => {
+  const { userId } = (req as any).user as { userId?: string };
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  // Query the current user
+  const currentUser = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+
+  if (!currentUser) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  const { date } = req.query as { date?: string };
+
+  if (!date) {
+    return res
+      .status(400)
+      .json({ error: "Query parameter 'date' is required" });
+  }
+
+  const startOfDay = dayjs(date).startOf("day").toDate();
+  const endOfDay = dayjs(date).endOf("day").toDate();
+
+  const appointments = await prisma.appointment.findMany({
+    where: {
+      startTime: { lte: endOfDay },
+      endTime: { gte: startOfDay },
+    },
+    orderBy: { startTime: "asc" },
+    include: {
+      employee: {
+        select: { id: true, name: true, colour: true },
+      },
+    },
+  });
+
+  return res.json(appointments);
 };
 
 export const getAppointmentById = async (req: Request, res: Response) => {
