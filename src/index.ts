@@ -9,24 +9,26 @@ import timeOffRoutes from "./routes/timeOff.routes";
 import availabilityRoutes from "./routes/availability.routes";
 import bookingRoutes from "./routes/booking.routes";
 import employeesRoutes from "./routes/employees.routes";
+import managementRoutes from "./routes/management.routes";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Log incoming requests
+app.use((req: Request, res: Response, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+  next();
+});
+
 app.use("/auth", authRoutes);
-
 app.use("/appointments", appointmentRoutes);
-
 app.use("/working-hours", workingHoursRoutes);
-
 app.use("/availability", availabilityRoutes);
-
 app.use("/time-off", timeOffRoutes);
-
 app.use("/employee", bookingRoutes);
-
 app.use("/employees", employeesRoutes);
+app.use("/management", managementRoutes);
 
 app.get("/", (req: Request, res: Response) => {
   res.send("Hello from express");

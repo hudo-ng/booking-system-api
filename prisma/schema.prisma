@@ -25,7 +25,9 @@ model User {
   timeOff TimeOff[]
   photo_url    String?       
   start_price  Float?    
-  colour       String?     
+  colour       String?
+  isAdmin     Boolean
+  phone_number String
 }
 
 model Appointment {
