@@ -32,6 +32,6 @@ app.get("/", (req: Request, res: Response) => {
   res.send("Hello from express");
 });
 
-app.listen(config.port, () => {
+app.listen(3000, "0.0.0.0", () => {
   console.log(`Server running at http://localhost:${config.port}`);
 });

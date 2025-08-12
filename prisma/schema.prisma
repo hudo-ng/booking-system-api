@@ -40,8 +40,26 @@ model Appointment {
   startTime DateTime?
   endTime DateTime?
   createdAt DateTime? @default(now())
+  dob          DateTime?
+  address      String?
+  paidWith     String?
 
   AppointmentHistory AppointmentHistory[]
+
+  AppointmentAttachment AppointmentAttachment[]
+}
+
+model AppointmentAttachment {
+  id            String     @id @default(uuid())
+  appointmentId String
+  appointment   Appointment @relation(fields: [appointmentId], references: [id])
+  fileId    String  
+  url       String   
+  mime      String
+  size      Int
+  width     Int?
+  height    Int?
+  createdAt DateTime @default(now())
 }
 
 model AppointmentHistory {
