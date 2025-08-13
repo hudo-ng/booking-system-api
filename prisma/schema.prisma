@@ -26,8 +26,8 @@ model User {
   photo_url    String?       
   start_price  Float?    
   colour       String?
-  isAdmin     Boolean
-  phone_number String
+  isAdmin     Boolean @default(true)
+  phone_number String @default("111-111-1111")
 }
 
 model Appointment {
@@ -55,7 +55,8 @@ model AppointmentAttachment {
   id            String     @id @default(uuid())
   appointmentId String
   appointment   Appointment @relation(fields: [appointmentId], references: [id])
-  fileId    String  
+  fileId    String
+  filename String 
   url       String   
   mime      String
   size      Int
