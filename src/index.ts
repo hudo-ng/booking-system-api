@@ -15,7 +15,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Log incoming requests
 app.use((req: Request, res: Response, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
   next();
