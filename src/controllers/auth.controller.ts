@@ -33,7 +33,12 @@ export const login = async (req: Request, res: Response) => {
   }
 
   const token = jwt.sign(
-    { userId: user.id, role: user.role },
+    {
+      userId: user.id,
+      role: user.role,
+      isAdmin: user.isAdmin,
+      name: user.name,
+    },
     config.jwtSecret,
     { expiresIn: "1y" }
   );
