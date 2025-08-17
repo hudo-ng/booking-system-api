@@ -84,8 +84,15 @@ export const addEmployee = async (req: Request, res: Response) => {
       return res.status(403).json({ error: "You do not have permission" });
     }
 
-    const { email, password, name, colour, start_price, phone_number } =
-      req.body;
+    const {
+      email,
+      password,
+      name,
+      colour,
+      start_price,
+      phone_number,
+      isAdmin,
+    } = req.body;
 
     const hashed = await bcrypt.hash(password, 10);
 
@@ -97,7 +104,7 @@ export const addEmployee = async (req: Request, res: Response) => {
         role: "employee",
         colour,
         start_price,
-        isAdmin: false,
+        isAdmin: isAdmin,
         phone_number,
       },
     });
