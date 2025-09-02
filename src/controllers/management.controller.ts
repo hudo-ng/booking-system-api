@@ -117,3 +117,21 @@ export const addEmployee = async (req: Request, res: Response) => {
     return res.status(500).json({ error: "Internal server error" });
   }
 };
+
+export const getAllNotification = async (req: Request, res: Response) => {
+  try {
+    const notifications = await prisma.notification.findMany({
+      orderBy: { created_at: "desc" },
+      take: 30, // limit to 30 results
+      include: {
+        createdBy: {
+          select: { id: true, name: true },
+        },
+      },
+    });
+    res.json(notifications);
+  } catch (err) {
+    console.error("Error fetching notifications:", err);
+    res.status(500).json({ message: "Failed to fetch notifications" });
+  }
+};

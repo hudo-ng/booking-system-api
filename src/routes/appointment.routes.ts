@@ -9,6 +9,7 @@ import {
   getAppointmentHistory,
   createAppointment,
   getAllAppointmentsBySelectedDate,
+  deleteAppointment,
 } from "../controllers/appointment.controller";
 
 const router = Router();
@@ -23,5 +24,6 @@ router.patch("/:id/status", updateAppointmentStatus);
 router.patch("/:id", updateAppointment);
 router.get("/:id", getAppointmentById);
 router.post("/create", createAppointment);
+router.delete("/delete", deleteAppointment);
 
 export default router;

@@ -30,9 +30,21 @@ export const createAppointment = async (req: Request, res: Response) => {
   }
 
   try {
-    const { customerName, email, phone, detail, startTime, endTime } = req.body;
+    const {
+      customerName,
+      email,
+      phone,
+      detail,
+      startTime,
+      endTime,
+      // ✅ New fields for Notification
+      quote_amount,
+      deposit_amount,
+      deposit_category,
+      extra_deposit_category,
+    } = req.body;
 
-    // Validate time order
+    // ✅ Validate time order
     if (startTime && endTime) {
       const start = new Date(startTime);
       const end = new Date(endTime);
@@ -44,6 +56,7 @@ export const createAppointment = async (req: Request, res: Response) => {
       }
     }
 
+    // ✅ Create Appointment
     const newAppointment = await prisma.appointment.create({
       data: {
         employeeId: userId,
@@ -54,11 +67,31 @@ export const createAppointment = async (req: Request, res: Response) => {
         status: "accepted",
         startTime: startTime ? new Date(startTime) : null,
         endTime: endTime ? new Date(endTime) : null,
+        quote_amount,
+        deposit_amount,
+        deposit_category,
+        extra_deposit_category,
       },
       include: {
         employee: {
           select: { id: true, name: true },
         },
+      },
+    });
+
+    // ✅ Create Notification after successful appointment
+    await prisma.notification.create({
+      data: {
+        created_by: userId,
+        description: detail || "No description provided",
+        title: "created new appointment",
+        customer_name: customerName,
+        quote_amount,
+        deposit_amount,
+        deposit_category,
+        extra_deposit_category,
+        appointment_start_time: startTime ? new Date(startTime) : new Date(),
+        appointment_end_time: endTime ? new Date(endTime) : new Date(),
       },
     });
 
@@ -118,6 +151,48 @@ export const getAllAppointments = async (req: Request, res: Response) => {
   });
 
   res.json(appointments);
+};
+
+export const deleteAppointment = async (req: Request, res: Response) => {
+  const { userId } = (req as any).user as { userId?: string };
+  const { appointmentId } = req.query as { appointmentId?: string };
+  console.log("Deleting appointment with ID:", appointmentId);
+  if (!userId) return res.status(401).json({ message: "Unauthorized" });
+  if (!appointmentId)
+    return res.status(400).json({ message: "Appointment ID required" });
+
+  try {
+    // Delete appointment
+    const deletedAppointment = await prisma.appointment.delete({
+      where: { id: appointmentId },
+      include: { employee: { select: { id: true, name: true } } },
+    });
+
+    // Create notification for deletion
+    await prisma.notification.create({
+      data: {
+        created_by: userId,
+
+        title: "Delete Appointment",
+        description: deletedAppointment.detail || "Appointment deleted",
+        customer_name: deletedAppointment.customerName,
+        quote_amount: deletedAppointment?.quote_amount || 0,
+        deposit_amount: deletedAppointment?.deposit_amount || 0,
+        deposit_category: deletedAppointment?.deposit_category || "",
+        extra_deposit_category: deletedAppointment.extra_deposit_category || "",
+        appointment_start_time: deletedAppointment.startTime || new Date(),
+        appointment_end_time: deletedAppointment.endTime || new Date(),
+      },
+    });
+
+    res.status(200).json({
+      message: "Appointment deleted",
+      appointment: deletedAppointment,
+    });
+  } catch (error) {
+    console.error("Failed to delete appointment", error);
+    res.status(500).json({ message: "Failed to delete appointment" });
+  }
 };
 
 export const getAllAppointmentsBySelectedDate = async (
