@@ -28,8 +28,11 @@ model User {
   colour       String?
   isAdmin      Boolean        @default(true)
   phone_number String         @default("111-111-1111")
-
+  isOwner      Boolean        @default(false)
   Notification Notification[]
+  WorkShift WorkShift[]
+  WorkOverride WorkOverride[]
+  WorkSchedule WorkSchedule[]
 }
 
 model Appointment {
@@ -133,4 +136,40 @@ enum AppointmentStatus {
 enum Role {
   admin
   employee
+}
+
+model WorkSchedule {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  dayOfWeek Int      // 0 = Sunday, 6 = Saturday
+  startTime DateTime // only time part matters (e.g., "08:00:00")
+  endTime   DateTime // only time part matters (e.g., "22:00:00")
+
+  createdAt DateTime @default(now())
+}
+
+model WorkShift {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  clockIn   DateTime
+  clockOut  DateTime?
+
+  createdAt DateTime @default(now())
+}
+
+model WorkOverride {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  date      DateTime // specific date (YYYY-MM-DD)
+  newEndTime DateTime
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, date], name: "userId_date")
 }
