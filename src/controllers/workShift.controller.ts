@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
+import dayjs from "dayjs";
 
 const prisma = new PrismaClient();
 
@@ -129,7 +130,6 @@ export const getWorkShifts = async (req: Request, res: Response) => {
 export const getWorkSchedule = async (req: Request, res: Response) => {
   try {
     const { userId } = (req as any).user as { userId?: string };
-
     if (!userId) {
       return res.status(401).json({ error: "Unauthorized" });
     }
@@ -138,25 +138,62 @@ export const getWorkSchedule = async (req: Request, res: Response) => {
     const currentUser = await prisma.user.findUnique({
       where: { id: userId },
     });
-
     if (!currentUser) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Owner (or admin) → get all schedules
+    // Owner → get all users' schedules
     if (currentUser.isOwner) {
-      const allSchedules = await prisma.workSchedule.findMany({
-        include: {
-          user: { select: { id: true, name: true, email: true } },
-        },
-        orderBy: [{ userId: "asc" }, { dayOfWeek: "asc" }],
+      // Get all users
+      const allUsers = await prisma.user.findMany({
+        select: { id: true, name: true, email: true },
       });
+
+      // Collect all schedules for all users
+      let allSchedules: (typeof prisma.workSchedule.findMany extends Promise<
+        infer U
+      >
+        ? U
+        : any)[] = [];
+
+      for (const user of allUsers) {
+        let userSchedules = await prisma.workSchedule.findMany({
+          where: { userId: user.id },
+          include: { user: { select: { id: true, name: true, email: true } } },
+          orderBy: { dayOfWeek: "asc" },
+        });
+
+        // If no schedule found → create default 7 entries
+        if (userSchedules.length === 0) {
+          const defaultSchedules = Array.from({ length: 7 }, (_, idx) => ({
+            userId: user.id,
+            dayOfWeek: idx,
+            startTime: dayjs().hour(9).minute(0).second(0).toDate(),
+            endTime: dayjs().hour(9).minute(0).second(0).toDate(),
+          }));
+
+          userSchedules = await prisma.$transaction(
+            defaultSchedules.map((s) =>
+              prisma.workSchedule.create({
+                data: s,
+                include: {
+                  user: { select: { id: true, name: true, email: true } },
+                },
+              })
+            )
+          );
+        }
+
+        allSchedules.push(...userSchedules);
+      }
+
       return res.json(allSchedules);
     }
 
     // Normal user → get only their schedule
     const schedule = await prisma.workSchedule.findMany({
       where: { userId },
+      include: { user: { select: { id: true, name: true, email: true } } },
       orderBy: { dayOfWeek: "asc" },
     });
 

@@ -29,7 +29,7 @@ app.use("/time-off", timeOffRoutes);
 app.use("/employee", bookingRoutes);
 app.use("/employees", employeesRoutes);
 app.use("/management", managementRoutes);
-app.use("/workshift", workshiftRoutes);
+app.use("/work-shifts", workshiftRoutes);
 
 app.get("/", (req: Request, res: Response) => {
   res.send("Hello from express");

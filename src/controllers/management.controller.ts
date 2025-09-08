@@ -5,6 +5,7 @@ import bcrypt from "bcrypt";
 const prisma = new PrismaClient();
 
 export const getAllEmployees = async (_req: Request, res: Response) => {
+  console.log("Fetching all employees");
   const employees = await prisma.user.findMany({
     where: { role: "employee" },
     select: {
