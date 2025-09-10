@@ -5,26 +5,39 @@ import { getDistanceFromLatLonInKm } from "../utils/distance";
 
 const prisma = new PrismaClient();
 
+// GET /work-shifts/clock-history?month=9&year=2025&userId=123
 export const getWorkShiftsByMonth = async (req: Request, res: Response) => {
-  const { id: userId } = (req as any).user;
-  const { month, year } = req.query;
+  try {
+    const { month, year, userId } = req.query;
+    console.log("Fetching clock history for:");
+    console.log("Month:", month);
+    console.log("Year:", year);
+    console.log("UserId:", userId);
+    if (!month || !year || !userId) {
+      return res
+        .status(400)
+        .json({ message: "month, year, and userId are required" });
+    }
 
-  if (!month || !year) {
-    return res.status(400).json({ message: "Month and year are required" });
+    const startDate = new Date(Number(year), Number(month) - 1, 1);
+    const endDate = new Date(Number(year), Number(month), 0, 23, 59, 59);
+
+    const shifts = await prisma.workShift.findMany({
+      where: {
+        userId: String(userId),
+        clockIn: {
+          gte: startDate,
+          lte: endDate,
+        },
+      },
+      orderBy: { clockIn: "asc" },
+    });
+
+    res.json({ shifts });
+  } catch (error) {
+    console.error("Error fetching clock history:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
-
-  const startDate = new Date(Number(year), Number(month) - 1, 1);
-  const endDate = new Date(Number(year), Number(month), 0, 23, 59, 59);
-
-  const shifts = await prisma.workShift.findMany({
-    where: {
-      userId,
-      clockIn: { gte: startDate, lte: endDate },
-    },
-    orderBy: { clockIn: "asc" },
-  });
-
-  res.json({ shifts });
 };
 
 // ✅ Clock In
