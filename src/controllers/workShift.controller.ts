@@ -206,10 +206,28 @@ export const getWorkSchedule = async (req: Request, res: Response) => {
 
 // ✅ Set (replace) weekly schedule for a user
 export const setWorkScheduleByUserId = async (req: Request, res: Response) => {
-  const { userId, schedules } = req.body;
+  const { userId } = (req as any).user as { userId?: string };
+  const { id, schedules } = req.body;
   // schedules = [{ dayOfWeek: number, startTime: string, endTime: string }, ...]
+  if (!id) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  // Query the current user
+  const currentUserInToken = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+  if (currentUserInToken?.isOwner === false) {
+    return res.status(403).json({ message: "Only owner can set schedules" });
+  }
+  // Query the current user
+  const currentUser = await prisma.user.findUnique({
+    where: { id: id },
+  });
+  if (!currentUser) {
+    return res.status(404).json({ error: "User not found" });
+  }
 
-  if (!userId || !Array.isArray(schedules)) {
+  if (!id || !Array.isArray(schedules)) {
     return res
       .status(400)
       .json({ message: "userId and schedules are required" });
@@ -217,7 +235,7 @@ export const setWorkScheduleByUserId = async (req: Request, res: Response) => {
 
   // Remove old schedule first
   await prisma.workSchedule.deleteMany({
-    where: { userId },
+    where: { userId: id },
   });
 
   // Create new schedule
@@ -225,7 +243,7 @@ export const setWorkScheduleByUserId = async (req: Request, res: Response) => {
     schedules.map((s) =>
       prisma.workSchedule.create({
         data: {
-          userId,
+          userId: id,
           dayOfWeek: s.dayOfWeek,
           startTime: new Date(s.startTime),
           endTime: new Date(s.endTime),
