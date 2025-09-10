@@ -6,6 +6,7 @@ import {
   extendShift,
   getWorkSchedule,
   getWorkShifts,
+  getWorkShiftsByMonth,
   setWorkScheduleByUserId,
 } from "../controllers/workShift.controller";
 import { authenticate, authorize } from "../middleware/auth";
@@ -13,7 +14,8 @@ import { authenticate, authorize } from "../middleware/auth";
 const router = Router();
 
 router.use(authenticate, authorize(["admin", "employee"]));
-router.post("/clock-in", validateIp, clockIn);
+router.get("/clock-history", getWorkShiftsByMonth);
+router.post("/clock-in", clockIn);
 router.post("/clock-out", clockOut);
 router.post("/extend-shift", extendShift);
 router.get("/", getWorkShifts);

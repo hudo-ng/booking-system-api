@@ -1,18 +1,67 @@
 import { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import dayjs from "dayjs";
+import { getDistanceFromLatLonInKm } from "../utils/distance";
 
 const prisma = new PrismaClient();
 
+export const getWorkShiftsByMonth = async (req: Request, res: Response) => {
+  const { id: userId } = (req as any).user;
+  const { month, year } = req.query;
+
+  if (!month || !year) {
+    return res.status(400).json({ message: "Month and year are required" });
+  }
+
+  const startDate = new Date(Number(year), Number(month) - 1, 1);
+  const endDate = new Date(Number(year), Number(month), 0, 23, 59, 59);
+
+  const shifts = await prisma.workShift.findMany({
+    where: {
+      userId,
+      clockIn: { gte: startDate, lte: endDate },
+    },
+    orderBy: { clockIn: "asc" },
+  });
+
+  res.json({ shifts });
+};
+
 // ✅ Clock In
 export const clockIn = async (req: Request, res: Response) => {
-  const { id: userId } = (req as any).user;
+  const { userId } = (req as any).user as { userId?: string };
+  console.log("Clock-in request from user:", userId);
+  const { latitude, longitude } = req.body;
+
+  if (!userId) {
+    return res.status(401).json({ message: "Unauthorized: userId missing" });
+  }
+
+  if (!latitude || !longitude) {
+    return res.status(400).json({ message: "Location required" });
+  }
+
+  // ✅ Check distance
+  const distance = getDistanceFromLatLonInKm(
+    latitude,
+    longitude,
+    51.03869,
+    -114.060243
+  );
+
+  if (distance > 2) {
+    return res
+      .status(403)
+      .json({ message: "You are not within 2km of the expected location" });
+  }
 
   const activeShift = await prisma.workShift.findFirst({
     where: { userId, clockOut: null },
   });
 
   if (activeShift) {
+    // User already has an active shift, optionally handle this case
+    // For example, you could return an error or skip creating a new shift
     return res.status(400).json({ message: "Already clocked in" });
   }
 
