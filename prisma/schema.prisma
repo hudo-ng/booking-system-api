@@ -29,6 +29,9 @@ model User {
   isAdmin      Boolean        @default(true)
   phone_number String         @default("111-111-1111")
   isOwner      Boolean        @default(false)
+  percentage_clean Float?     @default(0)
+  percentage_work  Float?     @default(0)
+  show_on_calendar_booking Boolean @default(false)
   Notification Notification[]
   WorkShift WorkShift[]
   WorkOverride WorkOverride[]

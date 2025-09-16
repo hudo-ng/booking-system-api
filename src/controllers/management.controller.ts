@@ -11,9 +11,16 @@ export const getAllEmployees = async (_req: Request, res: Response) => {
     select: {
       id: true,
       name: true,
-      photo_url: true,
+      email: true,
+      phone_number: true,
       start_price: true,
       colour: true,
+      photo_url: true,
+      percentage_clean: true,
+      percentage_work: true,
+      show_on_calendar_booking: true,
+      isAdmin: true,
+      role: true,
     },
   });
   res.json(employees);
@@ -38,22 +45,42 @@ export const editEmployee = async (req: Request, res: Response) => {
   if (!currentUser?.isAdmin) {
     return res.status(403).json({ error: "You do not have permission" });
   }
-  const { staff_id, name, start_price, colour } = req.body;
 
+  const {
+    staff_id,
+    name,
+    phone_number,
+    start_price,
+    colour,
+    photo_url,
+    percentage_clean,
+    percentage_work,
+    show_on_calendar_booking,
+  } = req.body;
+  console.log("Editing employee with ID:", req.body);
   try {
     const updatedEmployee = await prisma.user.update({
       where: { id: staff_id },
       data: {
         name,
+        phone_number,
         start_price,
         colour,
+        photo_url,
+        percentage_clean,
+        percentage_work,
+        show_on_calendar_booking,
       },
       select: {
         id: true,
         name: true,
-        photo_url: true,
+        phone_number: true,
         start_price: true,
         colour: true,
+        photo_url: true,
+        percentage_clean: true,
+        percentage_work: true,
+        show_on_calendar_booking: true,
       },
     });
 
