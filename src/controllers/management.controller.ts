@@ -4,25 +4,66 @@ import bcrypt from "bcrypt";
 
 const prisma = new PrismaClient();
 
-export const getAllEmployees = async (_req: Request, res: Response) => {
-  console.log("Fetching all employees");
-  const employees = await prisma.user.findMany({
-    where: { role: "employee" },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      phone_number: true,
-      start_price: true,
-      colour: true,
-      photo_url: true,
-      percentage_clean: true,
-      percentage_work: true,
-      show_on_calendar_booking: true,
-      isAdmin: true,
-      role: true,
-    },
+export const getAllEmployees = async (req: Request, res: Response) => {
+  const { userId } = (req as any).user as { userId?: string };
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  // Get current user
+  const currentUser = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { isAdmin: true, isOwner: true },
   });
+
+  if (!currentUser) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  let employees;
+
+  if (currentUser.isAdmin || currentUser?.isOwner) {
+    // Return all employees
+    employees = await prisma.user.findMany({
+      where: { role: "employee" },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone_number: true,
+        start_price: true,
+        colour: true,
+        photo_url: true,
+        percentage_clean: true,
+        percentage_work: true,
+        show_on_calendar_booking: true,
+        isAdmin: true,
+        role: true,
+      },
+    });
+  } else {
+    // Return only current user
+    const employee = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone_number: true,
+        start_price: true,
+        colour: true,
+        photo_url: true,
+        percentage_clean: true,
+        percentage_work: true,
+        show_on_calendar_booking: true,
+        isAdmin: true,
+        role: true,
+      },
+    });
+
+    employees = employee ? [employee] : [];
+  }
+
   res.json(employees);
 };
 
