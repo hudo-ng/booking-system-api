@@ -1,102 +1,118 @@
 import { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const prisma = new PrismaClient();
+
+const ZONE = "America/Vancouver";
 
 export const getAvailability = async (req: Request, res: Response) => {
   const { id: employeeId } = req.params;
   const { date } = req.query as { date: string };
+  const target = dayjs.tz(date, ZONE); // 2025-09-25T00:00:00-07:00
+  if (!target.isValid()) {
+    return res.status(400).json({ message: "Invalid date" });
+  }
 
-  const target = dayjs(date);
-  if (!target.isValid() || target.isBefore(dayjs(), "day")) {
+  const nowZ = dayjs.tz(undefined, ZONE);
+  if (target.startOf("day").isBefore(nowZ.startOf("day"))) {
     return res.status(400).json({ message: "Invalid or past date" });
   }
 
-  const weekday = target.day();
-  const startOfDay = target.startOf("day").toDate();
-  const endOfDay = target.endOf("day").toDate();
+  const weekday = target.day(); // 0..6 in ZONE
+  const startOfDayUtc = target.startOf("day").utc().toDate();
+  const endOfDayUtc = target.endOf("day").utc().toDate();
 
-  // Check for time off
+
   const isOff = await prisma.timeOff.findFirst({
-    where: { employeeId, date: startOfDay },
+    where: {
+      employeeId,
+      date: { gte: startOfDayUtc, lt: endOfDayUtc },
+    },
   });
   if (isOff) return res.json([]);
 
-  // Get working hours for the weekday
+
   const hours = await prisma.workingHours.findMany({
     where: { employeeId, weekday },
   });
   if (!hours.length) return res.json([]);
 
-  // Fetch accepted appointments
+ 
   const appts = await prisma.appointment.findMany({
     where: {
       employeeId,
       status: "accepted",
-      startTime: { lt: endOfDay },
-      endTime: { gt: startOfDay },
+      startTime: { lt: endOfDayUtc },
+      endTime: { gt: startOfDayUtc },
     },
   });
 
-  // Build a set of occupied time slots (1-hour increments)
+ 
   const occupied = new Set<string>();
   for (const a of appts) {
-    let current = dayjs(a.startTime);
-    while (current.isBefore(a.endTime)) {
-      occupied.add(current.toISOString());
-      current = current.add(1, "hour");
+    let cur = dayjs(a.startTime).utc();
+    const end = dayjs(a.endTime).utc();
+    while (cur.isBefore(end)) {
+      occupied.add(cur.toISOString());
+      cur = cur.add(1, "hour");
     }
   }
 
-  // Generate available slots with start & end times
   const availableSlots: { start: string; end: string }[] = [];
 
   for (const interval of hours) {
-    const type = interval.type;
-    if (type === "custom") {
-      if (!interval.startTime || !interval.endTime) continue;
-      const start = dayjs(`${date}T${interval.startTime}`);
-      const end = dayjs(`${date}T${interval.endTime}`);
+    const { type } = interval;
+    if (!interval.startTime || !interval.endTime) continue;
 
-      if (start.isValid() && end.isValid() && start.isAfter(dayjs())) {
-        if (!occupied.has(start.toISOString())) {
-          availableSlots.push({
-            start: start.toISOString(),
-            end: end.toISOString(),
-          });
-        }
+    const baseStart = dayjs.tz(`${date} ${interval.startTime}`, ZONE);
+    const baseEnd = dayjs.tz(`${date} ${interval.endTime}`, ZONE);
+    if (!baseStart.isValid() || !baseEnd.isValid()) continue;
+
+    if (type === "custom") {
+      const slotStartUtc = baseStart.utc();
+      const slotEndUtc = baseEnd.utc();
+
+      if (
+        slotStartUtc.isAfter(dayjs.utc()) &&
+        !occupied.has(slotStartUtc.toISOString())
+      ) {
+        availableSlots.push({
+          start: slotStartUtc.toISOString(), // e.g., 2025-09-25T16:00:00.000Z (9am PT)
+          end: slotEndUtc.toISOString(), // e.g., 2025-09-25T19:00:00.000Z (12pm PT)
+        });
       }
       continue;
     }
 
-    if (!interval.startTime || !interval.endTime) continue;
+    const step = type === "interval" ? interval.intervalLength || 60 : 60;
 
-    const start = dayjs(`${date}T${interval.startTime}`);
-    const end = dayjs(`${date}T${interval.endTime}`);
-    if (!start.isValid() || !end.isValid()) continue;
+    let curLocal = baseStart.clone();
+    while (curLocal.isBefore(baseEnd)) {
+      const slotStartLocal = curLocal;
+      const slotEndLocal = curLocal.add(step, "minute");
 
-    const step =
-      type === "interval"
-        ? interval.intervalLength || 60 // default 60 mins
-        : 60;
+      if (slotEndLocal.isAfter(baseEnd)) break;
 
-    let current = start;
-    while (current.add(1, "minute").isBefore(end)) {
-      const slotStart = current;
-      const slotEnd = current.add(step, "minute");
+      const slotStartUtc = slotStartLocal.utc();
+      const slotEndUtc = slotEndLocal.utc();
 
       if (
-        slotStart.isAfter(dayjs()) &&
-        !occupied.has(slotStart.toISOString())
+        slotStartUtc.isAfter(dayjs.utc()) &&
+        !occupied.has(slotStartUtc.toISOString())
       ) {
         availableSlots.push({
-          start: slotStart.toISOString(),
-          end: slotEnd.toISOString(),
+          start: slotStartUtc.toISOString(),
+          end: slotEndUtc.toISOString(),
         });
       }
 
-      current = current.add(step, "minute");
+      curLocal = curLocal.add(step, "minute");
     }
   }
 

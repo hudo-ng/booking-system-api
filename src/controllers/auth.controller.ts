@@ -43,5 +43,5 @@ export const login = async (req: Request, res: Response) => {
     { expiresIn: "1y" }
   );
 
-  res.json({ token: token, role: user.role });
+  res.json({ token: token, role: user.role, name: user.name });
 };
