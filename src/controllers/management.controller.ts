@@ -4,17 +4,66 @@ import bcrypt from "bcrypt";
 
 const prisma = new PrismaClient();
 
-export const getAllEmployees = async (_req: Request, res: Response) => {
-  const employees = await prisma.user.findMany({
-    where: { role: "employee" },
-    select: {
-      id: true,
-      name: true,
-      photo_url: true,
-      start_price: true,
-      colour: true,
-    },
+export const getAllEmployees = async (req: Request, res: Response) => {
+  const { userId } = (req as any).user as { userId?: string };
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  // Get current user
+  const currentUser = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { isAdmin: true, isOwner: true },
   });
+
+  if (!currentUser) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  let employees;
+
+  if (currentUser.isAdmin || currentUser?.isOwner) {
+    // Return all employees
+    employees = await prisma.user.findMany({
+      where: { role: "employee" },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone_number: true,
+        start_price: true,
+        colour: true,
+        photo_url: true,
+        percentage_clean: true,
+        percentage_work: true,
+        show_on_calendar_booking: true,
+        isAdmin: true,
+        role: true,
+      },
+    });
+  } else {
+    // Return only current user
+    const employee = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone_number: true,
+        start_price: true,
+        colour: true,
+        photo_url: true,
+        percentage_clean: true,
+        percentage_work: true,
+        show_on_calendar_booking: true,
+        isAdmin: true,
+        role: true,
+      },
+    });
+
+    employees = employee ? [employee] : [];
+  }
+
   res.json(employees);
 };
 
@@ -37,22 +86,42 @@ export const editEmployee = async (req: Request, res: Response) => {
   if (!currentUser?.isAdmin) {
     return res.status(403).json({ error: "You do not have permission" });
   }
-  const { staff_id, name, start_price, colour } = req.body;
 
+  const {
+    staff_id,
+    name,
+    phone_number,
+    start_price,
+    colour,
+    photo_url,
+    percentage_clean,
+    percentage_work,
+    show_on_calendar_booking,
+  } = req.body;
+  console.log("Editing employee with ID:", req.body);
   try {
     const updatedEmployee = await prisma.user.update({
       where: { id: staff_id },
       data: {
         name,
+        phone_number,
         start_price,
         colour,
+        photo_url,
+        percentage_clean,
+        percentage_work,
+        show_on_calendar_booking,
       },
       select: {
         id: true,
         name: true,
-        photo_url: true,
+        phone_number: true,
         start_price: true,
         colour: true,
+        photo_url: true,
+        percentage_clean: true,
+        percentage_work: true,
+        show_on_calendar_booking: true,
       },
     });
 
@@ -115,5 +184,23 @@ export const addEmployee = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Error creating employee:", error);
     return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export const getAllNotification = async (req: Request, res: Response) => {
+  try {
+    const notifications = await prisma.notification.findMany({
+      orderBy: { created_at: "desc" },
+      take: 30, // limit to 30 results
+      include: {
+        createdBy: {
+          select: { id: true, name: true },
+        },
+      },
+    });
+    res.json(notifications);
+  } catch (err) {
+    console.error("Error fetching notifications:", err);
+    res.status(500).json({ message: "Failed to fetch notifications" });
   }
 };

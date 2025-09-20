@@ -14,86 +14,120 @@ datasource db {
 }
 
 model User {
-  id         String       @id @default(uuid())
-  email      String       @unique
-  password   String
-  name       String
-  role       Role
-  createdAt  DateTime     @default(now())
-  Appoinment Appointment[]
+  id           String         @id @default(uuid())
+  email        String         @unique
+  password     String
+  name         String
+  role         Role
+  createdAt    DateTime       @default(now())
+  Appoinment   Appointment[]
   workingHours WorkingHours[]
-  timeOff TimeOff[]
-  photo_url    String?       
-  start_price  Float?    
+  timeOff      TimeOff[]
+  photo_url    String?
+  start_price  Float?
   colour       String?
-  isAdmin     Boolean @default(true)
-  phone_number String @default("111-111-1111")
+  isAdmin      Boolean        @default(true)
+  phone_number String         @default("111-111-1111")
+  isOwner      Boolean        @default(false)
+  percentage_clean Float?     @default(0)
+  percentage_work  Float?     @default(0)
+  show_on_calendar_booking Boolean @default(false)
+  Notification Notification[]
+  WorkShift WorkShift[]
+  WorkOverride WorkOverride[]
+  WorkSchedule WorkSchedule[]
 }
 
 model Appointment {
-  id         String @id @default(uuid())
-  employeeId String
-  employee   User   @relation(fields: [employeeId], references: [id])
+  id           String            @id @default(uuid())
+  employeeId   String
+  employee     User              @relation(fields: [employeeId], references: [id])
   customerName String
-  email String
-  phone String
-  detail String
-  status AppointmentStatus @default(pending)
-  startTime DateTime?
-  endTime DateTime?
-  createdAt DateTime? @default(now())
+  email        String
+  phone        String
+  detail       String
+  status       AppointmentStatus @default(pending)
+  startTime    DateTime?
+  endTime      DateTime?
+  createdAt    DateTime?         @default(now())
   dob          DateTime?
   address      String?
   paidWith     String?
-
+  quote_amount           Float?
+  deposit_amount         Float?
+  deposit_category       String?
+  extra_deposit_category String?
   AppointmentHistory AppointmentHistory[]
 
   AppointmentAttachment AppointmentAttachment[]
+
+}
+
+model Notification {
+  id         String @id @default(uuid())
+  created_by String
+  createdBy  User   @relation(fields: [created_by], references: [id])
+
+  created_at             DateTime @default(now()) @map("created_at")
+  updated_at             DateTime @updatedAt @map("updated_at")
+  description            String
+  title                  String?
+  customer_name          String
+  quote_amount           Float @default(0)
+  deposit_amount         Float @default(0)
+  deposit_category       String
+  extra_deposit_category String?
+  appointment_start_time DateTime
+  appointment_end_time   DateTime
+  not_read               Boolean @default(true)
+
+  @@map("notifications")
 }
 
 model AppointmentAttachment {
-  id            String     @id @default(uuid())
+  id            String      @id @default(uuid())
   appointmentId String
   appointment   Appointment @relation(fields: [appointmentId], references: [id])
-  fileId    String
-  filename String 
-  url       String   
-  mime      String
-  size      Int
-  width     Int?
-  height    Int?
-  createdAt DateTime @default(now())
+  fileId        String
+  filename      String
+  url           String
+  mime          String
+  size          Int
+  width         Int?
+  height        Int?
+  createdAt     DateTime    @default(now())
 }
 
 model AppointmentHistory {
-  id String @id @default(uuid())
+  id            String      @id @default(uuid())
   appointmentId String
-  appointment Appointment @relation(references: [id], fields: [appointmentId])
-  fieldChanged String
-  oldValue String
-  newValue String
-  changedAt DateTime @default(now())
-  changedBy String
+  appointment   Appointment @relation(references: [id], fields: [appointmentId])
+  fieldChanged  String
+  oldValue      String
+  newValue      String
+  changedAt     DateTime    @default(now())
+  changedBy     String
 }
 
 model WorkingHours {
-  id String @id @default(uuid())
-  employee User @relation(fields: [employeeId], references: [id])
-  employeeId String
-  weekday Int
-  startTime String?
-  endTime String?
+  id             String  @id @default(uuid())
+  employee       User    @relation(fields: [employeeId], references: [id])
+  employeeId     String
+  weekday        Int
+  startTime      String?
+  endTime        String?
   intervalLength Int?
-  type String @default("fixed")
+  type           String  @default("fixed")
+
   @@index([employeeId, weekday], name: "employeeId_weekday")
 }
 
 model TimeOff {
-  id String @id @default(uuid())
-  employee User @relation(fields: [employeeId], references: [id])
+  id         String   @id @default(uuid())
+  employee   User     @relation(fields: [employeeId], references: [id])
   employeeId String
-  date DateTime
-  reason String?
+  date       DateTime
+  reason     String?
 }
 
 enum AppointmentStatus {
@@ -105,4 +139,40 @@ enum AppointmentStatus {
 enum Role {
   admin
   employee
+}
+
+model WorkSchedule {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  dayOfWeek Int      // 0 = Sunday, 6 = Saturday
+  startTime DateTime // only time part matters (e.g., "08:00:00")
+  endTime   DateTime // only time part matters (e.g., "22:00:00")
+
+  createdAt DateTime @default(now())
+}
+
+model WorkShift {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  clockIn   DateTime
+  clockOut  DateTime?
+
+  createdAt DateTime @default(now())
+}
+
+model WorkOverride {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+
+  date      DateTime // specific date (YYYY-MM-DD)
+  newEndTime DateTime
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, date], name: "userId_date")
 }

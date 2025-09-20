@@ -38,6 +38,7 @@ export const login = async (req: Request, res: Response) => {
       role: user.role,
       isAdmin: user.isAdmin,
       name: user.name,
+      isOwner: user.isOwner,
     },
     config.jwtSecret,
     { expiresIn: "1y" }
