@@ -5,6 +5,27 @@ import { getDistanceFromLatLonInKm } from "../utils/distance";
 
 const prisma = new PrismaClient();
 
+// GET /work-shifts/full/clock-history?month=9&year=2025&userId=123
+export const getWorkShiftsFull = async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ message: " userId are required" });
+    }
+
+    const shifts = await prisma.workShift.findMany({
+      where: {
+        userId: String(userId),
+      },
+      orderBy: { clockIn: "asc" },
+    });
+    res.json({ shifts });
+  } catch (error) {
+    console.error("Error fetching clock history:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
 // GET /work-shifts/clock-history?month=9&year=2025&userId=123
 export const getWorkShiftsByMonth = async (req: Request, res: Response) => {
   try {
