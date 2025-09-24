@@ -17,8 +17,11 @@ export const register = async (req: Request, res: Response) => {
       role,
       colour,
       start_price,
-      isAdmin: true,
+      isAdmin: false,
       phone_number: "6471234567",
+      slug: name.toLowerCase().replace(/\s+/g, "-"),
+      isOwner: false,
+      show_on_calendar_booking: false,
     },
   });
   res.status(201).json({ id: user.id, email: user.email, role: user.role });

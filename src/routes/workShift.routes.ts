@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   clockIn,
   clockOut,
+  editClockInAndClockOutTimeByShiftId,
   extendShift,
   getWorkSchedule,
   getWorkShifts,
@@ -17,6 +18,7 @@ router.get("/clock-history", getWorkShiftsByMonth);
 router.post("/clock-in", clockIn);
 router.post("/clock-out", clockOut);
 router.post("/extend-shift", extendShift);
+router.put("/edit-clockinout", editClockInAndClockOutTimeByShiftId);
 router.get("/", getWorkShifts);
 router.get("/schedule", getWorkSchedule);
 router.put("/schedule", setWorkScheduleByUserId);
