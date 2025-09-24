@@ -1,6 +1,8 @@
 import { Response, Request } from "express";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
+import slugify from "slugify";
+import { customAlphabet } from "nanoid";
 
 const prisma = new PrismaClient();
 
@@ -165,6 +167,12 @@ export const addEmployee = async (req: Request, res: Response) => {
 
     const hashed = await bcrypt.hash(password, 10);
 
+    const nano = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 5);
+    const base =
+      slugify(currentUser.name || "user", { lower: true, strict: true }) ||
+      "user";
+    const slug = `${base}-${nano()}`;
+
     const user = await prisma.user.create({
       data: {
         email,
@@ -175,6 +183,7 @@ export const addEmployee = async (req: Request, res: Response) => {
         start_price,
         isAdmin: isAdmin,
         phone_number,
+        slug,
       },
     });
 

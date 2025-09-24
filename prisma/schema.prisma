@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -14,72 +8,70 @@ datasource db {
 }
 
 model User {
-  id           String         @id @default(uuid())
-  email        String         @unique
-  password     String
-  name         String
-  role         Role
-  createdAt    DateTime       @default(now())
-  Appoinment   Appointment[]
-  workingHours WorkingHours[]
-  timeOff      TimeOff[]
-  photo_url    String?
-  start_price  Float?
-  colour       String?
-  isAdmin      Boolean        @default(true)
-  phone_number String         @default("111-111-1111")
-  isOwner      Boolean        @default(false)
-  percentage_clean Float?     @default(0)
-  percentage_work  Float?     @default(0)
-  show_on_calendar_booking Boolean @default(false)
-  Notification Notification[]
-  WorkShift WorkShift[]
-  WorkOverride WorkOverride[]
-  WorkSchedule WorkSchedule[]
+  id                       String         @id @default(uuid())
+  email                    String         @unique
+  password                 String
+  name                     String
+  role                     Role
+  createdAt                DateTime       @default(now())
+  photo_url                String?
+  start_price              Float?
+  colour                   String?
+  isAdmin                  Boolean        @default(true)
+  phone_number             String         @default("111-111-1111")
+  isOwner                  Boolean        @default(false)
+  percentage_clean         Float?         @default(0)
+  percentage_work          Float?         @default(0)
+  show_on_calendar_booking Boolean        @default(false)
+  Appoinment               Appointment[]
+  timeOff                  TimeOff[]
+  WorkOverride             WorkOverride[]
+  WorkSchedule             WorkSchedule[]
+  WorkShift                WorkShift[]
+  workingHours             WorkingHours[]
+  Notification             Notification[]
+  slug String @unique
 }
 
 model Appointment {
-  id           String            @id @default(uuid())
-  employeeId   String
-  employee     User              @relation(fields: [employeeId], references: [id])
-  customerName String
-  email        String
-  phone        String
-  detail       String
-  status       AppointmentStatus @default(pending)
-  startTime    DateTime?
-  endTime      DateTime?
-  createdAt    DateTime?         @default(now())
-  dob          DateTime?
-  address      String?
-  paidWith     String?
-  quote_amount           Float?
+  id                     String                  @id @default(uuid())
+  employeeId             String
+  customerName           String
+  email                  String
+  phone                  String
+  detail                 String
+  status                 AppointmentStatus       @default(pending)
+  startTime              DateTime?
+  endTime                DateTime?
+  createdAt              DateTime?               @default(now())
+  address                String?
+  dob                    DateTime?
+  paidWith               String?
   deposit_amount         Float?
   deposit_category       String?
   extra_deposit_category String?
-  AppointmentHistory AppointmentHistory[]
-
-  AppointmentAttachment AppointmentAttachment[]
-
+  quote_amount           Float?
+  employee               User                    @relation(fields: [employeeId], references: [id])
+  AppointmentAttachment  AppointmentAttachment[]
+  AppointmentHistory     AppointmentHistory[]
 }
 
 model Notification {
-  id         String @id @default(uuid())
-  created_by String
-  createdBy  User   @relation(fields: [created_by], references: [id])
-
+  id                     String   @id @default(uuid())
+  created_by             String
   created_at             DateTime @default(now()) @map("created_at")
   updated_at             DateTime @updatedAt @map("updated_at")
   description            String
-  title                  String?
   customer_name          String
-  quote_amount           Float @default(0)
-  deposit_amount         Float @default(0)
+  quote_amount           Float    @default(0)
+  deposit_amount         Float    @default(0)
   deposit_category       String
   extra_deposit_category String?
   appointment_start_time DateTime
   appointment_end_time   DateTime
-  not_read               Boolean @default(true)
+  title                  String?
+  not_read               Boolean  @default(true)
+  createdBy              User     @relation(fields: [created_by], references: [id])
 
   @@map("notifications")
 }
@@ -87,47 +79,77 @@ model Notification {
 model AppointmentAttachment {
   id            String      @id @default(uuid())
   appointmentId String
-  appointment   Appointment @relation(fields: [appointmentId], references: [id])
   fileId        String
-  filename      String
   url           String
   mime          String
   size          Int
   width         Int?
   height        Int?
   createdAt     DateTime    @default(now())
+  filename      String
+  appointment   Appointment @relation(fields: [appointmentId], references: [id])
 }
 
 model AppointmentHistory {
   id            String      @id @default(uuid())
   appointmentId String
-  appointment   Appointment @relation(references: [id], fields: [appointmentId])
   fieldChanged  String
   oldValue      String
   newValue      String
   changedAt     DateTime    @default(now())
   changedBy     String
+  appointment   Appointment @relation(fields: [appointmentId], references: [id])
 }
 
 model WorkingHours {
   id             String  @id @default(uuid())
-  employee       User    @relation(fields: [employeeId], references: [id])
   employeeId     String
   weekday        Int
   startTime      String?
   endTime        String?
   intervalLength Int?
   type           String  @default("fixed")
+  employee       User    @relation(fields: [employeeId], references: [id])
 
-  @@index([employeeId, weekday], name: "employeeId_weekday")
+  @@index([employeeId, weekday], map: "employeeId_weekday")
 }
 
 model TimeOff {
   id         String   @id @default(uuid())
-  employee   User     @relation(fields: [employeeId], references: [id])
   employeeId String
   date       DateTime
   reason     String?
+  employee   User     @relation(fields: [employeeId], references: [id])
+}
+
+model WorkSchedule {
+  id        String   @id @default(uuid())
+  userId    String
+  dayOfWeek Int
+  startTime DateTime
+  endTime   DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model WorkShift {
+  id        String    @id @default(uuid())
+  userId    String
+  clockIn   DateTime
+  clockOut  DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id])
+}
+
+model WorkOverride {
+  id         String   @id @default(uuid())
+  userId     String
+  date       DateTime
+  newEndTime DateTime
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, date], name: "userId_date")
 }
 
 enum AppointmentStatus {
@@ -139,40 +161,4 @@ enum AppointmentStatus {
 enum Role {
   admin
   employee
-}
-
-model WorkSchedule {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-
-  dayOfWeek Int      // 0 = Sunday, 6 = Saturday
-  startTime DateTime // only time part matters (e.g., "08:00:00")
-  endTime   DateTime // only time part matters (e.g., "22:00:00")
-
-  createdAt DateTime @default(now())
-}
-
-model WorkShift {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-
-  clockIn   DateTime
-  clockOut  DateTime?
-
-  createdAt DateTime @default(now())
-}
-
-model WorkOverride {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-
-  date      DateTime // specific date (YYYY-MM-DD)
-  newEndTime DateTime
-
-  createdAt DateTime @default(now())
-
-  @@unique([userId, date], name: "userId_date")
 }

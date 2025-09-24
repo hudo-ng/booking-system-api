@@ -9,7 +9,7 @@ dayjs.extend(timezone);
 
 const prisma = new PrismaClient();
 
-const ZONE = "America/Vancouver";
+const ZONE = "America/Edmonton";
 
 export const getAvailability = async (req: Request, res: Response) => {
   const { id: employeeId } = req.params;
@@ -24,10 +24,9 @@ export const getAvailability = async (req: Request, res: Response) => {
     return res.status(400).json({ message: "Invalid or past date" });
   }
 
-  const weekday = target.day(); // 0..6 in ZONE
+  const weekday = target.day();
   const startOfDayUtc = target.startOf("day").utc().toDate();
   const endOfDayUtc = target.endOf("day").utc().toDate();
-
 
   const isOff = await prisma.timeOff.findFirst({
     where: {
@@ -37,13 +36,11 @@ export const getAvailability = async (req: Request, res: Response) => {
   });
   if (isOff) return res.json([]);
 
-
   const hours = await prisma.workingHours.findMany({
     where: { employeeId, weekday },
   });
   if (!hours.length) return res.json([]);
 
- 
   const appts = await prisma.appointment.findMany({
     where: {
       employeeId,
@@ -53,7 +50,6 @@ export const getAvailability = async (req: Request, res: Response) => {
     },
   });
 
- 
   const occupied = new Set<string>();
   for (const a of appts) {
     let cur = dayjs(a.startTime).utc();

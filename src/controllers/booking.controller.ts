@@ -1,6 +1,13 @@
 import { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
+const ZONE = "America/Edmonton";
 
 const prisma = new PrismaClient();
 
@@ -69,11 +76,26 @@ export const requestBooking = async (req: Request, res: Response) => {
     }
   }
 
+  const dayStartLocal = dayjs.tz(date, "YYYY-MM-DD", ZONE).startOf("day");
+  const dayEndLocal = dayStartLocal.add(1, "day");
+  const dayStartUTC = dayStartLocal.utc();
+  const dayEndUTC = dayEndLocal.utc();
+
   const off = await prisma.timeOff.findFirst({
-    where: { employeeId, date: start.startOf("day").toDate() },
+    where: {
+      employeeId,
+      date: {
+        gte: dayStartUTC.toDate(),
+        lt: dayEndUTC.toDate(),
+      },
+    },
   });
-  if (off)
+
+  if (off) {
+    console.log(off);
     return res.status(400).json({ message: "Employee is off on that day" });
+  }
+
   const conflict = await prisma.appointment.findFirst({
     where: {
       employeeId,
