@@ -32,8 +32,21 @@ model User {
   WorkShift                WorkShift[]
   workingHours             WorkingHours[]
   Notification             Notification[]
+  CleanSchedule            CleanSchedule[]
   slug String @unique
 }
+
+model CleanSchedule {
+  id        String   @id @default(uuid())
+  userId    String
+  weekday   Int      // 0 = Sunday, 1 = Monday, ... 6 = Saturday
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, weekday]) // Ensure one record per day per user
+}
+
 
 model Appointment {
   id                     String                  @id @default(uuid())

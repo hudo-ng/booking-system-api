@@ -223,3 +223,93 @@ export const getAllNotification = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Failed to fetch notifications" });
   }
 };
+
+export const getCleanSchedules = async (req: Request, res: Response) => {
+  try {
+    const { userId } = (req as any).user as { userId?: string };
+    console.log("Fetching clean schedules for user:", userId);
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    let schedules = await prisma.cleanSchedule.findMany({
+      include: { user: { select: { id: true, name: true, email: true } } },
+      orderBy: [{ userId: "asc" }, { weekday: "asc" }],
+    });
+
+    // ✅ If empty, create default 7-day schedules (no user assigned)
+    if (schedules.length === 0) {
+      const defaultSchedules = Array.from({ length: 7 }, (_, i) => ({
+        weekday: i,
+        userId: userId,
+      }));
+
+      await prisma.cleanSchedule.createMany({ data: defaultSchedules });
+
+      // fetch again with fresh data
+      schedules = await prisma.cleanSchedule.findMany({
+        include: { user: { select: { id: true, name: true, email: true } } },
+        orderBy: [{ userId: "asc" }, { weekday: "asc" }],
+      });
+    }
+
+    res.json(schedules);
+  } catch (err) {
+    console.error("Error loading clean schedules:", err);
+    res.status(500).json({ message: "Failed to load clean schedules." });
+  }
+};
+
+// ✅ Assign or edit clean schedule
+export const assignUserToCleanSchedule = async (
+  req: Request,
+  res: Response
+) => {
+  const { isOwner } = (req as any).user || {};
+  console.log("Assigning clean schedule, isOwner:", isOwner);
+  if (!isOwner) {
+    return res
+      .status(403)
+      .json({ message: "Only owners can assign schedules" });
+  }
+
+  let { userId, weekdays } = req.body;
+  console.log("Received schedule assignment:", req.body);
+
+  // Normalize weekdays → always array of numbers
+  if (!userId || weekdays === undefined) {
+    return res.status(400).json({ message: "Invalid input" });
+  }
+  if (!Array.isArray(weekdays)) {
+    weekdays = [Number(weekdays)]; // convert single value like "0" → [0]
+  } else {
+    weekdays = weekdays.map((w: any) => Number(w));
+  }
+
+  try {
+    // Ensure default schedule exists (7 days, userId empty if not already created)
+    const count = await prisma.cleanSchedule.count();
+    if (count < 7) {
+      const defaultData = Array.from({ length: 7 }, (_, i) => ({
+        weekday: i,
+        userId: "", // empty string for unassigned
+      }));
+      await prisma.cleanSchedule.createMany({
+        data: defaultData,
+        skipDuplicates: true,
+      });
+    }
+
+    // Update schedules by replacing userId on matching weekdays
+    for (const day of weekdays) {
+      await prisma.cleanSchedule.updateMany({
+        where: { weekday: day },
+        data: { userId },
+      });
+    }
+
+    res.json({ message: "Clean schedule updated successfully" });
+  } catch (err) {
+    console.error("Error assigning clean schedule:", err);
+    res.status(500).json({ message: "Failed to update clean schedule" });
+  }
+};
