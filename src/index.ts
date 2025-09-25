@@ -14,7 +14,7 @@ import workshiftRoutes from "./routes/workShift.routes";
 
 const app = express();
 
-app.use(cors({ origin: "*" }));
+app.use(cors());
 app.use(express.json());
 
 app.use((req: Request, res: Response, next) => {
