@@ -11,7 +11,20 @@ export const listEmployees = async (_req: Request, res: Response) => {
       photo_url: true,
       start_price: true,
       colour: true,
+      slug: true,
     },
   });
   res.json(employees);
+};
+
+export const getEmployeeId = async (req: Request, res: Response) => {
+  const { employeeSlug } = req.params;
+  const employee = await prisma.user.findUnique({
+    where: { slug: employeeSlug },
+    select: {
+      id: true,
+      slug: true,
+    },
+  });
+  res.json(employee);
 };

@@ -3,12 +3,17 @@ import { Request, Response } from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { config } from "../config";
+import slugify from "slugify";
+import { customAlphabet } from "nanoid";
 
 const prisma = new PrismaClient();
 
 export const register = async (req: Request, res: Response) => {
   const { email, password, name, role, colour, start_price } = req.body;
   const hashed = await bcrypt.hash(password, 10);
+  const nano = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 5);
+  const base = slugify(name || "user", { lower: true, strict: true }) || "user";
+  const slug = `${base}-${nano()}`;
   const user = await prisma.user.create({
     data: {
       email,
@@ -19,6 +24,7 @@ export const register = async (req: Request, res: Response) => {
       start_price,
       isAdmin: true,
       phone_number: "6471234567",
+      slug,
     },
   });
   res.status(201).json({ id: user.id, email: user.email, role: user.role });

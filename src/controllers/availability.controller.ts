@@ -14,7 +14,7 @@ const ZONE = "America/Edmonton";
 export const getAvailability = async (req: Request, res: Response) => {
   const { id: employeeId } = req.params;
   const { date } = req.query as { date: string };
-  const target = dayjs.tz(date, ZONE); // 2025-09-25T00:00:00-07:00
+  const target = dayjs.tz(date, ZONE);
   if (!target.isValid()) {
     return res.status(400).json({ message: "Invalid date" });
   }

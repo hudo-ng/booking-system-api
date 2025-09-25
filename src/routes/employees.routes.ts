@@ -1,9 +1,12 @@
 import { Router } from "express";
-import { listEmployees } from "../controllers/employess.controller";
+import {
+  listEmployees,
+  getEmployeeId,
+} from "../controllers/employess.controller";
 
 const router = Router();
 
-// Public endpoint — no auth required
 router.get("/", listEmployees);
+router.get("/:employeeSlug", getEmployeeId);
 
 export default router;
