@@ -24,7 +24,7 @@ export const register = async (req: Request, res: Response) => {
       start_price,
       isAdmin: false,
       phone_number: "6471234567",
-      slug: name.toLowerCase().replace(/\s+/g, "-"),
+      slug,
       isOwner: false,
       show_on_calendar_booking: false,
     },
