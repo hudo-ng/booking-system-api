@@ -38,6 +38,8 @@ export const getAllEmployees = async (req: Request, res: Response) => {
         photo_url: true,
         percentage_clean: true,
         percentage_work: true,
+        percentage_shared: true,
+        wage: true,
         show_on_calendar_booking: true,
         isAdmin: true,
         role: true,
@@ -57,6 +59,8 @@ export const getAllEmployees = async (req: Request, res: Response) => {
         photo_url: true,
         percentage_clean: true,
         percentage_work: true,
+        percentage_shared: true,
+        wage: true,
         show_on_calendar_booking: true,
         isAdmin: true,
         role: true,
@@ -98,6 +102,8 @@ export const editEmployee = async (req: Request, res: Response) => {
     photo_url,
     percentage_clean,
     percentage_work,
+    percentage_shared,
+    wage,
     show_on_calendar_booking,
   } = req.body;
   console.log("Editing employee with ID:", req.body);
@@ -112,6 +118,8 @@ export const editEmployee = async (req: Request, res: Response) => {
         photo_url,
         percentage_clean,
         percentage_work,
+        percentage_shared,
+        wage,
         show_on_calendar_booking,
       },
       select: {
@@ -123,10 +131,12 @@ export const editEmployee = async (req: Request, res: Response) => {
         photo_url: true,
         percentage_clean: true,
         percentage_work: true,
+        percentage_shared: true,
+        wage: true,
         show_on_calendar_booking: true,
       },
     });
-
+    console.log("Updated employee:", updatedEmployee);
     res.json(updatedEmployee);
   } catch (error) {
     console.error("Failed to update employee", error);

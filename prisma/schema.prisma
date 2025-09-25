@@ -22,6 +22,8 @@ model User {
   isOwner                  Boolean        @default(false)
   percentage_clean         Float?         @default(0)
   percentage_work          Float?         @default(0)
+  percentage_shared        Float?         @default(0)
+  wage                     Float?         @default(0)
   show_on_calendar_booking Boolean        @default(false)
   Appoinment               Appointment[]
   timeOff                  TimeOff[]

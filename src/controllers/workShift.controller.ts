@@ -5,11 +5,32 @@ import { getDistanceFromLatLonInKm } from "../utils/distance";
 
 const prisma = new PrismaClient();
 
+// GET /work-shifts/full/clock-history?month=9&year=2025&userId=123
+export const getWorkShiftsFull = async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ message: " userId are required" });
+    }
+
+    const shifts = await prisma.workShift.findMany({
+      where: {
+        userId: String(userId),
+      },
+      orderBy: { clockIn: "asc" },
+    });
+    res.json({ shifts });
+  } catch (error) {
+    console.error("Error fetching clock history:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
 // GET /work-shifts/clock-history?month=9&year=2025&userId=123
 export const getWorkShiftsByMonth = async (req: Request, res: Response) => {
   try {
     const { month, year, userId } = req.query;
-    console.log("Fetching clock history for:");
+    console.log("Fetching clock history for: ", userId);
     console.log("Month:", month);
     console.log("Year:", year);
     console.log("UserId:", userId);
@@ -43,7 +64,6 @@ export const getWorkShiftsByMonth = async (req: Request, res: Response) => {
 // ✅ Clock In
 export const clockIn = async (req: Request, res: Response) => {
   const { userId } = (req as any).user as { userId?: string };
-  console.log("Clock-in request from user:", userId);
   const { latitude, longitude } = req.body;
 
   if (!userId) {
@@ -61,7 +81,6 @@ export const clockIn = async (req: Request, res: Response) => {
     51.03869,
     -114.060243
   );
-
   if (distance > 2) {
     return res
       .status(403)
@@ -70,12 +89,22 @@ export const clockIn = async (req: Request, res: Response) => {
 
   const activeShift = await prisma.workShift.findFirst({
     where: { userId, clockOut: null },
+    orderBy: { clockIn: "desc" }, // ✅ get the latest one
   });
 
   if (activeShift) {
-    // User already has an active shift, optionally handle this case
-    // For example, you could return an error or skip creating a new shift
-    return res.status(400).json({ message: "Already clocked in" });
+    const clockInDate = new Date(activeShift.clockIn);
+    const today = new Date();
+
+    const isSameDay =
+      clockInDate.getFullYear() === today.getFullYear() &&
+      clockInDate.getMonth() === today.getMonth() &&
+      clockInDate.getDate() === today.getDate();
+
+    if (isSameDay) {
+      return res.status(400).json({ message: "Already clocked in today" });
+    }
+    // else: old shift without clockOut → let them start a new one
   }
 
   const shift = await prisma.workShift.create({
@@ -89,14 +118,30 @@ export const clockIn = async (req: Request, res: Response) => {
 export const clockOut = async (req: Request, res: Response) => {
   const { id: userId } = (req as any).user;
 
+  // Find the latest active shift (not clocked out yet)
   const activeShift = await prisma.workShift.findFirst({
     where: { userId, clockOut: null },
+    orderBy: { clockIn: "desc" }, // ✅ latest shift
   });
 
   if (!activeShift) {
     return res.status(400).json({ message: "Not clocked in" });
   }
 
+  // ✅ Check if clockIn is today
+  const today = new Date();
+  const clockInDate = new Date(activeShift.clockIn);
+
+  const isSameDay =
+    clockInDate.getFullYear() === today.getFullYear() &&
+    clockInDate.getMonth() === today.getMonth() &&
+    clockInDate.getDate() === today.getDate();
+
+  if (!isSameDay) {
+    return res.status(400).json({ message: "Active shift is not from today" });
+  }
+
+  // ✅ Clock out
   const shift = await prisma.workShift.update({
     where: { id: activeShift.id },
     data: { clockOut: new Date() },
@@ -136,6 +181,34 @@ export const extendShift = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Error extending shift:", error);
     res.status(500).json({ message: "Error extending shift" });
+  }
+};
+
+// ✅ Edit ClockIn / ClockOut (Owner only)
+export const editClockInAndClockOutTimeByShiftId = async (
+  req: Request,
+  res: Response
+) => {
+  const { shiftId, newClockIn, newClockOut } = req.body;
+  const { isOwner } = (req as any).user;
+
+  if (!isOwner) {
+    return res.status(403).json({ message: "Only owner can edit shifts" });
+  }
+
+  try {
+    const updatedShift = await prisma.workShift.update({
+      where: { id: shiftId },
+      data: {
+        clockIn: newClockIn ? new Date(newClockIn) : undefined,
+        clockOut: newClockOut ? new Date(newClockOut) : undefined,
+      },
+    });
+
+    res.json({ message: "Shift updated", shift: updatedShift });
+  } catch (error) {
+    console.error("Error editing shift:", error);
+    res.status(500).json({ message: "Error editing shift" });
   }
 };
 

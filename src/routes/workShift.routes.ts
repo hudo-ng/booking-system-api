@@ -2,10 +2,12 @@ import { Router } from "express";
 import {
   clockIn,
   clockOut,
+  editClockInAndClockOutTimeByShiftId,
   extendShift,
   getWorkSchedule,
   getWorkShifts,
   getWorkShiftsByMonth,
+  getWorkShiftsFull,
   setWorkScheduleByUserId,
 } from "../controllers/workShift.controller";
 import { authenticate, authorize } from "../middleware/auth";
@@ -14,9 +16,11 @@ const router = Router();
 
 router.use(authenticate, authorize(["admin", "employee"]));
 router.get("/clock-history", getWorkShiftsByMonth);
+router.get("/full/clock-history", getWorkShiftsFull);
 router.post("/clock-in", clockIn);
 router.post("/clock-out", clockOut);
 router.post("/extend-shift", extendShift);
+router.put("/edit-clockinout", editClockInAndClockOutTimeByShiftId);
 router.get("/", getWorkShifts);
 router.get("/schedule", getWorkSchedule);
 router.put("/schedule", setWorkScheduleByUserId);
