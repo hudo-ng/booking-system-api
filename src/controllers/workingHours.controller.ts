@@ -64,7 +64,7 @@ export const setWorkingHours = async (req: Request, res: Response) => {
           .json({ message: "startTime and endTime are required" });
       }
 
-      const interval = parseInt(intervalLength)
+      const interval = parseInt(intervalLength);
 
       await prisma.workingHours.create({
         data: {
@@ -113,14 +113,26 @@ export const getAllWorkingHours = async (req: Request, res: Response) => {
     req.query.employeeId as string | undefined
   )?.trim();
 
-  console.log(requestedEmployeeId);
   const idToQuery = isAdmin ? requestedEmployeeId : userId;
 
   try {
-    const hours = await prisma.workingHours.findMany({
+    let hours = await prisma.workingHours.findMany({
       where: { employeeId: idToQuery },
       orderBy: [{ weekday: "asc" }, { startTime: "asc" }],
     });
+
+    // ✅ If empty, generate a default array of 7 weekdays
+    if (!hours || hours.length === 0) {
+      hours = Array.from({ length: 7 }, (_, i) => ({
+        id: `temp-${i}`, // temporary ID for frontend usage
+        employeeId: idToQuery,
+        weekday: i, // 0 = Sunday, 1 = Monday, ...
+        startTime: null,
+        endTime: null,
+        intervalLength: null,
+        type: "fixed",
+      }));
+    }
 
     res.json(hours);
   } catch (err) {
