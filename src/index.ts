@@ -13,6 +13,23 @@ import managementRoutes from "./routes/management.routes";
 import workshiftRoutes from "./routes/workShift.routes";
 
 const app = express();
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "https://hk-booking-system-api.onrender.com",
+  "https://hk-booking.vercel.app/",
+];
+
+app.use(
+  cors({
+    origin: allowedOrigins,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: false,
+  })
+);
+
+app.options("*", cors());
 app.use(cors());
 app.use(express.json());
 
