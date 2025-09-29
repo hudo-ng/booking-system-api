@@ -66,6 +66,7 @@ model Appointment {
   deposit_category       String?
   extra_deposit_category String?
   quote_amount           Float?
+  completed_photo_url    String?
   employee               User                    @relation(fields: [employeeId], references: [id])
   AppointmentAttachment  AppointmentAttachment[]
   AppointmentHistory     AppointmentHistory[]

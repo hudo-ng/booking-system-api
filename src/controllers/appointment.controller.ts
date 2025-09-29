@@ -153,6 +153,43 @@ export const getAllAppointments = async (req: Request, res: Response) => {
   res.json(appointments);
 };
 
+export const getCountAppointmentPending = async (
+  req: Request,
+  res: Response
+) => {
+  const { userId } = (req as any).user as { userId?: string };
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  // Query the current user
+  const currentUser = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+
+  if (!currentUser) {
+    return res.status(404).json({ error: "User not found" });
+  }
+  let count = 0;
+
+  if (currentUser.isAdmin) {
+    count = await prisma.appointment.count({
+      where: {
+        status: "pending",
+      },
+    });
+  } else {
+    count = await prisma.appointment.count({
+      where: {
+        employeeId: userId,
+        status: "pending",
+      },
+    });
+  }
+  console.log("Pending appointment count:", count);
+  res.json(count);
+};
+
 export const deleteAppointment = async (req: Request, res: Response) => {
   const { userId } = (req as any).user as { userId?: string };
   const { appointmentId } = req.query as { appointmentId?: string };
@@ -372,6 +409,38 @@ export const updateAppointment = async (req: Request, res: Response) => {
   } catch (err) {
     console.error("Update failed", err);
     res.status(500).json({ message: "Failed to update appointment" });
+  }
+};
+
+export const updateCompletedPhotoUrlAppointmentById = async (
+  req: Request,
+  res: Response
+) => {
+  const { id, completedPhotoUrl } = req.body;
+  console.log("Updating appointment ID:", id);
+  console.log("New completedPhotoUrl:", completedPhotoUrl);
+  if (!completedPhotoUrl) {
+    return res.status(400).json({ message: "completedPhotoUrl is required." });
+  }
+
+  try {
+    const appointment = await prisma.appointment.findUnique({ where: { id } });
+    if (!appointment) {
+      return res.status(404).json({ message: "Appointment not found." });
+    }
+
+    const updated = await prisma.appointment.update({
+      where: { id },
+      data: { completed_photo_url: completedPhotoUrl },
+    });
+
+    res.json({
+      message: "Appointment photo updated successfully.",
+      appointment: updated,
+    });
+  } catch (err) {
+    console.error("Error updating appointment photo URL:", err);
+    res.status(500).json({ message: "Failed to update appointment photo." });
   }
 };
 
