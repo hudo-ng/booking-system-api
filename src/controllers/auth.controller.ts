@@ -52,5 +52,13 @@ export const login = async (req: Request, res: Response) => {
     { expiresIn: "1y" }
   );
 
-  res.json({ token: token, role: user.role, name: user.name });
+  const safeUser = {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    slug: user.slug,
+  };
+
+  res.json({ token: token, ...safeUser });
 };
