@@ -10,6 +10,8 @@ import {
   createAppointment,
   getAllAppointmentsBySelectedDate,
   deleteAppointment,
+  getCountAppointmentPending,
+  updateCompletedPhotoUrlAppointmentById,
 } from "../controllers/appointment.controller";
 
 const router = Router();
@@ -17,11 +19,13 @@ const router = Router();
 router.use(authenticate, authorize(["admin", "employee"]));
 
 router.get("/all", getAllAppointments);
+router.get("/count/pending", getCountAppointmentPending);
 router.get("/all/by-date", getAllAppointmentsBySelectedDate);
 router.get("/", getAppointments);
 router.get("/:id/history", getAppointmentHistory);
 router.patch("/:id/status", updateAppointmentStatus);
 router.patch("/:id", updateAppointment);
+router.put("/completed", updateCompletedPhotoUrlAppointmentById);
 router.get("/:id", getAppointmentById);
 router.post("/create", createAppointment);
 router.delete("/delete", deleteAppointment);
