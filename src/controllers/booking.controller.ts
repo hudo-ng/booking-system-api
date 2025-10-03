@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
+import { sendPushAsync } from "../services/push";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
@@ -150,6 +151,38 @@ export const requestBooking = async (req: Request, res: Response) => {
 
       return appt;
     });
+
+    (async () => {
+      try {
+        const admins = await prisma.user.findMany({
+          where: { role: { in: ["admin", "employee"] } },
+          select: { id: true },
+        });
+
+        const targetUserIds = Array.from(
+          new Set([employeeId, ...admins.map((a) => a.id)])
+        );
+
+        const tokens = (
+          await prisma.deviceToken.findMany({
+            where: { userId: { in: targetUserIds }, enabled: true },
+            select: { token: true },
+          })
+        ).map((d) => d.token);
+
+        if (tokens.length) {
+          await sendPushAsync(tokens, {
+            title: "New booking request",
+            body: `${customerName} requested ${start
+              .tz(ZONE)
+              .format("MMM D, HH:mm")}–${end.tz(ZONE).format("HH:mm")}`,
+            data: { bookingId: created.id },
+          });
+        }
+      } catch (pushErr) {
+        console.error("Push send error:", pushErr);
+      }
+    })();
 
     return res.status(201).json(created);
   } catch (e) {

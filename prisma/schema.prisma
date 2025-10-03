@@ -8,45 +8,45 @@ datasource db {
 }
 
 model User {
-  id                       String         @id @default(uuid())
-  email                    String         @unique
+  id                       String          @id @default(uuid())
+  email                    String          @unique
   password                 String
   name                     String
   role                     Role
-  createdAt                DateTime       @default(now())
-  photo_url                String?
-  start_price              Float?
+  createdAt                DateTime        @default(now())
   colour                   String?
-  isAdmin                  Boolean        @default(true)
-  phone_number             String         @default("111-111-1111")
-  isOwner                  Boolean        @default(false)
-  percentage_clean         Float?         @default(0)
-  percentage_work          Float?         @default(0)
-  percentage_shared        Float?         @default(0)
-  wage                     Float?         @default(0)
-  show_on_calendar_booking Boolean        @default(false)
+  isAdmin                  Boolean         @default(true)
+  isOwner                  Boolean         @default(false)
+  percentage_clean         Float?          @default(0)
+  percentage_shared        Float?          @default(0)
+  percentage_work          Float?          @default(0)
+  phone_number             String          @default("111-111-1111")
+  photo_url                String?
+  show_on_calendar_booking Boolean         @default(false)
+  slug                     String          @unique
+  start_price              Float?
+  wage                     Float?          @default(0)
   Appoinment               Appointment[]
+  CleanSchedule            CleanSchedule[]
   timeOff                  TimeOff[]
   WorkOverride             WorkOverride[]
   WorkSchedule             WorkSchedule[]
   WorkShift                WorkShift[]
   workingHours             WorkingHours[]
   Notification             Notification[]
-  CleanSchedule            CleanSchedule[]
-  slug String @unique
+
+  DeviceToken DeviceToken[]
 }
 
 model CleanSchedule {
   id        String   @id @default(uuid())
   userId    String
-  weekday   Int      // 0 = Sunday, 1 = Monday, ... 6 = Saturday
+  weekday   Int
   createdAt DateTime @default(now())
-
   user      User     @relation(fields: [userId], references: [id])
 
-  @@unique([userId, weekday]) // Ensure one record per day per user
+  @@unique([userId, weekday])
 }
-
 
 model Appointment {
   id                     String                  @id @default(uuid())
@@ -60,11 +60,11 @@ model Appointment {
   endTime                DateTime?
   createdAt              DateTime?               @default(now())
   address                String?
-  dob                    DateTime?
-  paidWith               String?
   deposit_amount         Float?
   deposit_category       String?
+  dob                    DateTime?
   extra_deposit_category String?
+  paidWith               String?
   quote_amount           Float?
   completed_photo_url    String?
   employee               User                    @relation(fields: [employeeId], references: [id])
@@ -166,6 +166,18 @@ model WorkOverride {
   user       User     @relation(fields: [userId], references: [id])
 
   @@unique([userId, date], name: "userId_date")
+}
+
+model DeviceToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  platform  String?
+  lastSeen  DateTime @default(now())
+  enabled   Boolean  @default(true)
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
 }
 
 enum AppointmentStatus {
