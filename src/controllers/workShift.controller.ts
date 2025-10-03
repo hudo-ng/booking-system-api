@@ -75,11 +75,17 @@ export const clockIn = async (req: Request, res: Response) => {
   }
 
   // ✅ Check distance
+  // const distance = getDistanceFromLatLonInKm(
+  //   latitude,
+  //   longitude,
+  //   51.03869,
+  //   -114.060243
+  // );
   const distance = getDistanceFromLatLonInKm(
     latitude,
     longitude,
-    51.03869,
-    -114.060243
+    29.51305,
+    -98.551407
   );
   if (distance > 2) {
     return res
