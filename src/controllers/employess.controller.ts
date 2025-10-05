@@ -12,6 +12,7 @@ export const listEmployees = async (_req: Request, res: Response) => {
       start_price: true,
       colour: true,
       slug: true,
+      show_on_calendar_booking: true,
     },
   });
   res.json(employees);
