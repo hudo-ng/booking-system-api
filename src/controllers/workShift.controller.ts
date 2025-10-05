@@ -75,13 +75,19 @@ export const clockIn = async (req: Request, res: Response) => {
   }
 
   // ✅ Check distance
-  const distance = getDistanceFromLatLonInKm(
+  const distanceA = getDistanceFromLatLonInKm(
     latitude,
     longitude,
     51.03869,
     -114.060243
   );
-  if (distance > 2) {
+  const distanceB = getDistanceFromLatLonInKm(
+    latitude,
+    longitude,
+    29.51305,
+    -98.551407
+  );
+  if (distanceB > 2 && distanceA > 2) {
     return res
       .status(403)
       .json({ message: "You are not within 2km of the expected location" });

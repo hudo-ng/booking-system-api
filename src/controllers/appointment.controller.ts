@@ -1,6 +1,5 @@
 import { Request, Response } from "express";
 import { PrismaClient, AppointmentStatus } from "@prisma/client";
-import { trackAppointmentHistory } from "../utils/trackChanges";
 import dayjs from "dayjs";
 
 const prisma = new PrismaClient();
@@ -331,12 +330,12 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
   });
   if (!user) throw new Error("User not found");
   const changedBy = user.name;
-  await trackAppointmentHistory(
-    id,
-    appt,
-    { startTime, endTime, status },
-    changedBy
-  );
+  // await trackAppointmentHistory(
+  //   id,
+  //   appt,
+  //   { startTime, endTime, status },
+  //   changedBy
+  // );
 
   const updated = await prisma.appointment.update({
     where: { id },
@@ -389,12 +388,12 @@ export const updateAppointment = async (req: Request, res: Response) => {
   });
   if (!user) throw new Error("User not found");
   const changedBy = user.name;
-  await trackAppointmentHistory(
-    id,
-    appointment,
-    { startTime, endTime, status },
-    changedBy
-  );
+  // await trackAppointmentHistory(
+  //   id,
+  //   appointment,
+  //   { startTime, endTime, status },
+  //   changedBy
+  // );
 
   try {
     const updated = await prisma.appointment.update({
