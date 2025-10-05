@@ -15,7 +15,7 @@ export const getAllEmployees = async (req: Request, res: Response) => {
   // Get current user
   const currentUser = await prisma.user.findUnique({
     where: { id: userId },
-    select: { isAdmin: true, isOwner: true },
+    select: { isOwner: true },
   });
 
   if (!currentUser) {
@@ -24,7 +24,7 @@ export const getAllEmployees = async (req: Request, res: Response) => {
 
   let employees;
 
-  if (currentUser.isAdmin || currentUser?.isOwner) {
+  if (currentUser?.isOwner) {
     // Return all employees
     employees = await prisma.user.findMany({
       where: { role: "employee" },
@@ -43,6 +43,7 @@ export const getAllEmployees = async (req: Request, res: Response) => {
         show_on_calendar_booking: true,
         isAdmin: true,
         role: true,
+        is_reception: true,
       },
     });
   } else {
@@ -64,6 +65,7 @@ export const getAllEmployees = async (req: Request, res: Response) => {
         show_on_calendar_booking: true,
         isAdmin: true,
         role: true,
+        is_reception: true,
       },
     });
 
@@ -105,6 +107,7 @@ export const editEmployee = async (req: Request, res: Response) => {
     percentage_shared,
     wage,
     show_on_calendar_booking,
+    is_reception,
   } = req.body;
   console.log("Editing employee with ID:", req.body);
   try {
@@ -121,6 +124,7 @@ export const editEmployee = async (req: Request, res: Response) => {
         percentage_shared,
         wage,
         show_on_calendar_booking,
+        is_reception,
       },
       select: {
         id: true,
@@ -134,6 +138,7 @@ export const editEmployee = async (req: Request, res: Response) => {
         percentage_shared: true,
         wage: true,
         show_on_calendar_booking: true,
+        is_reception: true,
       },
     });
     console.log("Updated employee:", updatedEmployee);
