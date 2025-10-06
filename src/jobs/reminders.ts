@@ -12,7 +12,7 @@ const prisma = new PrismaClient();
 
 export async function runDailyReminder(opts?: {
   zone?: string;
-  includeStatuses?: ("pending" | "accepted")[];
+  includeStatuses?: "accepted"[];
   dryRun?: boolean;
 }) {
   const zone = opts?.zone ?? ZONE;
@@ -21,7 +21,7 @@ export async function runDailyReminder(opts?: {
   const startUTC = startLocal.utc().toDate();
   const endUTC = endLocal.utc().toDate();
 
-  const statuses = opts?.includeStatuses ?? ["accepted", "pending"];
+  const statuses = opts?.includeStatuses ?? ["accepted"];
 
   const appts = await prisma.appointment.findMany({
     where: {
