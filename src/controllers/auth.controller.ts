@@ -47,6 +47,7 @@ export const login = async (req: Request, res: Response) => {
       isAdmin: user.isAdmin,
       name: user.name,
       isOwner: user.isOwner,
+      is_reception: user.is_reception,
     },
     config.jwtSecret,
     { expiresIn: "1y" }
@@ -61,4 +62,58 @@ export const login = async (req: Request, res: Response) => {
   };
 
   res.json({ token: token, ...safeUser });
+};
+
+export const logInByIdToken = async (req: Request, res: Response) => {
+  try {
+    const { idToken } = req.body;
+    console.log("Received idToken:", idToken);
+    if (!idToken) {
+      return res.status(400).json({ message: "idToken is required" });
+    }
+
+    // 1️⃣ Verify the incoming token (the token should be signed with your server's secret)
+    let decoded: any;
+    try {
+      decoded = jwt.verify(idToken, config.jwtSecret);
+    } catch (err) {
+      return res.status(401).json({ message: "Invalid or expired token" });
+    }
+
+    // 2️⃣ Check if user exists in database
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // 3️⃣ Generate a new access token for continued use
+    const token = jwt.sign(
+      {
+        userId: user.id,
+        role: user.role,
+        isAdmin: user.isAdmin,
+        name: user.name,
+        isOwner: user.isOwner,
+        is_reception: user.is_reception,
+      },
+      config.jwtSecret,
+      { expiresIn: "1y" }
+    );
+
+    const safeUser = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      slug: user.slug,
+    };
+
+    return res.json({ token, ...safeUser });
+  } catch (error) {
+    console.error("logInByIdToken error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
 };

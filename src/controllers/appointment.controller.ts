@@ -30,6 +30,7 @@ export const createAppointment = async (req: Request, res: Response) => {
 
   try {
     const {
+      employeeId,
       customerName,
       email,
       phone,
@@ -58,7 +59,7 @@ export const createAppointment = async (req: Request, res: Response) => {
     // ✅ Create Appointment
     const newAppointment = await prisma.appointment.create({
       data: {
-        employeeId: userId,
+        employeeId: employeeId ? employeeId : userId,
         customerName,
         email,
         phone,
@@ -82,9 +83,9 @@ export const createAppointment = async (req: Request, res: Response) => {
     await prisma.notification.create({
       data: {
         created_by: userId,
-        description: detail || "No description provided",
+        description: detail ? detail : "No description provided",
         title: "created new appointment",
-        customer_name: customerName,
+        customer_name: customerName ? customerName : "No name provided",
         quote_amount,
         deposit_amount,
         deposit_category,
@@ -185,7 +186,6 @@ export const getCountAppointmentPending = async (
       },
     });
   }
-  console.log("Pending appointment count:", count);
   res.json(count);
 };
 
