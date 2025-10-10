@@ -102,6 +102,90 @@ export const createAppointment = async (req: Request, res: Response) => {
   }
 };
 
+export const editAppointment = async (req: Request, res: Response) => {
+  const { userId } = (req as any).user as { userId?: string };
+
+  if (!userId) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  try {
+    const {
+      id,
+      employeeId,
+      customerName,
+      email,
+      phone,
+      detail,
+      startTime,
+      endTime,
+      quote_amount,
+      deposit_amount,
+      deposit_category,
+      extra_deposit_category,
+    } = req.body;
+    console.log("Editing appointment with ID:", id);
+    // ✅ Validate time order
+    if (startTime && endTime) {
+      const start = new Date(startTime);
+      const end = new Date(endTime);
+      if (end <= start) {
+        return res
+          .status(400)
+          .json({ message: "End time must be after start time" });
+      }
+    }
+
+    // ✅ Update Appointment
+
+    const updated = await prisma.appointment.update({
+      where: { id },
+      data: {
+        employeeId,
+        customerName,
+        email,
+        phone,
+        detail,
+        startTime: startTime ? new Date(startTime) : null,
+        endTime: endTime ? new Date(endTime) : null,
+        quote_amount,
+        deposit_amount,
+        deposit_category,
+        extra_deposit_category,
+      },
+      include: {
+        employee: { select: { id: true, name: true } },
+      },
+    });
+    if (updated) {
+      // ✅ Optional: Log edit as notification
+      await prisma.notification.create({
+        data: {
+          created_by: userId,
+          description: detail ? detail : "No description provided",
+          title: "edit appointment",
+          customer_name: customerName ? customerName : "No name provided",
+          quote_amount,
+          deposit_amount,
+          deposit_category,
+          extra_deposit_category,
+          appointment_start_time: startTime ? new Date(startTime) : new Date(),
+          appointment_end_time: endTime ? new Date(endTime) : new Date(),
+        },
+      });
+
+      res.json(updated);
+    } else {
+      return res
+        .status(400)
+        .json({ message: "End time must be after start time" });
+    }
+  } catch (error) {
+    console.error("❌ Failed to edit appointment:", error);
+    res.status(500).json({ message: "Failed to edit appointment" });
+  }
+};
+
 export const getAllAppointments = async (req: Request, res: Response) => {
   const { userId } = (req as any).user as { userId?: string };
   if (!userId) {

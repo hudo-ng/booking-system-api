@@ -12,6 +12,7 @@ import {
   deleteAppointment,
   getCountAppointmentPending,
   updateCompletedPhotoUrlAppointmentById,
+  editAppointment,
 } from "../controllers/appointment.controller";
 
 const router = Router();
@@ -28,6 +29,7 @@ router.patch("/:id", updateAppointment);
 router.put("/completed", updateCompletedPhotoUrlAppointmentById);
 router.get("/:id", getAppointmentById);
 router.post("/create", createAppointment);
+router.put("/edit", editAppointment);
 router.delete("/delete", deleteAppointment);
 
 export default router;
