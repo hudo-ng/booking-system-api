@@ -33,11 +33,35 @@ export const register = async (req: Request, res: Response) => {
 };
 
 export const login = async (req: Request, res: Response) => {
-  const { email, password } = req.body;
+  const { email, password, deviceId } = req.body as {
+    email: string;
+    password: string;
+    deviceId?: string;
+  };
   const user = await prisma.user.findUnique({ where: { email } });
 
   if (!user || !(await bcrypt.compare(password, user.password))) {
     return res.status(401).json({ message: "Invalid credentials" });
+  }
+
+  const isEmployee = (user.role as any) === "employee";
+  if (isEmployee && deviceId && !user.currentDeviceId) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { currentDeviceId: deviceId },
+    });
+  }
+
+  if (
+    isEmployee &&
+    deviceId &&
+    user.currentDeviceId &&
+    user.currentDeviceId !== deviceId
+  ) {
+    return res.status(423).json({
+      error: "DEVICE_LOCKED",
+      message: "This device is not authorized.",
+    });
   }
 
   const token = jwt.sign(
@@ -48,6 +72,7 @@ export const login = async (req: Request, res: Response) => {
       name: user.name,
       isOwner: user.isOwner,
       is_reception: user.is_reception,
+      deviceId: deviceId ?? null,
     },
     config.jwtSecret,
     { expiresIn: "1y" }
@@ -66,7 +91,10 @@ export const login = async (req: Request, res: Response) => {
 
 export const logInByIdToken = async (req: Request, res: Response) => {
   try {
-    const { idToken } = req.body;
+    const { idToken, deviceId } = req.body as {
+      idToken: string;
+      deviceId?: string;
+    };
     console.log("Received idToken:", idToken);
     if (!idToken) {
       return res.status(400).json({ message: "idToken is required" });
@@ -89,6 +117,26 @@ export const logInByIdToken = async (req: Request, res: Response) => {
       return res.status(404).json({ message: "User not found" });
     }
 
+    const isEmployee = (user.role as any) === "employee";
+    if (user.role === "employee") {
+      if (deviceId && !user.currentDeviceId) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { currentDeviceId: deviceId },
+        });
+      }
+      if (
+        deviceId &&
+        user.currentDeviceId &&
+        user.currentDeviceId !== deviceId
+      ) {
+        return res.status(423).json({
+          error: "DEVICE_LOCKED",
+          message: "This device is not authorized.",
+        });
+      }
+    }
+
     // 3️⃣ Generate a new access token for continued use
     const token = jwt.sign(
       {
@@ -98,6 +146,7 @@ export const logInByIdToken = async (req: Request, res: Response) => {
         name: user.name,
         isOwner: user.isOwner,
         is_reception: user.is_reception,
+        deviceId: deviceId ?? null,
       },
       config.jwtSecret,
       { expiresIn: "1y" }

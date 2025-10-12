@@ -17,7 +17,6 @@ model User {
   colour                   String?
   isAdmin                  Boolean         @default(false)
   isOwner                  Boolean         @default(false)
-  is_reception             Boolean         @default(false)
   percentage_clean         Float?          @default(0)
   percentage_shared        Float?          @default(0)
   percentage_work          Float?          @default(0)
@@ -27,16 +26,17 @@ model User {
   slug                     String          @unique
   start_price              Float?
   wage                     Float?          @default(0)
+  is_reception             Boolean         @default(false)
+  currentDeviceId          String?
   Appoinment               Appointment[]
   CleanSchedule            CleanSchedule[]
+  DeviceToken              DeviceToken[]
   timeOff                  TimeOff[]
   WorkOverride             WorkOverride[]
   WorkSchedule             WorkSchedule[]
   WorkShift                WorkShift[]
   workingHours             WorkingHours[]
   Notification             Notification[]
-
-  DeviceToken DeviceToken[]
 }
 
 model CleanSchedule {
@@ -170,13 +170,13 @@ model WorkOverride {
 }
 
 model DeviceToken {
-  id        String   @id @default(uuid())
-  userId    String
-  token     String   @unique
-  platform  String?
-  lastSeen  DateTime @default(now())
-  enabled   Boolean  @default(true)
-  user User @relation(fields: [userId], references: [id])
+  id       String   @id @default(uuid())
+  userId   String
+  token    String   @unique
+  platform String?
+  lastSeen DateTime @default(now())
+  enabled  Boolean  @default(true)
+  user     User     @relation(fields: [userId], references: [id])
 
   @@index([userId])
 }

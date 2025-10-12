@@ -2,12 +2,13 @@ import { Router } from "express";
 import { PrismaClient } from "@prisma/client";
 import { authenticate, authorize } from "../middleware/auth";
 import { sendPushAsync } from "../services/push";
+import { enforceDevice } from "../middleware/enforceDevice";
 
 const router = Router();
 
 const prisma = new PrismaClient();
 
-router.use(authenticate, authorize(["admin", "employee"]));
+router.use(authenticate, enforceDevice, authorize(["admin", "employee"]));
 
 router.post("/register", async (req, res) => {
   try {

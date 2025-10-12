@@ -14,10 +14,11 @@ import {
   updateCompletedPhotoUrlAppointmentById,
   editAppointment,
 } from "../controllers/appointment.controller";
+import { enforceDevice } from "../middleware/enforceDevice";
 
 const router = Router();
 
-router.use(authenticate, authorize(["admin", "employee"]));
+router.use(authenticate, enforceDevice, authorize(["admin", "employee"]));
 
 router.get("/all", getAllAppointments);
 router.get("/count/pending", getCountAppointmentPending);

@@ -5,10 +5,11 @@ import {
   getWorkingHours,
   getAllWorkingHours,
 } from "../controllers/workingHours.controller";
+import { enforceDevice } from "../middleware/enforceDevice";
 
 const router = Router();
 
-router.use("/", authenticate, authorize(["admin", "employee"]));
+router.use("/", authenticate, enforceDevice, authorize(["admin", "employee"]));
 router.post("/", setWorkingHours);
 router.get("/all", getAllWorkingHours);
 router.get("/:weekday", getWorkingHours);

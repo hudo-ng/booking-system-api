@@ -11,10 +11,11 @@ import {
   setWorkScheduleByUserId,
 } from "../controllers/workShift.controller";
 import { authenticate, authorize } from "../middleware/auth";
+import { enforceDevice } from "../middleware/enforceDevice";
 
 const router = Router();
 
-router.use(authenticate, authorize(["admin", "employee"]));
+router.use(authenticate, enforceDevice, authorize(["admin", "employee"]));
 router.get("/clock-history", getWorkShiftsByMonth);
 router.get("/full/clock-history", getWorkShiftsFull);
 router.post("/clock-in", clockIn);

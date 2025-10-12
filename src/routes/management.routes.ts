@@ -8,10 +8,11 @@ import {
   getAllNotification,
   getCleanSchedules,
 } from "../controllers/management.controller";
+import { enforceDevice } from "../middleware/enforceDevice";
 
 const router = Router();
 
-router.use(authenticate, authorize(["admin", "employee"]));
+router.use(authenticate, enforceDevice, authorize(["admin", "employee"]));
 router.get("/employees", getAllEmployees);
 router.put("/employees/edit", editEmployee);
 router.post("/employees/add", addEmployee);
