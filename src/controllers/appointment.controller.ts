@@ -1,9 +1,14 @@
 import { Request, Response } from "express";
 import { PrismaClient, AppointmentStatus } from "@prisma/client";
 import dayjs from "dayjs";
+import timezone from "dayjs/plugin/timezone";
+import utc from "dayjs/plugin/utc";
 
 const prisma = new PrismaClient();
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
+const TIMEZONE = "America/Chicago";
 export const getAppointments = async (req: Request, res: Response) => {
   const { userId, role } = (req as any).user as {
     userId: string;
@@ -319,45 +324,57 @@ export const getAllAppointmentsBySelectedDate = async (
   req: Request,
   res: Response
 ) => {
-  const { userId } = (req as any).user as { userId?: string };
-  if (!userId) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
+  try {
+    const { userId } = (req as any).user as { userId?: string };
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
-  // Query the current user
-  const currentUser = await prisma.user.findUnique({
-    where: { id: userId },
-  });
+    // Query current user
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+    });
 
-  if (!currentUser) {
-    return res.status(404).json({ error: "User not found" });
-  }
+    if (!currentUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
 
-  const { date } = req.query as { date?: string };
+    const { date } = req.query as { date?: string };
+    if (!date) {
+      return res
+        .status(400)
+        .json({ error: "Query parameter 'date' is required" });
+    }
 
-  if (!date) {
-    return res
-      .status(400)
-      .json({ error: "Query parameter 'date' is required" });
-  }
+    // ✅ Convert using San Antonio timezone (America/Chicago)
+    const startOfDay = dayjs.tz(date, TIMEZONE).startOf("day").utc().toDate();
+    const endOfDay = dayjs.tz(date, TIMEZONE).endOf("day").utc().toDate();
 
-  const startOfDay = dayjs(date).startOf("day").toDate();
-  const endOfDay = dayjs(date).endOf("day").toDate();
+    // Optional: Log for debugging in production
+    console.log({
+      date,
+      startOfDay: startOfDay.toISOString(),
+      endOfDay: endOfDay.toISOString(),
+    });
 
-  const appointments = await prisma.appointment.findMany({
-    where: {
-      startTime: { lte: endOfDay },
-      endTime: { gte: startOfDay },
-    },
-    orderBy: { startTime: "asc" },
-    include: {
-      employee: {
-        select: { id: true, name: true, colour: true },
+    const appointments = await prisma.appointment.findMany({
+      where: {
+        startTime: { lte: endOfDay },
+        endTime: { gte: startOfDay },
       },
-    },
-  });
+      orderBy: { startTime: "asc" },
+      include: {
+        employee: {
+          select: { id: true, name: true, colour: true },
+        },
+      },
+    });
 
-  return res.json(appointments);
+    return res.json(appointments);
+  } catch (err) {
+    console.error("Error fetching appointments:", err);
+    return res.status(500).json({ error: "Internal server error" });
+  }
 };
 
 export const getAppointmentById = async (req: Request, res: Response) => {
