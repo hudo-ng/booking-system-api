@@ -37,6 +37,8 @@ model User {
   WorkShift                WorkShift[]
   workingHours             WorkingHours[]
   Notification             Notification[]
+
+  RecurringSeries RecurringSeries[]
 }
 
 model CleanSchedule {
@@ -71,6 +73,10 @@ model Appointment {
   employee               User                    @relation(fields: [employeeId], references: [id])
   AppointmentAttachment  AppointmentAttachment[]
   AppointmentHistory     AppointmentHistory[]
+  seriesId               String?                 
+  occurrenceIndex        Int?                    
+  isException            Boolean                 @default(false)
+  RecurringSeries        RecurringSeries?        @relation(fields: [seriesId], references: [id])
 }
 
 model Notification {
@@ -181,6 +187,22 @@ model DeviceToken {
   @@index([userId])
 }
 
+model RecurringSeries {
+  id             String          @id @default(uuid())
+  employeeId     String
+  startDate      DateTime        
+  endDate        DateTime?       
+  frequency      RecurrenceFreq  
+  interval       Int             @default(1)
+  count          Int?            
+  byWeekday      Int[]          
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  employee       User            @relation(fields: [employeeId], references: [id])
+  appointments   Appointment[]  
+  isActive       Boolean         @default(true)
+}
+
 enum AppointmentStatus {
   pending
   accepted
@@ -190,4 +212,10 @@ enum AppointmentStatus {
 enum Role {
   admin
   employee
+}
+
+enum RecurrenceFreq {
+  daily
+  weekly
+  monthly
 }
