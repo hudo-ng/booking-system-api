@@ -8,6 +8,7 @@ import {
   updateAppointmentStatus,
   getAppointmentHistory,
   createAppointment,
+  createRecurringAppointments,
   getAllAppointmentsBySelectedDate,
   deleteAppointment,
   getCountAppointmentPending,
@@ -30,6 +31,7 @@ router.patch("/:id", updateAppointment);
 router.put("/completed", updateCompletedPhotoUrlAppointmentById);
 router.get("/:id", getAppointmentById);
 router.post("/create", createAppointment);
+router.post("/recurring", createRecurringAppointments);
 router.put("/edit", editAppointment);
 router.delete("/delete", deleteAppointment);
 

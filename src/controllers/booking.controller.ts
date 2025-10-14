@@ -8,7 +8,7 @@ import timezone from "dayjs/plugin/timezone";
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-const ZONE = "America/Edmonton";
+const ZONE = "America/Chicago";
 
 const prisma = new PrismaClient();
 

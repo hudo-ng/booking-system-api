@@ -3,6 +3,7 @@ import { PrismaClient, AppointmentStatus } from "@prisma/client";
 import dayjs from "dayjs";
 import timezone from "dayjs/plugin/timezone";
 import utc from "dayjs/plugin/utc";
+import { generateOccurrences } from "../utils/generateOccurrences";
 
 const prisma = new PrismaClient();
 dayjs.extend(utc);
@@ -555,5 +556,114 @@ export const getAppointmentHistory = async (req: Request, res: Response) => {
   } catch (err) {
     console.error("Failed to fetch appointment history:", err);
     res.status(500).json({ message: "Failed to fetch appointment history" });
+  }
+};
+
+export const createRecurringAppointments = async (req: Request, res: Response) => {
+  const { userId } = (req as any).user as { userId?: string };
+  if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+  try {
+    const {
+      employeeId,
+      customerName,
+      email,
+      phone,
+      detail,
+      startDate,       
+      startTime,       
+      endTime,         
+      frequency,       
+      interval = 1,    
+      count,           
+      endDate,         
+      byWeekday,  
+      quote_amount,
+      deposit_amount,
+      deposit_category,
+      extra_deposit_category,
+    } = req.body;
+
+    const series = await prisma.recurringSeries.create({
+      data: {
+        employeeId: employeeId ?? userId,
+        startDate: new Date(startDate),
+        endDate: endDate ? new Date(endDate) : null,
+        frequency,
+        interval,
+        count,
+        byWeekday,
+      },
+    });
+
+    const occurrences = generateOccurrences(
+      series,
+      startTime,
+      endTime,
+      "America/Chicago"
+    );
+
+    const validOccurrences: { start: Date; end: Date; }[] = [];
+    for (const occ of occurrences) {
+      const conflict = await prisma.appointment.findFirst({
+        where: {
+          employeeId,
+          status: "accepted",
+          startTime: { lt: occ.end },
+          endTime: { gt: occ.start },
+        },
+      });
+      if (!conflict) validOccurrences.push(occ);
+    }
+
+    const createdAppointments = await prisma.$transaction(async (tx) => {
+      return await Promise.all(
+        validOccurrences.map((occ, index) =>
+          tx.appointment.create({
+            data: {
+              employeeId: employeeId ?? userId,
+              customerName,
+              email,
+              phone,
+              detail,
+              status: "accepted",
+              startTime: occ.start,
+              endTime: occ.end,
+              quote_amount,
+              deposit_amount,
+              deposit_category,
+              extra_deposit_category,
+              seriesId: series.id,
+              occurrenceIndex: index + 1,
+            },
+          })
+        )
+      );
+    });
+
+    await prisma.notification.create({
+      data: {
+        created_by: userId,
+        title: "Created recurring appointments",
+        description: `Recurring (${frequency}) appointments for ${customerName}`,
+        customer_name: customerName || "No name provided",
+        quote_amount,
+        deposit_amount,
+        deposit_category,
+        extra_deposit_category,
+        appointment_start_time: new Date(startDate),
+        appointment_end_time: new Date(startDate),
+      },
+    });
+
+    res.status(201).json({
+      message: "Recurring appointments created",
+      seriesId: series.id,
+      createdCount: createdAppointments.length,
+      skippedCount: occurrences.length - validOccurrences.length,
+    });
+  } catch (error) {
+    console.error("Failed to create recurring appointments:", error);
+    res.status(500).json({ message: "Failed to create recurring appointments" });
   }
 };
