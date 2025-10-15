@@ -14,6 +14,8 @@ import {
   getCountAppointmentPending,
   updateCompletedPhotoUrlAppointmentById,
   editAppointment,
+  editRecurringAppointments,
+  deleteRecurringAppointments,
 } from "../controllers/appointment.controller";
 import { enforceDevice } from "../middleware/enforceDevice";
 
@@ -32,6 +34,8 @@ router.put("/completed", updateCompletedPhotoUrlAppointmentById);
 router.get("/:id", getAppointmentById);
 router.post("/create", createAppointment);
 router.post("/recurring", createRecurringAppointments);
+router.put("/recurring/:seriesId", editRecurringAppointments);
+router.delete("/recurring/:seriesId", deleteRecurringAppointments);
 router.put("/edit", editAppointment);
 router.delete("/delete", deleteAppointment);
 

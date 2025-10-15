@@ -559,7 +559,10 @@ export const getAppointmentHistory = async (req: Request, res: Response) => {
   }
 };
 
-export const createRecurringAppointments = async (req: Request, res: Response) => {
+export const createRecurringAppointments = async (
+  req: Request,
+  res: Response
+) => {
   const { userId } = (req as any).user as { userId?: string };
   if (!userId) return res.status(401).json({ message: "Unauthorized" });
 
@@ -570,14 +573,14 @@ export const createRecurringAppointments = async (req: Request, res: Response) =
       email,
       phone,
       detail,
-      startDate,       
-      startTime,       
-      endTime,         
-      frequency,       
-      interval = 1,    
-      count,           
-      endDate,         
-      byWeekday,  
+      startDate,
+      startTime,
+      endTime,
+      frequency,
+      interval = 1,
+      count,
+      endDate,
+      byWeekday,
       quote_amount,
       deposit_amount,
       deposit_category,
@@ -603,7 +606,7 @@ export const createRecurringAppointments = async (req: Request, res: Response) =
       "America/Chicago"
     );
 
-    const validOccurrences: { start: Date; end: Date; }[] = [];
+    const validOccurrences: { start: Date; end: Date }[] = [];
     for (const occ of occurrences) {
       const conflict = await prisma.appointment.findFirst({
         where: {
@@ -664,6 +667,181 @@ export const createRecurringAppointments = async (req: Request, res: Response) =
     });
   } catch (error) {
     console.error("Failed to create recurring appointments:", error);
-    res.status(500).json({ message: "Failed to create recurring appointments" });
+    res
+      .status(500)
+      .json({ message: "Failed to create recurring appointments" });
+  }
+};
+
+export const editRecurringAppointments = async (
+  req: Request,
+  res: Response
+) => {
+  const { seriesId } = req.params;
+  const { updateAll } = req.query;
+  const { userId } = (req as any).user as { userId: string };
+
+  const {
+    customerName,
+    detail,
+    startTime,
+    endTime,
+    frequency,
+    interval,
+    count,
+    byWeekday,
+  } = req.body;
+
+  try {
+    const series = await prisma.recurringSeries.findUnique({
+      where: { id: seriesId },
+      include: {
+        employee: { select: { id: true, name: true } },
+        appointments: true,
+      },
+    });
+
+    if (!series) return res.status(404).json({ message: "Series not found" });
+
+    const sampleAppt = series.appointments[0];
+    const custName = customerName ?? sampleAppt?.customerName ?? "Unknown";
+
+    if (updateAll === "true") {
+      await prisma.recurringSeries.update({
+        where: { id: seriesId },
+        data: { frequency, interval, count, byWeekday },
+      });
+    }
+
+    const targets =
+      updateAll === "true" ? series.appointments : [series.appointments[0]];
+
+    for (const appt of targets) {
+      await prisma.appointment.update({
+        where: { id: appt.id },
+        data: {
+          customerName: customerName ?? appt.customerName,
+          detail: detail ?? appt.detail,
+          startTime: startTime ? new Date(startTime) : appt.startTime,
+          endTime: endTime ? new Date(endTime) : appt.endTime,
+          isException: updateAll !== "true",
+        },
+      });
+    }
+
+    await prisma.notification.create({
+      data: {
+        created_by: userId,
+        title:
+          updateAll === "true"
+            ? "Recurring Series Updated"
+            : "Appointment Updated",
+        description:
+          updateAll === "true"
+            ? `All appointments for ${custName} were updated.`
+            : `${custName}'s single appointment was updated.`,
+        customer_name: custName,
+        quote_amount: sampleAppt?.quote_amount ?? 0,
+        deposit_amount: sampleAppt?.deposit_amount ?? 0,
+        deposit_category: sampleAppt?.deposit_category ?? "",
+        extra_deposit_category: sampleAppt?.extra_deposit_category ?? "",
+        appointment_start_time: sampleAppt?.startTime ?? new Date(),
+        appointment_end_time: sampleAppt?.endTime ?? new Date(),
+      },
+    });
+
+    return res.json({
+      message: `Updated ${targets.length} appointment(s)`,
+    });
+  } catch (error) {
+    console.error("❌ editRecurringAppointments error:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to update recurring appointments" });
+  }
+};
+
+export const deleteRecurringAppointments = async (
+  req: Request,
+  res: Response
+) => {
+  const { seriesId } = req.params;
+  const { deleteAll } = req.query;
+  const { userId } = (req as any).user as { userId: string };
+
+  try {
+    const series = await prisma.recurringSeries.findUnique({
+      where: { id: seriesId },
+      include: {
+        employee: { select: { id: true, name: true } },
+        appointments: true,
+      },
+    });
+
+    if (!series) {
+      return res.status(404).json({ message: "Series not found" });
+    }
+    const sampleAppt = series.appointments[0];
+    const customerName = sampleAppt?.customerName || "Unknown customer";
+
+    if (deleteAll === "true") {
+      await prisma.$transaction(async (tx) => {
+        await tx.appointment.deleteMany({ where: { seriesId } });
+        await tx.recurringSeries.update({
+          where: { id: seriesId },
+          data: { isActive: false },
+        });
+      });
+
+      await prisma.notification.create({
+        data: {
+          created_by: userId,
+          title: "Recurring Series Deleted",
+          description: `All appointments for ${customerName} were deleted.`,
+          customer_name: customerName,
+          quote_amount: sampleAppt?.quote_amount ?? 0,
+          deposit_amount: sampleAppt?.deposit_amount ?? 0,
+          deposit_category: sampleAppt?.deposit_category ?? "",
+          extra_deposit_category: sampleAppt?.extra_deposit_category ?? "",
+          appointment_start_time: sampleAppt?.startTime ?? new Date(),
+          appointment_end_time: sampleAppt?.endTime ?? new Date(),
+        },
+      });
+
+      return res.json({
+        message: "Recurring series deactivated and appointments deleted",
+      });
+    }
+
+    const upcoming = series.appointments
+      .filter((a) => a.startTime && dayjs(a.startTime).isAfter(dayjs()))
+      .sort((a, b) => a.startTime!.getTime() - b.startTime!.getTime())[0];
+
+    if (!upcoming) {
+      return res.status(404).json({ message: "No upcoming appointment found" });
+    }
+
+    await prisma.appointment.delete({ where: { id: upcoming.id } });
+
+    await prisma.notification.create({
+      data: {
+        created_by: userId,
+        title: "Deleted appointment occurrence",
+        description: `${customerName}'s single appointment was deleted.`,
+        customer_name: customerName,
+        quote_amount: upcoming.quote_amount ?? 0,
+        deposit_amount: upcoming.deposit_amount ?? 0,
+        deposit_category: upcoming.deposit_category ?? "",
+        extra_deposit_category: upcoming.extra_deposit_category ?? "",
+        appointment_start_time: upcoming.startTime ?? new Date(),
+        appointment_end_time: upcoming.endTime ?? new Date(),
+      },
+    });
+    return res.json({ message: "Deleted one occurrence" });
+  } catch (error) {
+    console.error("❌ deleteRecurringAppointments error:", error);
+    res
+      .status(500)
+      .json({ message: "Failed to delete recurring appointments" });
   }
 };
