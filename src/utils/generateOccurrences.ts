@@ -23,8 +23,8 @@ export function generateOccurrences(
     count?: number | null;
     byWeekday?: number[] | null;
   },
-  startTime: string,
-  endTime: string,
+  startTimeISO: string,
+  endTimeISO: string,
   tz: string
 ): Occurrence[] {
   const {
@@ -36,70 +36,94 @@ export function generateOccurrences(
     byWeekday,
   } = series;
 
-  const startOfSeries = dayjs.tz(startDate, tz).startOf("day");
-  const endBoundary = endDate ? dayjs.tz(endDate, tz).endOf("day") : null;
+  const baseStart = dayjs(startTimeISO).tz(tz, true);
+  const baseEnd = dayjs(endTimeISO).tz(tz, true);
 
-  const occurrences: Occurrence[] = [];
-  let current = startOfSeries.clone();
+  const seriesStartDay = dayjs.tz(startDate, tz).startOf("day");
+  const seriesEndDay = endDate ? dayjs.tz(endDate, tz).endOf("day") : null;
+  const now = dayjs().tz(tz);
+
+  const out: Occurrence[] = [];
+  let current = seriesStartDay.clone();
   let created = 0;
 
   while (true) {
     if (count && created >= count) break;
-    if (endBoundary && current.isAfter(endBoundary)) break;
+    if (seriesEndDay && current.isAfter(seriesEndDay)) break;
 
     if (
       frequency === "weekly" &&
       Array.isArray(byWeekday) &&
       byWeekday.length
     ) {
-      for (const weekday of byWeekday) {
-        const next = current.startOf("week").add(weekday, "day");
+      for (const wd of byWeekday) {
+        const next = current.startOf("week").add(wd, "day");
         const startDT = next
-          .hour(Number(startTime.split(":")[0]))
-          .minute(Number(startTime.split(":")[1]))
+          .hour(baseStart.hour())
+          .minute(baseStart.minute())
           .second(0);
         const endDT = next
-          .hour(Number(endTime.split(":")[0]))
-          .minute(Number(endTime.split(":")[1]))
+          .hour(baseEnd.hour())
+          .minute(baseEnd.minute())
           .second(0);
 
-        if (startDT.isSameOrAfter(startOfSeries)) {
-          occurrences.push({ start: startDT.toDate(), end: endDT.toDate() });
-          created++;
-          if (count && created >= count) break;
-        }
+        if (startDT.isBefore(seriesStartDay)) continue;
+        if (seriesEndDay && startDT.isAfter(seriesEndDay)) continue;
+
+        if (endDT.isBefore(now)) continue;
+
+        out.push({ start: startDT.toDate(), end: endDT.toDate() });
+        created++;
+        if (count && created >= count) break;
       }
       current = current.add(interval, "week");
-    } else if (frequency === "daily") {
-      const startDT = current
-        .hour(Number(startTime.split(":")[0]))
-        .minute(Number(startTime.split(":")[1]))
-        .second(0);
-      const endDT = current
-        .hour(Number(endTime.split(":")[0]))
-        .minute(Number(endTime.split(":")[1]))
-        .second(0);
-
-      occurrences.push({ start: startDT.toDate(), end: endDT.toDate() });
-      created++;
-      current = current.add(interval, "day");
-    } else if (frequency === "monthly") {
-      const startDT = current
-        .hour(Number(startTime.split(":")[0]))
-        .minute(Number(startTime.split(":")[1]))
-        .second(0);
-      const endDT = current
-        .hour(Number(endTime.split(":")[0]))
-        .minute(Number(endTime.split(":")[1]))
-        .second(0);
-
-      occurrences.push({ start: startDT.toDate(), end: endDT.toDate() });
-      created++;
-      current = current.add(interval, "month");
-    } else {
-      break;
+      continue;
     }
+
+    if (frequency === "daily") {
+      const startDT = current
+        .hour(baseStart.hour())
+        .minute(baseStart.minute())
+        .second(0);
+      const endDT = current
+        .hour(baseEnd.hour())
+        .minute(baseEnd.minute())
+        .second(0);
+
+      if (
+        !(seriesEndDay && startDT.isAfter(seriesEndDay)) &&
+        !endDT.isBefore(now)
+      ) {
+        out.push({ start: startDT.toDate(), end: endDT.toDate() });
+        created++;
+      }
+      current = current.add(interval, "day");
+      continue;
+    }
+
+    if (frequency === "monthly") {
+      const startDT = current
+        .hour(baseStart.hour())
+        .minute(baseStart.minute())
+        .second(0);
+      const endDT = current
+        .hour(baseEnd.hour())
+        .minute(baseEnd.minute())
+        .second(0);
+
+      if (
+        !(seriesEndDay && startDT.isAfter(seriesEndDay)) &&
+        !endDT.isBefore(now)
+      ) {
+        out.push({ start: startDT.toDate(), end: endDT.toDate() });
+        created++;
+      }
+      current = current.add(interval, "month");
+      continue;
+    }
+    break;
   }
 
-  return occurrences;
+  console.log("✅ generateOccurrences created", out.length, "items");
+  return out;
 }
