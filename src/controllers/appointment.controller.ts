@@ -48,6 +48,7 @@ export const createAppointment = async (req: Request, res: Response) => {
       deposit_amount,
       deposit_category,
       extra_deposit_category,
+      assignedById,
     } = req.body;
 
     // ✅ Validate time order
@@ -66,6 +67,7 @@ export const createAppointment = async (req: Request, res: Response) => {
     const newAppointment = await prisma.appointment.create({
       data: {
         employeeId: employeeId ? employeeId : userId,
+        assignedById: assignedById ?? userId,
         customerName,
         email,
         phone,
