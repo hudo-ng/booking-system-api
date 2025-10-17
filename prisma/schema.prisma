@@ -39,6 +39,8 @@ model User {
   Notification             Notification[]
 
   RecurringSeries RecurringSeries[]
+
+  Appointment Appointment[] @relation("AssignedBy")
 }
 
 model CleanSchedule {
@@ -77,6 +79,8 @@ model Appointment {
   occurrenceIndex        Int?                    
   isException            Boolean                 @default(false)
   RecurringSeries        RecurringSeries?        @relation(fields: [seriesId], references: [id])
+  assignedById    String?           // 👈 add this field
+  assignedBy      User?   @relation("AssignedBy", fields: [assignedById], references: [id])
 }
 
 model Notification {
