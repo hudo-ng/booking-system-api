@@ -91,7 +91,7 @@ export const editEmployee = async (req: Request, res: Response) => {
   }
 
   // Check if user is admin
-  if (!currentUser?.isAdmin) {
+  if (!currentUser?.isAdmin && !currentUser?.isOwner) {
     return res.status(403).json({ error: "You do not have permission" });
   }
 

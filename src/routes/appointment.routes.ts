@@ -16,6 +16,7 @@ import {
   editAppointment,
   editRecurringAppointments,
   deleteRecurringAppointments,
+  getAppointmentsByAssigneeAndDate,
 } from "../controllers/appointment.controller";
 import { enforceDevice } from "../middleware/enforceDevice";
 
@@ -38,5 +39,6 @@ router.put("/recurring/:seriesId", editRecurringAppointments);
 router.delete("/recurring/:seriesId", deleteRecurringAppointments);
 router.put("/edit", editAppointment);
 router.delete("/delete", deleteAppointment);
+router.get("/by-assignee/:assigneeId", getAppointmentsByAssigneeAndDate);
 
 export default router;
