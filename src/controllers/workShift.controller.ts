@@ -138,14 +138,14 @@ export const clockOut = async (req: Request, res: Response) => {
   const today = new Date();
   const clockInDate = new Date(activeShift.clockIn);
 
-  const isSameDay =
-    clockInDate.getFullYear() === today.getFullYear() &&
-    clockInDate.getMonth() === today.getMonth() &&
-    clockInDate.getDate() === today.getDate();
+  // const isSameDay =
+  //   clockInDate.getFullYear() === today.getFullYear() &&
+  //   clockInDate.getMonth() === today.getMonth() &&
+  //   clockInDate.getDate() === today.getDate();
 
-  if (!isSameDay) {
-    return res.status(400).json({ message: "Active shift is not from today" });
-  }
+  // if (!isSameDay) {
+  //   return res.status(400).json({ message: "Active shift is not from today" });
+  // }
 
   // ✅ Clock out
   const shift = await prisma.workShift.update({
