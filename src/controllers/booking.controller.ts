@@ -154,13 +154,17 @@ export const requestBooking = async (req: Request, res: Response) => {
 
     (async () => {
       try {
-        const admins = await prisma.user.findMany({
-          where: { role: { in: ["admin", "employee"] } },
+        // 1️⃣ Get all admins and receptionists
+        const relevantUsers = await prisma.user.findMany({
+          where: {
+            OR: [{ isOwner: true }, { isAdmin: true }, { is_reception: true }],
+          },
           select: { id: true },
         });
 
+        // 2️⃣ Combine with the selected employeeId
         const targetUserIds = Array.from(
-          new Set([employeeId, ...admins.map((a) => a.id)])
+          new Set([employeeId, ...relevantUsers.map((u) => u.id)])
         );
 
         const tokens = (
