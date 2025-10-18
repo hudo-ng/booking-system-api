@@ -269,9 +269,11 @@ export const assignUserToCleanSchedule = async (
   req: Request,
   res: Response
 ) => {
-  const { isOwner } = (req as any).user || {};
-  console.log("Assigning clean schedule, isOwner:", isOwner);
-  if (!isOwner) {
+  const currentUser = await prisma.user.findUnique({
+    where: { id: (req as any).user.userId },
+    select: { isOwner: true },
+  });
+  if (!currentUser?.isOwner) {
     return res
       .status(403)
       .json({ message: "Only owners can assign schedules" });

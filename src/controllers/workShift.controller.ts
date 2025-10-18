@@ -74,7 +74,7 @@ export const clockIn = async (req: Request, res: Response) => {
     return res.status(400).json({ message: "Location required" });
   }
 
-  // ✅ Check distance
+  // ✅ Check distance from allowed locations
   const distanceA = getDistanceFromLatLonInKm(
     latitude,
     longitude,
@@ -87,15 +87,17 @@ export const clockIn = async (req: Request, res: Response) => {
     29.51305,
     -98.551407
   );
+
   if (distanceB > 2 && distanceA > 2) {
     return res
       .status(403)
       .json({ message: "You are not within 2km of the expected location" });
   }
 
+  // ✅ Check for existing active shift
   const activeShift = await prisma.workShift.findFirst({
     where: { userId, clockOut: null },
-    orderBy: { clockIn: "desc" }, // ✅ get the latest one
+    orderBy: { clockIn: "desc" },
   });
 
   if (activeShift) {
@@ -110,9 +112,58 @@ export const clockIn = async (req: Request, res: Response) => {
     if (isSameDay) {
       return res.status(400).json({ message: "Already clocked in today" });
     }
-    // else: old shift without clockOut → let them start a new one
   }
 
+  // ✅ Get today's schedule
+  const today = new Date();
+  const dayOfWeek = today.getDay(); // 0=Sunday ... 6=Saturday
+
+  const schedule = await prisma.workSchedule.findFirst({
+    where: { userId, dayOfWeek },
+  });
+
+  if (!schedule) {
+    return res
+      .status(403)
+      .json({ message: "No work schedule found for today" });
+  }
+
+  // ✅ Create start and end times for today
+  let startTime = new Date(schedule.startTime);
+  let endTime = new Date(schedule.endTime);
+
+  startTime.setFullYear(today.getFullYear(), today.getMonth(), today.getDate());
+  endTime.setFullYear(today.getFullYear(), today.getMonth(), today.getDate());
+
+  // ✅ Explicitly block if start == end (off day or invalid)
+  if (startTime.getTime() === endTime.getTime()) {
+    return res.status(403).json({
+      message: "Clock-in not allowed — no scheduled shift for today.",
+    });
+  }
+
+  // ✅ Handle overnight shifts (end before start → next day)
+  if (endTime < startTime) {
+    endTime.setDate(endTime.getDate() + 1);
+  }
+
+  const now = today.getTime();
+
+  if (now < startTime.getTime() || now > endTime.getTime()) {
+    const startText = startTime.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    const endText = endTime.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return res.status(403).json({
+      message: `You can only clock in between ${startText} and ${endText}.`,
+    });
+  }
+
+  // ✅ Record clock-in
   const shift = await prisma.workShift.create({
     data: { userId, clockIn: new Date() },
   });
@@ -127,30 +178,30 @@ export const clockOut = async (req: Request, res: Response) => {
   // Find the latest active shift (not clocked out yet)
   const activeShift = await prisma.workShift.findFirst({
     where: { userId, clockOut: null },
-    orderBy: { clockIn: "desc" }, // ✅ latest shift
+    orderBy: { clockIn: "desc" }, // latest shift
   });
 
   if (!activeShift) {
     return res.status(400).json({ message: "Not clocked in" });
   }
 
-  // ✅ Check if clockIn is today
-  const today = new Date();
+  const now = new Date();
   const clockInDate = new Date(activeShift.clockIn);
 
-  // const isSameDay =
-  //   clockInDate.getFullYear() === today.getFullYear() &&
-  //   clockInDate.getMonth() === today.getMonth() &&
-  //   clockInDate.getDate() === today.getDate();
+  // Check if the shift is within the last 2 days
+  const twoDaysAgo = new Date(now);
+  twoDaysAgo.setDate(now.getDate() - 2);
 
-  // if (!isSameDay) {
-  //   return res.status(400).json({ message: "Active shift is not from today" });
-  // }
+  if (clockInDate < twoDaysAgo) {
+    return res
+      .status(400)
+      .json({ message: "Active shift is older than 2 days, cannot clock out" });
+  }
 
-  // ✅ Clock out
+  // Clock out
   const shift = await prisma.workShift.update({
     where: { id: activeShift.id },
-    data: { clockOut: new Date() },
+    data: { clockOut: now },
   });
 
   res.json({ message: "Clocked out successfully", shift });
@@ -159,9 +210,12 @@ export const clockOut = async (req: Request, res: Response) => {
 // ✅ Extend Shift (Owner only)
 export const extendShift = async (req: Request, res: Response) => {
   const { userId, date, newEndTime } = req.body;
-  const { isOwner } = (req as any).user;
+  const currentUser = await prisma.user.findUnique({
+    where: { id: (req as any).user.userId },
+    select: { isOwner: true },
+  });
 
-  if (!isOwner) {
+  if (!currentUser?.isOwner) {
     return res.status(403).json({ message: "Only owner can extend shifts" });
   }
 
@@ -196,12 +250,15 @@ export const editClockInAndClockOutTimeByShiftId = async (
   res: Response
 ) => {
   const { shiftId, newClockIn, newClockOut } = req.body;
-  const { isOwner } = (req as any).user;
+  const currentUser = await prisma.user.findUnique({
+    where: { id: (req as any).user.userId },
+    select: { isOwner: true },
+  });
 
-  if (!isOwner) {
+  if (!currentUser?.isOwner) {
     return res.status(403).json({ message: "Only owner can edit shifts" });
   }
-
+  console.log("Editing shift:", shiftId, newClockIn, newClockOut);
   try {
     const updatedShift = await prisma.workShift.update({
       where: { id: shiftId },
