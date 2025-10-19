@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import dayjs from "dayjs";
 import { getDistanceFromLatLonInKm } from "../utils/distance";
+import axios from "axios";
 
 const prisma = new PrismaClient();
 
@@ -451,4 +452,64 @@ export const setWorkScheduleByUserId = async (req: Request, res: Response) => {
   );
 
   res.json({ message: "Schedule updated", schedules: newSchedules });
+};
+
+export const getPiercingReport = async (req: Request, res: Response) => {
+  try {
+    const { startDate, endDate } = req.body;
+    console.log("Received dates:", startDate, endDate);
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({ message: "Missing startDate or endDate" });
+    }
+
+    const allData: any[] = [];
+
+    // Parse start and end dates safely (avoid timezone shifts)
+    const [startY, startM, startD] = startDate.split("-").map(Number);
+    const [endY, endM, endD] = endDate.split("-").map(Number);
+
+    const start = new Date(startY, startM - 1, startD); // month is 0-indexed
+    const end = new Date(endY, endM - 1, endD);
+    const current = new Date(start);
+
+    while (current <= end) {
+      // Format as MMDDYYYY
+      const formattedDate = `${(current.getMonth() + 1)
+        .toString()
+        .padStart(2, "0")}${current
+        .getDate()
+        .toString()
+        .padStart(2, "0")}${current.getFullYear()}`;
+
+      // Fetch data for this date
+      const response = await axios.post(
+        "https://hyperinkersform.com/api/fetching",
+        {
+          endDate: formattedDate,
+        }
+      );
+
+      if (response.data?.data) {
+        allData.push(...response.data.data);
+      }
+
+      console.log("Fetched data for date:", formattedDate);
+
+      // Move to next day
+      current.setDate(current.getDate() + 1);
+    }
+
+    // Filter only piercing items
+    const piercingData = allData.filter(
+      (item) =>
+        item.color === "piercing" &&
+        ["done", "paid"].includes(item?.status?.toLowerCase())
+    );
+
+    return res.json({ data: piercingData });
+  } catch (error: any) {
+    console.error("Error fetching piercing report:", error.message);
+    return res.status(500).json({ message: "Failed to fetch report" });
+  }
 };

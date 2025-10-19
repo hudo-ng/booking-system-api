@@ -4,6 +4,7 @@ import {
   clockOut,
   editClockInAndClockOutTimeByShiftId,
   extendShift,
+  getPiercingReport,
   getWorkSchedule,
   getWorkShifts,
   getWorkShiftsByMonth,
@@ -25,5 +26,6 @@ router.put("/edit-clockinout", editClockInAndClockOutTimeByShiftId);
 router.get("/", getWorkShifts);
 router.get("/schedule", getWorkSchedule);
 router.put("/schedule", setWorkScheduleByUserId);
+router.post("/piercing-report", getPiercingReport);
 
 export default router;
