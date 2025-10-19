@@ -19,7 +19,7 @@ export const setWorkingHours = async (req: Request, res: Response) => {
     return res.status(400).json({ message: "Invalid weekday (0–6 expected)" });
   }
 
-  if (!type || !["fixed", "interval", "custom"].includes(type)) {
+  if (!type || !["fixed", "interval", "custom", "off"].includes(type)) {
     return res.status(400).json({ message: "Invalid type" });
   }
 
@@ -75,6 +75,14 @@ export const setWorkingHours = async (req: Request, res: Response) => {
           intervalLength: type === "interval" ? interval ?? 60 : null,
           type,
         },
+      });
+    } else if (type === "off") {
+      await prisma.workingHours.deleteMany({
+        where: { employeeId: targetId, weekday },
+      });
+
+      await prisma.workingHours.create({
+        data: { employeeId: targetId, weekday, type: "off" },
       });
     }
 
