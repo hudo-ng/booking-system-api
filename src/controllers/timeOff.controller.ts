@@ -8,14 +8,14 @@ dayjs.extend(utc);
 dayjs.extend(timezone);
 
 const prisma = new PrismaClient();
-const ZONE = "America/Edmonton";
+const ZONE = "America/Chicago";
 
 export const setTimeOff = async (req: Request, res: Response) => {
   const { userId } = (req as any).user;
   const { date, reason } = req.body;
 
   const localStart = dayjs.tz(date, "YYYY-MM-DD", ZONE).startOf("day");
-  const storeUtc = localStart.utc().toDate();
+  const storeUtc = localStart.toDate();
 
   const start = localStart.utc();
   const end = localStart.add(1, "day").utc();
