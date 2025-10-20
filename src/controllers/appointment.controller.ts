@@ -4,6 +4,7 @@ import dayjs from "dayjs";
 import timezone from "dayjs/plugin/timezone";
 import utc from "dayjs/plugin/utc";
 import { generateOccurrences } from "../utils/generateOccurrences";
+import { sendSMS } from "../utils/sms";
 
 const prisma = new PrismaClient();
 dayjs.extend(utc);
@@ -286,23 +287,27 @@ export const getCountAppointmentPending = async (
 export const deleteAppointment = async (req: Request, res: Response) => {
   const { userId } = (req as any).user as { userId?: string };
   const { appointmentId } = req.query as { appointmentId?: string };
-  console.log("Deleting appointment with ID:", appointmentId);
+
   if (!userId) return res.status(401).json({ message: "Unauthorized" });
   if (!appointmentId)
     return res.status(400).json({ message: "Appointment ID required" });
 
   try {
-    // Delete appointment
+    // ✅ Step 1: Delete all attachments linked to this appointment
+    await prisma.appointmentAttachment.deleteMany({
+      where: { appointmentId },
+    });
+
+    // ✅ Step 2: Delete appointment itself
     const deletedAppointment = await prisma.appointment.delete({
       where: { id: appointmentId },
       include: { employee: { select: { id: true, name: true } } },
     });
 
-    // Create notification for deletion
+    // ✅ Step 3: Log deletion in notifications
     await prisma.notification.create({
       data: {
         created_by: userId,
-
         title: "Delete Appointment",
         description: deletedAppointment.detail || "Appointment deleted",
         customer_name: deletedAppointment.customerName,
@@ -316,7 +321,7 @@ export const deleteAppointment = async (req: Request, res: Response) => {
     });
 
     res.status(200).json({
-      message: "Appointment deleted",
+      message: "Appointment and attachments deleted",
       appointment: deletedAppointment,
     });
   } catch (error) {
@@ -454,7 +459,7 @@ export const updateAppointment = async (req: Request, res: Response) => {
   const { id } = req.params;
   const { startTime, endTime, status } = req.body;
 
-  const { userId, role } = (req as any).user as {
+  const { userId } = (req as any).user as {
     userId: string;
     role: string;
   };
@@ -490,16 +495,10 @@ export const updateAppointment = async (req: Request, res: Response) => {
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { name: true },
+    select: { name: true, phone_number: true },
   });
+
   if (!user) throw new Error("User not found");
-  const changedBy = user.name;
-  // await trackAppointmentHistory(
-  //   id,
-  //   appointment,
-  //   { startTime, endTime, status },
-  //   changedBy
-  // );
 
   try {
     const updated = await prisma.appointment.update({
@@ -510,6 +509,13 @@ export const updateAppointment = async (req: Request, res: Response) => {
         status,
       },
     });
+    // ✅ Send SMS if appointment is accepted
+    if (status === "accepted" && appointment.phone) {
+      const artistBody = `Your appointment with ${appointment.customerName} is confirmed. Look forward to take care your customer soon.`;
+      const customerBody = `Appointment accepted`;
+      await sendSMS(appointment.phone, customerBody);
+      await sendSMS(user.phone_number, artistBody);
+    }
     res.json(updated);
   } catch (err) {
     console.error("Update failed", err);

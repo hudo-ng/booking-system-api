@@ -13,6 +13,10 @@ export const listEmployees = async (_req: Request, res: Response) => {
       colour: true,
       slug: true,
       show_on_calendar_booking: true,
+      is_reception: true,
+      isOwner: true,
+      isAdmin: true,
+      email: true,
     },
   });
   res.json(employees);
