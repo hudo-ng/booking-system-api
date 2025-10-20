@@ -115,13 +115,13 @@ export const getWorkingHours = async (req: Request, res: Response) => {
 };
 
 export const getAllWorkingHours = async (req: Request, res: Response) => {
-  const { userId, isAdmin } = (req as any).user || {};
+  const { userId } = (req as any).user || {};
 
   const requestedEmployeeId = (
     req.query.employeeId as string | undefined
   )?.trim();
 
-  const idToQuery = isAdmin ? requestedEmployeeId : userId;
+  const idToQuery = requestedEmployeeId ?? userId;
 
   try {
     let hours = await prisma.workingHours.findMany({
