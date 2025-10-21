@@ -6,7 +6,7 @@ const twilioPhone = process.env.TWILIO_PHONE_NUMBER!;
 
 const client = twilio(accountSid, authToken);
 
-// ✅ Function to send SMS
+// ✅ send SMS
 export const sendSMS = async (to: string, body: string) => {
   try {
     await client.messages.create({
