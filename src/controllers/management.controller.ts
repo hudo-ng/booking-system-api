@@ -233,27 +233,25 @@ export const getCleanSchedules = async (req: Request, res: Response) => {
   try {
     const { userId } = (req as any).user as { userId?: string };
     console.log("Fetching clean schedules for user:", userId);
-    if (!userId) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
     let schedules = await prisma.cleanSchedule.findMany({
       include: { user: { select: { id: true, name: true, email: true } } },
-      orderBy: [{ userId: "asc" }, { weekday: "asc" }],
+      orderBy: [{ weekday: "asc" }, { shiftType: "asc" }],
     });
 
-    // ✅ If empty, create default 7-day schedules (no user assigned)
     if (schedules.length === 0) {
-      const defaultSchedules = Array.from({ length: 7 }, (_, i) => ({
-        weekday: i,
-        userId: userId,
+      const defaultSchedules = Array.from({ length: 7 * 2 }, (_, i) => ({
+        weekday: i % 7,
+        shiftType: i < 7 ? "day" : "night",
+        userId: "",
       }));
 
       await prisma.cleanSchedule.createMany({ data: defaultSchedules });
 
-      // fetch again with fresh data
       schedules = await prisma.cleanSchedule.findMany({
         include: { user: { select: { id: true, name: true, email: true } } },
-        orderBy: [{ userId: "asc" }, { weekday: "asc" }],
+        orderBy: [{ weekday: "asc" }, { shiftType: "asc" }],
       });
     }
 
@@ -264,7 +262,6 @@ export const getCleanSchedules = async (req: Request, res: Response) => {
   }
 };
 
-// ✅ Assign or edit clean schedule
 export const assignUserToCleanSchedule = async (
   req: Request,
   res: Response
@@ -273,32 +270,36 @@ export const assignUserToCleanSchedule = async (
     where: { id: (req as any).user.userId },
     select: { isOwner: true },
   });
+
   if (!currentUser?.isOwner) {
     return res
       .status(403)
       .json({ message: "Only owners can assign schedules" });
   }
 
-  let { userId, weekdays } = req.body;
+  let { userId, weekdays, shiftType = "day" } = req.body;
   console.log("Received schedule assignment:", req.body);
 
-  // Normalize weekdays → always array of numbers
   if (!userId || weekdays === undefined) {
     return res.status(400).json({ message: "Invalid input" });
   }
-  if (!Array.isArray(weekdays)) {
-    weekdays = [Number(weekdays)]; // convert single value like "0" → [0]
-  } else {
-    weekdays = weekdays.map((w: any) => Number(w));
-  }
+
+  const days = Array.isArray(weekdays)
+    ? weekdays.map((w: any) => Number(w))
+    : [Number(weekdays)];
+
+  const systemUser = await prisma.user.findUnique({
+    where: { email: "default@system.com" },
+  });
+  if (!systemUser) throw new Error("System user missing! Please create one.");
 
   try {
-    // Ensure default schedule exists (7 days, userId empty if not already created)
     const count = await prisma.cleanSchedule.count();
-    if (count < 7) {
-      const defaultData = Array.from({ length: 7 }, (_, i) => ({
-        weekday: i,
-        userId: "", // empty string for unassigned
+    if (count < 14) {
+      const defaultData = Array.from({ length: 14 }, (_, i) => ({
+        weekday: i % 7,
+        shiftType: i < 7 ? "day" : "night",
+        userId: systemUser.id,
       }));
       await prisma.cleanSchedule.createMany({
         data: defaultData,
@@ -306,15 +307,17 @@ export const assignUserToCleanSchedule = async (
       });
     }
 
-    // Update schedules by replacing userId on matching weekdays
-    for (const day of weekdays) {
-      await prisma.cleanSchedule.updateMany({
-        where: { weekday: day },
-        data: { userId },
+    for (const day of days) {
+      await prisma.cleanSchedule.deleteMany({
+        where: { weekday: day, shiftType },
+      });
+
+      await prisma.cleanSchedule.create({
+        data: { weekday: day, shiftType, userId },
       });
     }
 
-    res.json({ message: "Clean schedule updated successfully" });
+    res.json({ message: `Clean schedule (${shiftType}) updated successfully` });
   } catch (err) {
     console.error("Error assigning clean schedule:", err);
     res.status(500).json({ message: "Failed to update clean schedule" });

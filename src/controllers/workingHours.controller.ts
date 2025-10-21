@@ -23,7 +23,7 @@ export const setWorkingHours = async (req: Request, res: Response) => {
     return res.status(400).json({ message: "Invalid type" });
   }
 
-  const targetId = isAdmin ? employeeId : userId;
+  const targetId = employeeId ?? userId;
 
   try {
     await prisma.workingHours.deleteMany({

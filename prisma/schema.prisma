@@ -45,10 +45,11 @@ model CleanSchedule {
   id        String   @id @default(uuid())
   userId    String
   weekday   Int
+  shiftType String @default("day")
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id])
 
-  @@unique([userId, weekday])
+  @@unique([userId, weekday, shiftType])
 }
 
 model Appointment {
