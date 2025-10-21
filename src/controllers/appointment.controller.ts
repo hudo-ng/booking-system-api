@@ -4,7 +4,7 @@ import dayjs from "dayjs";
 import timezone from "dayjs/plugin/timezone";
 import utc from "dayjs/plugin/utc";
 import { generateOccurrences } from "../utils/generateOccurrences";
-import { sendSMS } from "../utils/sms";
+// import { sendSMS } from "../utils/sms";
 
 const prisma = new PrismaClient();
 dayjs.extend(utc);
@@ -510,12 +510,12 @@ export const updateAppointment = async (req: Request, res: Response) => {
       },
     });
     // ✅ Send SMS if appointment is accepted
-    if (status === "accepted" && appointment.phone) {
-      const artistBody = `Your appointment with ${appointment.customerName} is confirmed. Look forward to take care your customer soon.`;
-      const customerBody = `Appointment accepted`;
-      await sendSMS(appointment.phone, customerBody);
-      await sendSMS(user.phone_number, artistBody);
-    }
+    // if (status === "accepted" && appointment.phone) {
+    //   const artistBody = `Your appointment with ${appointment.customerName} is confirmed. Look forward to take care your customer soon.`;
+    //   const customerBody = `Appointment accepted`;
+    //   await sendSMS(appointment.phone, customerBody);
+    //   await sendSMS(user.phone_number, artistBody);
+    // }
     res.json(updated);
   } catch (err) {
     console.error("Update failed", err);
