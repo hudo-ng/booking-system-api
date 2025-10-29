@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
 import slugify from "slugify";
 import { customAlphabet } from "nanoid";
+import { sendSMS } from "../utils/sms";
 
 const prisma = new PrismaClient();
 
@@ -321,5 +322,32 @@ export const assignUserToCleanSchedule = async (
   } catch (err) {
     console.error("Error assigning clean schedule:", err);
     res.status(500).json({ message: "Failed to update clean schedule" });
+  }
+};
+
+export const releaseSms = async (req: Request, res: Response) => {
+  try {
+    const { phone, text } = req.body;
+
+    // ✅ Validate input
+    if (!phone || !text) {
+      return res.status(400).json({
+        message: "Phone number and text message are required.",
+      });
+    }
+
+    // ✅ Send SMS using your helper
+    const result = await sendSMS(phone, text);
+
+    return res.status(200).json({
+      message: "SMS sent successfully.",
+      result,
+    });
+  } catch (error: any) {
+    console.error("Error sending SMS:", error);
+    return res.status(500).json({
+      message: "Failed to send SMS.",
+      error: error.message || error,
+    });
   }
 };

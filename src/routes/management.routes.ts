@@ -7,6 +7,7 @@ import {
   getAllEmployees,
   getAllNotification,
   getCleanSchedules,
+  releaseSms,
 } from "../controllers/management.controller";
 import { enforceDevice } from "../middleware/enforceDevice";
 
@@ -20,4 +21,5 @@ router.get("/notification/all", getAllNotification);
 router.get("/employees", getAllEmployees);
 router.get("/clean-schedule", getCleanSchedules);
 router.put("/clean-schedule/edit", assignUserToCleanSchedule);
+router.post("/sms/release", releaseSms);
 export default router;
