@@ -9,7 +9,7 @@ dayjs.extend(timezone);
 
 const prisma = new PrismaClient();
 
-const ZONE = "America/Edmonton";
+const ZONE = "America/Chicago";
 
 export const getAvailability = async (req: Request, res: Response) => {
   const { id: employeeId } = req.params;
@@ -62,6 +62,15 @@ export const getAvailability = async (req: Request, res: Response) => {
 
   const availableSlots: { start: string; end: string }[] = [];
 
+  function overlaps(
+    aStart: dayjs.Dayjs,
+    aEnd: dayjs.Dayjs,
+    bStart: dayjs.Dayjs,
+    bEnd: dayjs.Dayjs
+  ) {
+    return aStart.isBefore(bEnd) && bStart.isBefore(aEnd);
+  }
+
   for (const interval of hours) {
     const { type } = interval;
     if (!interval.startTime || !interval.endTime) continue;
@@ -74,13 +83,19 @@ export const getAvailability = async (req: Request, res: Response) => {
       const slotStartUtc = baseStart.utc();
       const slotEndUtc = baseEnd.utc();
 
+      const hasConflict = appts.some((a) => {
+        const apptStart = dayjs(a.startTime).utc();
+        const apptEnd = dayjs(a.endTime).utc();
+        return slotStartUtc.isBefore(apptEnd) && apptStart.isBefore(slotEndUtc);
+      });
+
       if (
         slotStartUtc.isAfter(dayjs.utc()) &&
-        !occupied.has(slotStartUtc.toISOString())
+        !hasConflict
       ) {
         availableSlots.push({
-          start: slotStartUtc.toISOString(), // e.g., 2025-09-25T16:00:00.000Z (9am PT)
-          end: slotEndUtc.toISOString(), // e.g., 2025-09-25T19:00:00.000Z (12pm PT)
+          start: slotStartUtc.toISOString(),
+          end: slotEndUtc.toISOString(),
         });
       }
       continue;
