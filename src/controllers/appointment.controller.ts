@@ -153,7 +153,7 @@ export const editAppointment = async (req: Request, res: Response) => {
       where: { id },
       data: {
         employeeId,
-        assignedById: assignedById ?? employeeId,
+
         customerName,
         email,
         phone,
