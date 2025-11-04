@@ -378,6 +378,9 @@ export const getAllAppointmentsBySelectedDate = async (
         employee: {
           select: { id: true, name: true, colour: true },
         },
+        assignedBy: {
+          select: { id: true, name: true, colour: true },
+        },
       },
     });
 
