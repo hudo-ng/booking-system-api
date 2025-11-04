@@ -5,6 +5,7 @@ import {
   editClockInAndClockOutTimeByShiftId,
   extendShift,
   getPiercingReport,
+  getTattooReport,
   getWorkSchedule,
   getWorkShifts,
   getWorkShiftsByMonth,
@@ -27,5 +28,6 @@ router.get("/", getWorkShifts);
 router.get("/schedule", getWorkSchedule);
 router.put("/schedule", setWorkScheduleByUserId);
 router.post("/piercing-report", getPiercingReport);
+router.post("/tattoo-report", getTattooReport);
 
 export default router;
