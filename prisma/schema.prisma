@@ -45,8 +45,8 @@ model CleanSchedule {
   id        String   @id @default(uuid())
   userId    String
   weekday   Int
-  shiftType String @default("day")
   createdAt DateTime @default(now())
+  shiftType String   @default("day")
   user      User     @relation(fields: [userId], references: [id])
 
   @@unique([userId, weekday, shiftType])
@@ -146,6 +146,13 @@ model TimeOff {
   date       DateTime
   reason     String?
   employee   User     @relation(fields: [employeeId], references: [id])
+  status      TimeOffStatus   @default(PENDING)
+  batchId     String?
+  createdAt   DateTime        @default(now())
+  reviewedAt  DateTime?
+  reviewedBy  String?
+
+  @@unique([employeeId, date])
 }
 
 model WorkSchedule {
@@ -222,3 +229,9 @@ enum RecurrenceFreq {
   weekly
   monthly
 }
+
+enum TimeOffStatus {
+  PENDING
+  APPROVED
+  REJECTED
+ }
