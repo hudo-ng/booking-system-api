@@ -51,6 +51,7 @@ export const createAppointment = async (req: Request, res: Response) => {
       deposit_category,
       extra_deposit_category,
       assignedById,
+      is_sms_released,
     } = req.body;
 
     // ✅ Validate time order
@@ -86,6 +87,9 @@ export const createAppointment = async (req: Request, res: Response) => {
         employee: {
           select: { id: true, name: true },
         },
+        assignedBy: {
+          select: { id: true, name: true },
+        },
       },
     });
 
@@ -104,6 +108,19 @@ export const createAppointment = async (req: Request, res: Response) => {
         appointment_end_time: endTime ? new Date(endTime) : new Date(),
       },
     });
+
+    if (is_sms_released) {
+      const customerBody = `Thank you for choosing Hyper Inkers! Your appointment has been scheduled ${
+        newAppointment.assignedBy?.name
+          ? "by " + newAppointment.assignedBy?.name
+          : ""
+      } with Artist: ${newAppointment.employee.name} on ${dayjs(
+        newAppointment.startTime
+      ).format("MMM DD YYYY HH:mm")}. Deposit: ${
+        newAppointment.deposit_amount
+      } USD`;
+      await sendSMS(phone, customerBody);
+    }
 
     res.status(201).json(newAppointment);
   } catch (error) {
@@ -134,8 +151,9 @@ export const editAppointment = async (req: Request, res: Response) => {
       deposit_category,
       extra_deposit_category,
       assignedById,
+      is_sms_released,
     } = req.body;
-    console.log("Editing appointment with ID:", id);
+
     // ✅ Validate time order
     if (startTime && endTime) {
       const start = new Date(startTime);
@@ -146,52 +164,73 @@ export const editAppointment = async (req: Request, res: Response) => {
           .json({ message: "End time must be after start time" });
       }
     }
+    // ✅ Build update object ONLY with provided values
+    const data: any = {};
+    const fields = {
+      assignedById,
+      employeeId,
+      customerName,
+      email,
+      phone,
+      detail,
+      quote_amount,
+      deposit_amount,
+      deposit_category,
+      extra_deposit_category,
+    };
 
-    // ✅ Update Appointment
+    // ✅ Add only non-undefined fields
+    const fieldKeys = Object.keys(fields) as (keyof typeof fields)[];
+    for (const key of fieldKeys) {
+      const value = fields[key];
+      if (value !== undefined) {
+        data[key] = value;
+      }
+    }
 
+    // ✅ Convert times only when provided
+    if (startTime !== undefined)
+      data.startTime = startTime ? new Date(startTime) : null;
+    if (endTime !== undefined)
+      data.endTime = endTime ? new Date(endTime) : null;
+
+    // ✅ Run the update
     const updated = await prisma.appointment.update({
       where: { id },
-      data: {
-        employeeId,
-
-        customerName,
-        email,
-        phone,
-        detail,
-        startTime: startTime ? new Date(startTime) : null,
-        endTime: endTime ? new Date(endTime) : null,
-        quote_amount,
-        deposit_amount,
-        deposit_category,
-        extra_deposit_category,
-      },
+      data,
       include: {
         employee: { select: { id: true, name: true } },
       },
     });
-    if (updated) {
-      // ✅ Optional: Log edit as notification
-      await prisma.notification.create({
-        data: {
-          created_by: userId,
-          description: detail ? detail : "No description provided",
-          title: "edit appointment",
-          customer_name: customerName ? customerName : "No name provided",
-          quote_amount,
-          deposit_amount,
-          deposit_category,
-          extra_deposit_category,
-          appointment_start_time: startTime ? new Date(startTime) : new Date(),
-          appointment_end_time: endTime ? new Date(endTime) : new Date(),
-        },
-      });
 
-      res.json(updated);
-    } else {
-      return res
-        .status(400)
-        .json({ message: "End time must be after start time" });
+    // ✅ Create notification
+    await prisma.notification.create({
+      data: {
+        created_by: userId,
+        description: detail ? detail : "No description provided",
+        title: "edit appointment",
+        customer_name: customerName ? customerName : "No name provided",
+        quote_amount,
+        deposit_amount,
+        deposit_category,
+        extra_deposit_category,
+        appointment_start_time: startTime ? new Date(startTime) : new Date(),
+        appointment_end_time: endTime ? new Date(endTime) : new Date(),
+      },
+    });
+
+    // ✅ Send SMS if requested
+    if (is_sms_released && updated.phone) {
+      const customerBody = `Your appointment with ${
+        updated.employee.name
+      } has been re-scheduled to ${dayjs(updated.startTime).format(
+        "MMM DD YYYY HH:mm"
+      )}.\nText (210) 997-9737 or your artist to reschedule when you’re ready`;
+
+      await sendSMS(updated.phone, customerBody);
     }
+
+    return res.json(updated);
   } catch (error) {
     console.error("❌ Failed to edit appointment:", error);
     res.status(500).json({ message: "Failed to edit appointment" });
@@ -287,8 +326,11 @@ export const getCountAppointmentPending = async (
 
 export const deleteAppointment = async (req: Request, res: Response) => {
   const { userId } = (req as any).user as { userId?: string };
-  const { appointmentId } = req.query as { appointmentId?: string };
-
+  const { appointmentId, issendSMS } = req.query as {
+    appointmentId?: string;
+    issendSMS: string;
+  };
+  const is_sms_released = issendSMS === "true" ? true : false;
   if (!userId) return res.status(401).json({ message: "Unauthorized" });
   if (!appointmentId)
     return res.status(400).json({ message: "Appointment ID required" });
@@ -305,6 +347,13 @@ export const deleteAppointment = async (req: Request, res: Response) => {
       include: { employee: { select: { id: true, name: true } } },
     });
 
+    if (is_sms_released) {
+      const customerBody = `Your appointment on ${dayjs(
+        deletedAppointment.startTime
+      )} with ${deletedAppointment.employee.name} has been canceled.
+Text (210) 997-9737 or your artist to reschedule when you’re ready`;
+      await sendSMS(deletedAppointment.phone, customerBody);
+    }
     // ✅ Step 3: Log deletion in notifications
     await prisma.notification.create({
       data: {
