@@ -32,6 +32,7 @@ export const getAvailability = async (req: Request, res: Response) => {
     where: {
       employeeId,
       date: { gte: startOfDayUtc, lt: endOfDayUtc },
+      status: "APPROVED",
     },
   });
   if (isOff) return res.json([]);
@@ -89,10 +90,7 @@ export const getAvailability = async (req: Request, res: Response) => {
         return slotStartUtc.isBefore(apptEnd) && apptStart.isBefore(slotEndUtc);
       });
 
-      if (
-        slotStartUtc.isAfter(dayjs.utc()) &&
-        !hasConflict
-      ) {
+      if (slotStartUtc.isAfter(dayjs.utc()) && !hasConflict) {
         availableSlots.push({
           start: slotStartUtc.toISOString(),
           end: slotEndUtc.toISOString(),
