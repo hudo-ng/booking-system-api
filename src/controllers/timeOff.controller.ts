@@ -35,6 +35,25 @@ export const setTimeOff = async (req: Request, res: Response) => {
   res.json(entry);
 };
 
+export const getTimeOffAll = async (req: Request, res: Response) => {
+  const { role } = (req as any).user;
+
+  if (role !== "admin")
+    return res.status(403).json({ message: "Unauthorized" });
+
+  const offs = await prisma.timeOff.findMany({
+    where: { status: "PENDING" },
+    include: {
+      employee: {
+        select: { name: true, email: true, id: true },
+      },
+    },
+    orderBy: { date: "desc" },
+  });
+
+  res.json(offs);
+};
+
 export const getTimeOffWithFilter = async (req: Request, res: Response) => {
   const { userId } = (req as any).user;
   const { status } = req.query as {
@@ -113,7 +132,7 @@ export const setTimeOffBulk = async (req: Request, res: Response) => {
 
 export const setTimeOffStatus = async (req: Request, res: Response) => {
   const { role, userId: reviewerId } = (req as any).user;
-  if (role !== "ADMIN") return res.status(403).json({ message: "Forbidden" });
+  if (role !== "admin") return res.status(403).json({ message: "Forbidden" });
 
   const { id } = req.params;
   const { status } = req.body as { status: "APPROVED" | "REJECTED" };
@@ -131,7 +150,7 @@ export const setTimeOffStatus = async (req: Request, res: Response) => {
 
 export const setTimeOffBatchStatus = async (req: Request, res: Response) => {
   const { role, userId: reviewerId } = (req as any).user;
-  if (role !== "ADMIN") return res.status(403).json({ message: "Forbidden" });
+  if (role !== "admin") return res.status(403).json({ message: "Forbidden" });
 
   const { batchId } = req.params;
   const { status } = req.body as { status: "APPROVED" | "REJECTED" };

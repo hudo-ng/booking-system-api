@@ -6,6 +6,7 @@ import {
   setTimeOffBulk,
   setTimeOffStatus,
   setTimeOffBatchStatus,
+  getTimeOffAll,
 } from "../controllers/timeOff.controller";
 import { enforceDevice } from "../middleware/enforceDevice";
 
@@ -14,6 +15,7 @@ const router = Router();
 router.use(authenticate, enforceDevice, authorize(["admin", "employee"]));
 router.post("/bulk", setTimeOffBulk);
 router.get("/", getTimeOffWithFilter);
+router.get("/all", getTimeOffAll);
 router.patch("/:id/status", setTimeOffStatus);
 router.patch("/batch/:batchId/status", setTimeOffBatchStatus);
 router.post("/", setTimeOff);
