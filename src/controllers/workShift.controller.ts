@@ -3,6 +3,11 @@ import { PrismaClient } from "@prisma/client";
 import dayjs from "dayjs";
 import { getDistanceFromLatLonInKm } from "../utils/distance";
 import axios from "axios";
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
 
 const prisma = new PrismaClient();
 
@@ -90,34 +95,29 @@ export const clockIn = async (req: Request, res: Response) => {
   );
 
   if (distanceB > 2 && distanceA > 2) {
-    return res
-      .status(403)
-      .json({ message: "You are not within 2km of the expected location" });
+    return res.status(403).json({
+      message: "You are not within 2km of the expected location",
+    });
   }
 
-  // ✅ Check for existing active shift
+  // ✅ Check active shift
   const activeShift = await prisma.workShift.findFirst({
     where: { userId, clockOut: null },
     orderBy: { clockIn: "desc" },
   });
 
   if (activeShift) {
-    const clockInDate = new Date(activeShift.clockIn);
-    const today = new Date();
+    const lastClockIn = dayjs(activeShift.clockIn).tz("America/Chicago");
+    const nowChicago = dayjs().tz("America/Chicago");
 
-    const isSameDay =
-      clockInDate.getFullYear() === today.getFullYear() &&
-      clockInDate.getMonth() === today.getMonth() &&
-      clockInDate.getDate() === today.getDate();
-
-    if (isSameDay) {
+    if (lastClockIn.isSame(nowChicago, "day")) {
       return res.status(400).json({ message: "Already clocked in today" });
     }
   }
 
-  // ✅ Get today's schedule
-  const today = new Date();
-  const dayOfWeek = today.getDay(); // 0=Sunday ... 6=Saturday
+  // ✅ Get today's Chicago date
+  const nowChicago = dayjs().tz("America/Chicago");
+  const dayOfWeek = nowChicago.day();
 
   const schedule = await prisma.workSchedule.findFirst({
     where: { userId, dayOfWeek },
@@ -129,47 +129,54 @@ export const clockIn = async (req: Request, res: Response) => {
       .json({ message: "No work schedule found for today" });
   }
 
-  // ✅ Create start and end times for today
-  let startTime = new Date(schedule.startTime);
-  let endTime = new Date(schedule.endTime);
+  // ✅ Convert schedule times (UTC in DB) → Chicago time
+  let startTime = dayjs(schedule.startTime).tz("America/Chicago");
+  let endTime = dayjs(schedule.endTime).tz("America/Chicago");
 
-  startTime.setFullYear(today.getFullYear(), today.getMonth(), today.getDate());
-  endTime.setFullYear(today.getFullYear(), today.getMonth(), today.getDate());
+  // ✅ Apply today's date to both times
+  startTime = startTime
+    .year(nowChicago.year())
+    .month(nowChicago.month())
+    .date(nowChicago.date());
 
-  // ✅ Explicitly block if start == end (off day or invalid)
-  if (startTime.getTime() === endTime.getTime()) {
+  endTime = endTime
+    .year(nowChicago.year())
+    .month(nowChicago.month())
+    .date(nowChicago.date());
+
+  // ✅ Off-day case (if start === end)
+  if (startTime.valueOf() === endTime.valueOf()) {
     return res.status(403).json({
       message: "Clock-in not allowed — no scheduled shift for today.",
     });
   }
 
-  // ✅ Handle overnight shifts (end before start → next day)
-  if (endTime < startTime) {
-    endTime.setDate(endTime.getDate() + 1);
+  // ✅ Handle overnight shifts
+  if (endTime.isBefore(startTime)) {
+    endTime = endTime.add(1, "day");
   }
 
-  const now = today.getTime();
-
-  if (now < startTime.getTime() || now > endTime.getTime()) {
-    const startText = startTime.toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-    const endText = endTime.toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+  // ✅ Compare now to schedule window
+  if (nowChicago.isBefore(startTime) || nowChicago.isAfter(endTime)) {
     return res.status(403).json({
-      message: `You can only clock in between ${startText} and ${endText}.`,
+      message: `You can only clock in between ${startTime.format(
+        "h:mm A"
+      )} and ${endTime.format("h:mm A")} Chicago time.`,
     });
   }
 
-  // ✅ Record clock-in
+  // ✅ Clock in
   const shift = await prisma.workShift.create({
-    data: { userId, clockIn: new Date() },
+    data: {
+      userId,
+      clockIn: nowChicago.toDate(), // ✅ store Chicago-adjusted time
+    },
   });
 
-  res.json({ message: "Clocked in successfully", shift });
+  return res.json({
+    message: "Clocked in successfully",
+    shift,
+  });
 };
 
 // ✅ Clock Out
