@@ -102,6 +102,19 @@ model Notification {
   @@map("notifications")
 }
 
+model MiniPhoto {
+  id                     String   @id @default(uuid())
+  custom_id              String   @unique
+  photo_url              String
+  style                  String
+  category               String
+  is_showed              Boolean  @default(false)
+  updated_at             DateTime @updatedAt @map("updated_at")
+  created_at             DateTime @default(now()) @map("created_at")
+  created_by             String
+
+}
+
 model AppointmentAttachment {
   id            String      @id @default(uuid())
   appointmentId String

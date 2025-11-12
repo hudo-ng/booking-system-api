@@ -351,3 +351,85 @@ export const releaseSms = async (req: Request, res: Response) => {
     });
   }
 };
+
+export const getAllMiniPhoto = async (req: Request, res: Response) => {
+  try {
+    const photos = await prisma.miniPhoto.findMany({
+      orderBy: { created_at: "desc" },
+    });
+    res.json(photos);
+  } catch (error) {
+    console.error("Failed to fetch mini photos:", error);
+    res.status(500).json({ message: "Failed to fetch mini photos" });
+  }
+};
+
+export const createMiniPhoto = async (req: Request, res: Response) => {
+  try {
+    const { custom_key, photo_url, style, created_by, is_showed } = req.body;
+
+    if (!custom_key || !photo_url || !created_by) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    // find the largest custom_id that starts with the given key (e.g., "A")
+    const latestPhoto = await prisma.miniPhoto.findFirst({
+      where: { custom_id: { startsWith: custom_key } },
+      orderBy: { custom_id: "desc" },
+    });
+
+    // compute next number (A1, A2, A3, etc.)
+    let nextNumber = 1;
+    if (latestPhoto) {
+      const match = latestPhoto.custom_id.match(/\d+$/);
+      if (match) nextNumber = parseInt(match[0]) + 1;
+    }
+
+    const newCustomId = `${custom_key}${nextNumber}`;
+
+    const newPhoto = await prisma.miniPhoto.create({
+      data: {
+        custom_id: newCustomId,
+        photo_url,
+        style,
+        category: "",
+        created_by,
+        is_showed: is_showed ?? false,
+      },
+    });
+
+    res.status(201).json(newPhoto);
+  } catch (error) {
+    console.error("Failed to create mini photo:", error);
+    res.status(500).json({ message: "Failed to create mini photo" });
+  }
+};
+
+export const updateMiniPhoto = async (req: Request, res: Response) => {
+  try {
+    const { id, is_showed, category, style, photo_url } = req.body;
+
+    if (!id) return res.status(400).json({ message: "Missing id" });
+
+    // build partial update object (only include provided fields)
+    const dataToUpdate: any = {};
+    if (typeof is_showed !== "undefined") dataToUpdate.is_showed = is_showed;
+    if (typeof category !== "undefined") dataToUpdate.category = category;
+    if (typeof style !== "undefined") dataToUpdate.style = style;
+    if (typeof photo_url !== "undefined") dataToUpdate.photo_url = photo_url;
+
+    if (Object.keys(dataToUpdate).length === 0) {
+      return res.status(400).json({ message: "No fields to update" });
+    }
+
+    const updated = await prisma.miniPhoto.update({
+      where: { id },
+      data: dataToUpdate,
+    });
+
+    res.json(updated);
+  } catch (error) {
+    console.error("Failed to update mini photo:", error);
+    res.status(500).json({ message: "Failed to update mini photo" });
+  }
+};
