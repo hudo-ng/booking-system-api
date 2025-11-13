@@ -366,7 +366,8 @@ export const getAllMiniPhoto = async (req: Request, res: Response) => {
 
 export const createMiniPhoto = async (req: Request, res: Response) => {
   try {
-    const { custom_key, photo_url, style, created_by, is_showed } = req.body;
+    const { custom_key, photo_url, style, created_by, is_showed, category } =
+      req.body;
 
     if (!custom_key || !photo_url || !created_by) {
       return res.status(400).json({ message: "Missing required fields" });
@@ -392,7 +393,7 @@ export const createMiniPhoto = async (req: Request, res: Response) => {
         custom_id: newCustomId,
         photo_url,
         style,
-        category: "",
+        category,
         created_by,
         is_showed: is_showed ?? false,
       },
