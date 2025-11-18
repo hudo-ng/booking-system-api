@@ -364,29 +364,58 @@ export const getAllMiniPhoto = async (req: Request, res: Response) => {
   }
 };
 
-export const createMiniPhoto = async (req: Request, res: Response) => {
-  try {
-    const { custom_key, photo_url, style, created_by, is_showed, category } =
-      req.body;
+// Helper function to get next available custom_id
+const getNextCustomId = async (): Promise<string> => {
+  const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
-    if (!custom_key || !photo_url || !created_by) {
-      return res.status(400).json({ message: "Missing required fields" });
-    }
-
-    // find the largest custom_id that starts with the given key (e.g., "A")
+  for (const letter of letters) {
+    // Find the latest number for this letter
     const latestPhoto = await prisma.miniPhoto.findFirst({
-      where: { custom_id: { startsWith: custom_key } },
+      where: { custom_id: { startsWith: letter } },
       orderBy: { custom_id: "desc" },
     });
 
-    // compute next number (A1, A2, A3, etc.)
     let nextNumber = 1;
     if (latestPhoto) {
       const match = latestPhoto.custom_id.match(/\d+$/);
       if (match) nextNumber = parseInt(match[0]) + 1;
     }
 
-    const newCustomId = `${custom_key}${nextNumber}`;
+    let candidateId = `${letter}${nextNumber}`;
+
+    // Check if candidateId already exists
+    const exists = await prisma.miniPhoto.findUnique({
+      where: { custom_id: candidateId },
+    });
+
+    if (!exists) {
+      // If not exist, return it immediately
+      return candidateId;
+    } else {
+      // If exists, increment the number until we find one
+      while (true) {
+        nextNumber++;
+        candidateId = `${letter}${nextNumber}`;
+        const existsLoop = await prisma.miniPhoto.findUnique({
+          where: { custom_id: candidateId },
+        });
+        if (!existsLoop) return candidateId;
+      }
+    }
+  }
+
+  throw new Error("No available custom_id left (A-Z)"); // unlikely
+};
+
+export const createMiniPhoto = async (req: Request, res: Response) => {
+  try {
+    const { photo_url, style, created_by, is_showed, category } = req.body;
+
+    if (!photo_url || !created_by) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    const newCustomId = await getNextCustomId();
 
     const newPhoto = await prisma.miniPhoto.create({
       data: {
