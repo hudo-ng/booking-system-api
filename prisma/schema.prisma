@@ -104,7 +104,7 @@ model Notification {
 
 model MiniPhoto {
   id                     String   @id @default(uuid())
-  custom_id              String   @unique
+  custom_id              String   
   photo_url              String
   style                  String
   category               String

@@ -368,43 +368,26 @@ export const getAllMiniPhoto = async (req: Request, res: Response) => {
 const getNextCustomId = async (): Promise<string> => {
   const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
-  for (const letter of letters) {
-    // Find the latest number for this letter
-    const latestPhoto = await prisma.miniPhoto.findFirst({
-      where: { custom_id: { startsWith: letter } },
-      orderBy: { custom_id: "desc" },
-    });
+  // 1. Find all existing custom_ids
+  const allPhotos = await prisma.miniPhoto.findMany({
+    select: { custom_id: true },
+  });
 
-    let nextNumber = 1;
-    if (latestPhoto) {
-      const match = latestPhoto.custom_id.match(/\d+$/);
-      if (match) nextNumber = parseInt(match[0]) + 1;
-    }
+  // 2. Build a set of existing custom_ids for fast lookup
+  const existingIds = new Set(allPhotos.map((p) => p.custom_id));
 
-    let candidateId = `${letter}${nextNumber}`;
+  // 3. Start from number 1, loop until we find an unused id
+  let number = 1;
 
-    // Check if candidateId already exists
-    const exists = await prisma.miniPhoto.findUnique({
-      where: { custom_id: candidateId },
-    });
-
-    if (!exists) {
-      // If not exist, return it immediately
-      return candidateId;
-    } else {
-      // If exists, increment the number until we find one
-      while (true) {
-        nextNumber++;
-        candidateId = `${letter}${nextNumber}`;
-        const existsLoop = await prisma.miniPhoto.findUnique({
-          where: { custom_id: candidateId },
-        });
-        if (!existsLoop) return candidateId;
+  while (true) {
+    for (const letter of letters) {
+      const candidateId = `${letter}${number}`;
+      if (!existingIds.has(candidateId)) {
+        return candidateId;
       }
     }
+    number++; // increment number only after trying all letters
   }
-
-  throw new Error("No available custom_id left (A-Z)"); // unlikely
 };
 
 export const createMiniPhoto = async (req: Request, res: Response) => {
