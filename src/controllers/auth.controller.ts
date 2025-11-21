@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken";
 import { config } from "../config";
 import slugify from "slugify";
 import { customAlphabet } from "nanoid";
+import axios from "axios";
 
 const prisma = new PrismaClient();
 
@@ -164,5 +165,142 @@ export const logInByIdToken = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("logInByIdToken error:", error);
     return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const createPaymentRequest = async (req: Request, res: Response) => {
+  try {
+    const { Amount, PaymentType = "Card", artist } = req.body;
+
+    if (!Amount || !artist) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Amount and artist are required" });
+    }
+
+    // --- Generate ReferenceId ---
+    // Simple auto-increment logic: get last referenceId and add 1
+    let lastPayment = await prisma.trackingPayment.findFirst({
+      orderBy: { createdAt: "desc" },
+    });
+
+    const nextReferenceId = lastPayment
+      ? (parseInt(lastPayment.referenceId) + 1).toString().padStart(6, "0")
+      : "000001";
+
+    let paymentData: any = {
+      referenceId: nextReferenceId,
+      paymentType: PaymentType,
+      amount: Amount,
+      artist,
+      transactionType: PaymentType === "Cash" ? "CashPayment" : "CardPayment",
+    };
+
+    if (PaymentType === "Cash") {
+      // Directly insert cash payment
+      const cashRecord = await prisma.trackingPayment.create({
+        data: paymentData,
+      });
+      return res.json({ success: true, data: cashRecord });
+    }
+
+    // --- Card Payment: Call Dejavoo API ---
+    const Tpn = process.env.DEJAVOO_TPN!;
+    const Authkey = process.env.DEJAVOO_AUTH_KEY!;
+    const RegisterId = process.env.DEJAVOO_REGISTER_ID!;
+    const MerchantNumber = process.env.DEJAVOO_MERCHANT_NUMBER ?? null;
+
+    if (!Tpn || !Authkey || !RegisterId) {
+      return res
+        .status(500)
+        .json({ success: false, error: "Missing terminal credentials in env" });
+    }
+
+    const payload = {
+      Amount,
+      PaymentType,
+      ReferenceId: nextReferenceId,
+      Tpn,
+      RegisterId,
+      Authkey,
+      MerchantNumber,
+      PrintReceipt: "No",
+      GetReceipt: "No",
+      CaptureSignature: true,
+      CallbackInfo: { Url: "" },
+      GetExtendedData: true,
+      IsReadyForIS: false,
+      CustomFields: { document_id: "hello", id: "10" },
+    };
+
+    console.log("Dejavoo Request Payment Payload:", payload);
+
+    const response = await axios.post(
+      "https://spinpos.net/v2/Payment/Sale",
+      payload,
+      { headers: { "Content-Type": "application/json" }, timeout: 120000 }
+    );
+
+    const data = response.data;
+
+    // --- Map response to trackingPayment schema ---
+    const record = await prisma.trackingPayment.create({
+      data: {
+        referenceId: nextReferenceId,
+        paymentType: PaymentType,
+        transactionType: data.TransactionType,
+        invoiceNumber: data.InvoiceNumber,
+        batchNumber: data.BatchNumber,
+        transactionNumber: data.TransactionNumber,
+        authCode: data.AuthCode,
+        voided: data.Voided,
+        pnReferenceId: data.PNReferenceId,
+        totalAmount: data.Amounts.TotalAmount,
+        amount: data.Amounts.Amount,
+        tipAmount: data.Amounts.TipAmount,
+        feeAmount: data.Amounts.FeeAmount,
+        taxAmount: data.Amounts.TaxAmount,
+        cardType: data.CardData.CardType,
+        entryType: data.CardData.EntryType,
+        last4: data.CardData.Last4,
+        first4: data.CardData.First4,
+        BIN: data.CardData.BIN,
+        name: data.CardData.Name,
+        emvApplicationName: data.EMVData.ApplicationName,
+        emvAID: data.EMVData.AID,
+        emvTVR: data.EMVData.TVR,
+        emvTSI: data.EMVData.TSI,
+        emvIAD: data.EMVData.IAD,
+        emvARC: data.EMVData.ARC,
+        hostResponseCode: data.GeneralResponse.HostResponseCode,
+        hostResponseMessage: data.GeneralResponse.HostResponseMessage,
+        resultCode: data.GeneralResponse.ResultCode,
+        statusCode: data.GeneralResponse.StatusCode,
+        message: data.GeneralResponse.Message,
+        detailedMessage: data.GeneralResponse.DetailedMessage,
+        artist,
+        payment_method: "Card",
+      },
+    });
+
+    return res.json({ success: true, data: record });
+  } catch (err: any) {
+    console.error(
+      "CreatePaymentRequest error:",
+      err.response?.data || err.message
+    );
+
+    // Terminal busy handling
+    if (err.response?.data?.GeneralResponse?.StatusCode === "2008") {
+      const delay = err.response.data.GeneralResponse.DelayBeforeNextRequest;
+      return res.status(429).json({
+        success: false,
+        error: `Terminal busy. Please wait ${Math.ceil(delay / 60)} min.`,
+      });
+    }
+
+    return res
+      .status(500)
+      .json({ success: false, error: err.response?.data || err.message });
   }
 };

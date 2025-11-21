@@ -248,3 +248,54 @@ enum TimeOffStatus {
   APPROVED
   REJECTED
  }
+
+model TrackingPayment {
+  id                      String   @id @default(uuid())
+  referenceId             String   
+  invoiceNumber           String?
+  batchNumber             String?
+  transactionNumber       String?
+  paymentType             String
+  transactionType         String
+  authCode                String?
+  voided                  Boolean  @default(false)
+  pnReferenceId           String?
+
+  // Amounts
+  totalAmount             Float?
+  amount                  Float?
+  tipAmount               Float?
+  feeAmount               Float?
+  taxAmount               Float?
+
+  // Card info
+  cardType                String?
+  entryType               String?
+  last4                   String?
+  first4                  String?
+  BIN                     String?
+  name                    String?
+
+  // EMV Data
+  emvApplicationName      String?
+  emvAID                  String?
+  emvTVR                  String?
+  emvTSI                  String?
+  emvIAD                  String?
+  emvARC                  String?
+
+  // Host / General response
+  hostResponseCode        String?
+  hostResponseMessage     String?
+  resultCode              String?
+  statusCode              String?
+  message                 String?
+  detailedMessage         String?
+
+  // Custom fields
+  artist                  String
+  payment_method           String  // "Cash" | "Card"
+
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+}
