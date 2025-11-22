@@ -216,7 +216,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
     const Tpn = process.env.DEJAVOO_TPN!;
     const Authkey = process.env.DEJAVOO_AUTH_KEY!;
     const RegisterId = process.env.DEJAVOO_REGISTER_ID!;
-    const MerchantNumber = process.env.DEJAVOO_MERCHANT_NUMBER ?? null;
+    const MerchantNumber = process.env.DEJAVOO_MERCHANT_NUMBER!;
 
     if (!Tpn || !Authkey || !RegisterId) {
       return res
