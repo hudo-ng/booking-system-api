@@ -170,7 +170,7 @@ export const logInByIdToken = async (req: Request, res: Response) => {
 
 export const createPaymentRequest = async (req: Request, res: Response) => {
   try {
-    const { Amount, PaymentType = "Card", artist } = req.body;
+    const { Amount, PaymentType = "Credit", artist } = req.body;
 
     if (!artist) {
       return res
