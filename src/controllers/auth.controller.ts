@@ -172,14 +172,13 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
   try {
     const { Amount, PaymentType = "Card", artist } = req.body;
 
-    if (!Amount || !artist) {
+    if (!artist) {
       return res
         .status(400)
         .json({ success: false, error: "Amount and artist are required" });
     }
 
     // --- Generate ReferenceId ---
-    // Simple auto-increment logic: get last referenceId and add 1
     let lastPayment = await prisma.trackingPayment.findFirst({
       orderBy: { createdAt: "desc" },
     });
@@ -188,23 +187,32 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       ? (parseInt(lastPayment.referenceId) + 1).toString().padStart(6, "0")
       : "000001";
 
-    let paymentData: any = {
-      referenceId: nextReferenceId,
-      paymentType: PaymentType,
-      amount: Amount,
-      artist,
-      transactionType: PaymentType === "Cash" ? "CashPayment" : "CardPayment",
-    };
+    let amountNumber = typeof Amount === "number" ? Amount : parseFloat(Amount);
 
-    if (PaymentType === "Cash") {
-      // Directly insert cash payment
-      const cashRecord = await prisma.trackingPayment.create({
-        data: paymentData,
+    if (isNaN(amountNumber)) {
+      return res.status(400).json({
+        success: false,
+        error: "Amount must be a valid number",
       });
+    }
+
+    // --- CASH PAYMENT ---
+    if (PaymentType === "Cash") {
+      const cashRecord = await prisma.trackingPayment.create({
+        data: {
+          referenceId: nextReferenceId,
+          paymentType: "Cash",
+          transactionType: "CashPayment",
+          amount: amountNumber,
+          artist,
+          payment_method: "Cash",
+        },
+      });
+
       return res.json({ success: true, data: cashRecord });
     }
 
-    // --- Card Payment: Call Dejavoo API ---
+    // --- CARD PAYMENT ---
     const Tpn = process.env.DEJAVOO_TPN!;
     const Authkey = process.env.DEJAVOO_AUTH_KEY!;
     const RegisterId = process.env.DEJAVOO_REGISTER_ID!;
@@ -213,7 +221,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
     if (!Tpn || !Authkey || !RegisterId) {
       return res
         .status(500)
-        .json({ success: false, error: "Missing terminal credentials in env" });
+        .json({ success: false, error: "Missing terminal credentials" });
     }
 
     const payload = {
@@ -233,7 +241,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       CustomFields: { document_id: "hello", id: "10" },
     };
 
-    console.log("Dejavoo Request Payment Payload:", payload);
+    console.log("Dejavoo Request:", payload);
 
     const response = await axios.post(
       "https://spinpos.net/v2/Payment/Sale",
@@ -243,54 +251,56 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
 
     const data = response.data;
 
-    // --- Map response to trackingPayment schema ---
-    const record = await prisma.trackingPayment.create({
+    // --- Insert into DB ---
+    const cardRecord = await prisma.trackingPayment.create({
       data: {
         referenceId: nextReferenceId,
         paymentType: PaymentType,
-        transactionType: data.TransactionType,
-        invoiceNumber: data.InvoiceNumber,
-        batchNumber: data.BatchNumber,
-        transactionNumber: data.TransactionNumber,
-        authCode: data.AuthCode,
-        voided: data.Voided,
-        pnReferenceId: data.PNReferenceId,
-        totalAmount: data.Amounts.TotalAmount,
-        amount: data.Amounts.Amount,
-        tipAmount: data.Amounts.TipAmount,
-        feeAmount: data.Amounts.FeeAmount,
-        taxAmount: data.Amounts.TaxAmount,
-        cardType: data.CardData.CardType,
-        entryType: data.CardData.EntryType,
-        last4: data.CardData.Last4,
-        first4: data.CardData.First4,
-        BIN: data.CardData.BIN,
-        name: data.CardData.Name,
-        emvApplicationName: data.EMVData.ApplicationName,
-        emvAID: data.EMVData.AID,
-        emvTVR: data.EMVData.TVR,
-        emvTSI: data.EMVData.TSI,
-        emvIAD: data.EMVData.IAD,
-        emvARC: data.EMVData.ARC,
-        hostResponseCode: data.GeneralResponse.HostResponseCode,
-        hostResponseMessage: data.GeneralResponse.HostResponseMessage,
-        resultCode: data.GeneralResponse.ResultCode,
-        statusCode: data.GeneralResponse.StatusCode,
-        message: data.GeneralResponse.Message,
-        detailedMessage: data.GeneralResponse.DetailedMessage,
+        transactionType: data?.TransactionType ?? "CardPayment",
+        invoiceNumber: data?.InvoiceNumber,
+        batchNumber: data?.BatchNumber,
+        transactionNumber: data?.TransactionNumber,
+        authCode: data?.AuthCode,
+        voided: data?.Voided ?? false,
+        pnReferenceId: data?.PNReferenceId,
+
+        totalAmount: data?.Amounts?.TotalAmount,
+        amount: data?.Amounts?.Amount,
+        tipAmount: data?.Amounts?.TipAmount,
+        feeAmount: data?.Amounts?.FeeAmount,
+        taxAmount: data?.Amounts?.TaxAmount,
+
+        cardType: data?.CardData?.CardType,
+        entryType: data?.CardData?.EntryType,
+        last4: data?.CardData?.Last4,
+        first4: data?.CardData?.First4,
+        BIN: data?.CardData?.BIN,
+        name: data?.CardData?.Name,
+
+        emvApplicationName: data?.EMVData?.ApplicationName,
+        emvAID: data?.EMVData?.AID,
+        emvTVR: data?.EMVData?.TVR,
+        emvTSI: data?.EMVData?.TSI,
+        emvIAD: data?.EMVData?.IAD,
+        emvARC: data?.EMVData?.ARC,
+
+        hostResponseCode: data?.GeneralResponse?.HostResponseCode,
+        hostResponseMessage: data?.GeneralResponse?.HostResponseMessage,
+        resultCode: data?.GeneralResponse?.ResultCode,
+        statusCode: data?.GeneralResponse?.StatusCode,
+        message: data?.GeneralResponse?.Message,
+        detailedMessage: data?.GeneralResponse?.DetailedMessage,
+
         artist,
         payment_method: "Card",
       },
     });
 
-    return res.json({ success: true, data: record });
+    return res.json({ success: true, data: cardRecord });
   } catch (err: any) {
-    console.error(
-      "CreatePaymentRequest error:",
-      err.response?.data || err.message
-    );
+    console.error("Payment Error:", err.response?.data || err.message);
 
-    // Terminal busy handling
+    // Terminal busy
     if (err.response?.data?.GeneralResponse?.StatusCode === "2008") {
       const delay = err.response.data.GeneralResponse.DelayBeforeNextRequest;
       return res.status(429).json({
