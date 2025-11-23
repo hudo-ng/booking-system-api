@@ -170,7 +170,7 @@ export const logInByIdToken = async (req: Request, res: Response) => {
 
 export const createPaymentRequest = async (req: Request, res: Response) => {
   try {
-    const { Amount, PaymentType = "Credit", artist } = req.body;
+    const { artist, Cash, Card } = req.body;
 
     if (!artist) {
       return res
@@ -187,116 +187,112 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       ? (parseInt(lastPayment.referenceId) + 1).toString().padStart(6, "0")
       : "000001";
 
-    let amountNumber = typeof Amount === "number" ? Amount : parseFloat(Amount);
-
-    if (isNaN(amountNumber)) {
+    if (isNaN(Card) && isNaN(Cash)) {
       return res.status(400).json({
         success: false,
         error: "Amount must be a valid number",
       });
     }
-
+    let cashRecord = null;
+    let cardRecord = null;
+    let dejavoo = null;
     // --- CASH PAYMENT ---
-    if (PaymentType === "Cash") {
-      const cashRecord = await prisma.trackingPayment.create({
+    if (typeof Cash === "number" && Cash > 0) {
+      cashRecord = await prisma.trackingPayment.create({
         data: {
           referenceId: nextReferenceId,
           paymentType: "Cash",
           transactionType: "CashPayment",
-          amount: amountNumber,
+          amount: Cash,
           artist,
           payment_method: "Cash",
         },
       });
+    }
+    if (typeof Card === "number" && Card > 0) {
+      // --- CARD PAYMENT ---
+      const Tpn = process.env.DEJAVOO_TPN!;
+      const Authkey = process.env.DEJAVOO_AUTH_KEY!;
+      const RegisterId = process.env.DEJAVOO_REGISTER_ID!;
+      const MerchantNumber = process.env.DEJAVOO_MERCHANT_NUMBER!;
 
-      return res.json({ success: true, data: cashRecord });
+      if (!Tpn || !Authkey || !RegisterId) {
+        return res
+          .status(500)
+          .json({ success: false, error: "Missing terminal credentials" });
+      }
+
+      const payload = {
+        Amount: Card,
+        PaymentType: "Credit",
+        ReferenceId: nextReferenceId,
+        Tpn,
+        RegisterId,
+        Authkey,
+        MerchantNumber,
+        PrintReceipt: "No",
+        GetReceipt: "No",
+        CaptureSignature: true,
+        CallbackInfo: { Url: "" },
+        GetExtendedData: true,
+        IsReadyForIS: false,
+        CustomFields: { document_id: "hello", id: "10" },
+      };
+
+      const response = await axios.post(
+        "https://spinpos.net/v2/Payment/Sale",
+        payload,
+        { headers: { "Content-Type": "application/json" }, timeout: 120000 }
+      );
+
+      dejavoo = response.data;
+
+      // --- Insert into DB ---
+      cardRecord = await prisma.trackingPayment.create({
+        data: {
+          referenceId: nextReferenceId,
+          paymentType: "Credit",
+          transactionType: dejavoo?.TransactionType ?? "CardPayment",
+          invoiceNumber: dejavoo?.InvoiceNumber,
+          batchNumber: dejavoo?.BatchNumber,
+          transactionNumber: dejavoo?.TransactionNumber,
+          authCode: dejavoo?.AuthCode,
+          voided: dejavoo?.Voided ?? false,
+          pnReferenceId: dejavoo?.PNReferenceId,
+
+          totalAmount: dejavoo?.Amounts?.TotalAmount,
+          amount: dejavoo?.Amounts?.Amount,
+          tipAmount: dejavoo?.Amounts?.TipAmount,
+          feeAmount: dejavoo?.Amounts?.FeeAmount,
+          taxAmount: dejavoo?.Amounts?.TaxAmount,
+
+          cardType: dejavoo?.CardData?.CardType,
+          entryType: dejavoo?.CardData?.EntryType,
+          last4: dejavoo?.CardData?.Last4,
+          first4: dejavoo?.CardData?.First4,
+          BIN: dejavoo?.CardData?.BIN,
+          name: dejavoo?.CardData?.Name,
+
+          emvApplicationName: dejavoo?.EMVData?.ApplicationName,
+          emvAID: dejavoo?.EMVData?.AID,
+          emvTVR: dejavoo?.EMVData?.TVR,
+          emvTSI: dejavoo?.EMVData?.TSI,
+          emvIAD: dejavoo?.EMVData?.IAD,
+          emvARC: dejavoo?.EMVData?.ARC,
+
+          hostResponseCode: dejavoo?.GeneralResponse?.HostResponseCode,
+          hostResponseMessage: dejavoo?.GeneralResponse?.HostResponseMessage,
+          resultCode: dejavoo?.GeneralResponse?.ResultCode,
+          statusCode: dejavoo?.GeneralResponse?.StatusCode,
+          message: dejavoo?.GeneralResponse?.Message,
+          detailedMessage: dejavoo?.GeneralResponse?.DetailedMessage,
+          artist,
+          payment_method: "Card",
+        },
+      });
     }
 
-    // --- CARD PAYMENT ---
-    const Tpn = process.env.DEJAVOO_TPN!;
-    const Authkey = process.env.DEJAVOO_AUTH_KEY!;
-    const RegisterId = process.env.DEJAVOO_REGISTER_ID!;
-    const MerchantNumber = process.env.DEJAVOO_MERCHANT_NUMBER!;
-
-    if (!Tpn || !Authkey || !RegisterId) {
-      return res
-        .status(500)
-        .json({ success: false, error: "Missing terminal credentials" });
-    }
-
-    const payload = {
-      Amount,
-      PaymentType,
-      ReferenceId: nextReferenceId,
-      Tpn,
-      RegisterId,
-      Authkey,
-      MerchantNumber,
-      PrintReceipt: "No",
-      GetReceipt: "No",
-      CaptureSignature: true,
-      CallbackInfo: { Url: "" },
-      GetExtendedData: true,
-      IsReadyForIS: false,
-      CustomFields: { document_id: "hello", id: "10" },
-    };
-
-    console.log("Dejavoo Request:", payload);
-
-    const response = await axios.post(
-      "https://spinpos.net/v2/Payment/Sale",
-      payload,
-      { headers: { "Content-Type": "application/json" }, timeout: 120000 }
-    );
-
-    const data = response.data;
-
-    // --- Insert into DB ---
-    const cardRecord = await prisma.trackingPayment.create({
-      data: {
-        referenceId: nextReferenceId,
-        paymentType: PaymentType,
-        transactionType: data?.TransactionType ?? "CardPayment",
-        invoiceNumber: data?.InvoiceNumber,
-        batchNumber: data?.BatchNumber,
-        transactionNumber: data?.TransactionNumber,
-        authCode: data?.AuthCode,
-        voided: data?.Voided ?? false,
-        pnReferenceId: data?.PNReferenceId,
-
-        totalAmount: data?.Amounts?.TotalAmount,
-        amount: data?.Amounts?.Amount,
-        tipAmount: data?.Amounts?.TipAmount,
-        feeAmount: data?.Amounts?.FeeAmount,
-        taxAmount: data?.Amounts?.TaxAmount,
-
-        cardType: data?.CardData?.CardType,
-        entryType: data?.CardData?.EntryType,
-        last4: data?.CardData?.Last4,
-        first4: data?.CardData?.First4,
-        BIN: data?.CardData?.BIN,
-        name: data?.CardData?.Name,
-
-        emvApplicationName: data?.EMVData?.ApplicationName,
-        emvAID: data?.EMVData?.AID,
-        emvTVR: data?.EMVData?.TVR,
-        emvTSI: data?.EMVData?.TSI,
-        emvIAD: data?.EMVData?.IAD,
-        emvARC: data?.EMVData?.ARC,
-
-        hostResponseCode: data?.GeneralResponse?.HostResponseCode,
-        hostResponseMessage: data?.GeneralResponse?.HostResponseMessage,
-        resultCode: data?.GeneralResponse?.ResultCode,
-        statusCode: data?.GeneralResponse?.StatusCode,
-        message: data?.GeneralResponse?.Message,
-        detailedMessage: data?.GeneralResponse?.DetailedMessage,
-
-        artist,
-        payment_method: "Card",
-      },
-    });
-
-    return res.json({ success: true, data: cardRecord });
+    return res.json({ success: true, dejavoo, cashRecord, cardRecord });
   } catch (err: any) {
     console.error("Payment Error:", err.response?.data || err.message);
 
