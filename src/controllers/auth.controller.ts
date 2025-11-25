@@ -6,6 +6,8 @@ import { config } from "../config";
 import slugify from "slugify";
 import { customAlphabet } from "nanoid";
 import axios from "axios";
+import escpos from "escpos";
+import fetch from "node-fetch";
 
 const prisma = new PrismaClient();
 
@@ -308,5 +310,86 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
     return res
       .status(500)
       .json({ success: false, error: err.response?.data || err.message });
+  }
+};
+
+export const printTcpReceipt = async (req: Request, res: Response) => {
+  try {
+    const { client, service, employee, amount, date } = req.body;
+    const PRINTER_IP = "192.168.0.200"; // Your printer IP
+    const device = new escpos.Network(PRINTER_IP, 9100);
+    const printer = new escpos.Printer(device);
+
+    device.open((error: any) => {
+      if (error) {
+        console.error(error);
+        return res.status(500).json({ message: "Printer connection failed" });
+      }
+
+      printer
+        .align("ct" as unknown as escpos.TXT_ALIGN)
+        .text("Salon Receipt")
+        .align("lt" as unknown as escpos.TXT_ALIGN)
+        .text("--------------------------------")
+        .text(`Client: ${client}`)
+        .text(`Service: ${service}`)
+        .text(`Employee: ${employee}`)
+        .text(`Date: ${date}`)
+        .text(`Amount: $${amount}`)
+        .text("--------------------------------")
+        .text("Thank you!")
+        .cut()
+        .close();
+
+      return res.json({ success: true, message: "Printed via TCP 9100" });
+    });
+  } catch (err: any) {
+    return res.status(500).json({ message: err.message });
+  }
+};
+
+export const printEposReceipt = async (req: Request, res: Response) => {
+  try {
+    const { client, service, employee, amount, date } = req.body;
+    const PRINTER_IP = "192.168.0.200"; // Your printer IP
+
+    // Epson ePOS JSON commands
+    const eposCommand = {
+      printer: "local_printer", // most LAN printers accept "local_printer"
+      commands: [
+        { align: "center" },
+        { text: "Salon Receipt\n" },
+        { align: "left" },
+        { text: "-------------------------------\n" },
+        { text: `Client: ${client}\n` },
+        { text: `Service: ${service}\n` },
+        { text: `Employee: ${employee}\n` },
+        { text: `Date: ${date}\n` },
+        { text: `Amount: $${amount}\n` },
+        { text: "-------------------------------\n" },
+        { text: "Thank you!\n\n" },
+        { cut: "full" },
+      ],
+    };
+
+    const response = await fetch(
+      `http://${PRINTER_IP}/cgi-bin/epos/service.cgi?devid=local_printer&timeout=10000`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(eposCommand),
+      }
+    );
+
+    if (!response.ok) {
+      const text = await response.text();
+      return res
+        .status(500)
+        .json({ message: "Failed to print via ePOS", error: text });
+    }
+
+    return res.json({ success: true, message: "Printed via ePOS" });
+  } catch (err: any) {
+    return res.status(500).json({ message: err.message });
   }
 };
