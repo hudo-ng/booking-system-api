@@ -24,6 +24,7 @@
     "dotenv": "^17.2.0",
     "escpos": "^3.0.0-alpha.6",
     "escpos-network": "^3.0.0-alpha.5",
+    "escpos-serialport": "^3.0.0-alpha.4",
     "expo-server-sdk": "^4.0.0",
     "express": "^5.1.0",
     "imagekit": "^6.0.0",

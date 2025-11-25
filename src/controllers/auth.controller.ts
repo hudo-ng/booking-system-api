@@ -313,38 +313,56 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
   }
 };
 
+// Import Network adapter separately
+
+const Network = require("escpos-network");
+
 export const printTcpReceipt = async (req: Request, res: Response) => {
+  const { client, service, employee, amount, date } = req.body;
+  const PRINTER_IP = "192.168.0.200";
+
   try {
-    const { client, service, employee, amount, date } = req.body;
-    const PRINTER_IP = "192.168.0.200"; // Your printer IP
-    const device = new escpos.Network(PRINTER_IP, 9100);
+    // Create network device
+    const device = new Network(PRINTER_IP, 9100);
+
+    // Create printer instance
     const printer = new escpos.Printer(device);
 
-    device.open((error: any) => {
-      if (error) {
-        console.error(error);
-        return res.status(500).json({ message: "Printer connection failed" });
+    // Open device
+    device.open((err: any) => {
+      if (err) {
+        return res.status(500).json({
+          success: false,
+          message: "Printer connection failed",
+          error: err.toString(),
+        });
       }
 
+      // Print receipt
       printer
-        .align("ct" as unknown as escpos.TXT_ALIGN)
-        .text("Salon Receipt")
-        .align("lt" as unknown as escpos.TXT_ALIGN)
-        .text("--------------------------------")
+
+        .text("✨ LUXURY SALON RECEIPT ✨")
+        .drawLine()
+
         .text(`Client: ${client}`)
         .text(`Service: ${service}`)
         .text(`Employee: ${employee}`)
         .text(`Date: ${date}`)
         .text(`Amount: $${amount}`)
-        .text("--------------------------------")
-        .text("Thank you!")
+        .drawLine()
+
+        .text("Thank you for visiting!")
         .cut()
         .close();
 
       return res.json({ success: true, message: "Printed via TCP 9100" });
     });
   } catch (err: any) {
-    return res.status(500).json({ message: err.message });
+    return res.status(500).json({
+      success: false,
+      message: "Unexpected error",
+      error: err.message,
+    });
   }
 };
 
