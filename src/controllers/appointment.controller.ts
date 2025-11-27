@@ -118,7 +118,7 @@ export const createAppointment = async (req: Request, res: Response) => {
         newAppointment.startTime
       ).format("MMM DD YYYY HH:mm")}. Deposit: ${
         newAppointment.deposit_amount
-      } USD`;
+      } USD. Prepare: https://tinyurl.com/52x5pjx4`;
       await sendSMS(phone, customerBody);
     }
 
@@ -561,11 +561,14 @@ export const updateAppointment = async (req: Request, res: Response) => {
         endTime: newEnd,
         status,
       },
+      include: {
+        employee: { select: { id: true, name: true } },
+      },
     });
     // ✅ Send SMS if appointment is accepted
     // if (status === "accepted" && appointment.phone) {
     //   const artistBody = `Your appointment with ${appointment.customerName} is confirmed. Look forward to take care your customer soon.`;
-    const customerBody = `Appointment accepted`;
+    const customerBody = `Your appointment with ${updated.employee.name} is confirmed. Please prepare : https://ik.imagekit.io/suva2tmrt/tattoo-prep.jpg`;
     await sendSMS(appointment.phone, customerBody);
     //   await sendSMS(user.phone_number, artistBody);
     // }
