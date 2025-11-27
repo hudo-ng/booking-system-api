@@ -320,47 +320,46 @@ const Network = require("escpos-network");
 export const printTcpReceipt = async (req: Request, res: Response) => {
   const { client, service, employee, amount, date } = req.body;
   const PRINTER_IP = "192.168.0.200";
+  const PORT = 9100;
 
   try {
     // Create network device
-    const device = new Network(PRINTER_IP, 9100);
+    const device = new Network(PRINTER_IP, PORT);
+
+    // Open device
+    await new Promise<void>((resolve, reject) => {
+      device.open((err: any) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
 
     // Create printer instance
     const printer = new escpos.Printer(device);
 
-    // Open device
-    device.open((err: any) => {
-      if (err) {
-        return res.status(500).json({
-          success: false,
-          message: "Printer connection failed",
-          error: err.toString(),
-        });
-      }
+    // Print receipt
+    printer
+      .text("✨ LUXURY SALON RECEIPT ✨")
+      .drawLine()
+      .text(`Client: ${client}`)
+      .text(`Service: ${service}`)
+      .text(`Employee: ${employee}`)
+      .text(`Date: ${date}`)
+      .text(`Amount: $${amount}`)
+      .drawLine()
+      .text("Thank you for visiting!")
+      .cut();
 
-      // Print receipt
-      printer
+    // Close device after a short delay
+    setTimeout(() => {
+      device.close();
+    }, 500);
 
-        .text("✨ LUXURY SALON RECEIPT ✨")
-        .drawLine()
-
-        .text(`Client: ${client}`)
-        .text(`Service: ${service}`)
-        .text(`Employee: ${employee}`)
-        .text(`Date: ${date}`)
-        .text(`Amount: $${amount}`)
-        .drawLine()
-
-        .text("Thank you for visiting!")
-        .cut()
-        .close();
-
-      return res.json({ success: true, message: "Printed via TCP 9100" });
-    });
+    return res.json({ success: true, message: "Printed via TCP 9100" });
   } catch (err: any) {
     return res.status(500).json({
       success: false,
-      message: "Unexpected error",
+      message: "Printer error",
       error: err.message,
     });
   }
