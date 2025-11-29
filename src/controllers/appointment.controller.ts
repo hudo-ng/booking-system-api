@@ -85,7 +85,7 @@ export const createAppointment = async (req: Request, res: Response) => {
       },
       include: {
         employee: {
-          select: { id: true, name: true },
+          select: { id: true, name: true, phone_number: true },
         },
         assignedBy: {
           select: { id: true, name: true },
@@ -119,7 +119,17 @@ export const createAppointment = async (req: Request, res: Response) => {
       ).format("MMM DD YYYY HH:mm")}. Deposit: ${
         newAppointment.deposit_amount
       } USD. Prepare: https://tinyurl.com/52x5pjx4`;
+      const artistBody = `New appointment scheduled ${
+        newAppointment?.assignedBy?.name &&
+        " by" + newAppointment?.assignedBy?.name
+      } with Artist: ${newAppointment?.employee?.name} on ${dayjs(
+        newAppointment?.startTime
+      ).format("MMM DD, YYYY HH:mm A")} with deposit: ${
+        newAppointment?.deposit_amount
+      } via ${newAppointment?.deposit_category}`;
       await sendSMS(phone, customerBody);
+      newAppointment?.employee?.phone_number &&
+        (await sendSMS(newAppointment?.employee?.phone_number, artistBody));
     }
 
     res.status(201).json(newAppointment);
@@ -563,6 +573,7 @@ export const updateAppointment = async (req: Request, res: Response) => {
       },
       include: {
         employee: { select: { id: true, name: true } },
+        assignedBy: { select: { id: true, name: true } },
       },
     });
     // ✅ Send SMS if appointment is accepted
@@ -570,7 +581,16 @@ export const updateAppointment = async (req: Request, res: Response) => {
     //   const artistBody = `Your appointment with ${appointment.customerName} is confirmed. Look forward to take care your customer soon.`;
     const customerBody = `Your appointment with ${updated.employee.name} is confirmed. Please prepare : https://ik.imagekit.io/suva2tmrt/tattoo-prep.jpg`;
     await sendSMS(appointment.phone, customerBody);
-    //   await sendSMS(user.phone_number, artistBody);
+
+    const artistBody = `New appointment scheduled ${
+      updated?.assignedBy?.name && " by" + updated?.assignedBy?.name
+    } with Artist: ${updated?.employee?.name} on ${dayjs(
+      updated?.startTime
+    ).format("MMM DD, YYYY HH:mm A")} with deposit: ${
+      updated?.deposit_amount
+    } via ${updated?.deposit_category}`;
+
+    await sendSMS(user.phone_number, artistBody);
     // }
     res.json(updated);
   } catch (err) {
