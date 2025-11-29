@@ -572,7 +572,7 @@ export const updateAppointment = async (req: Request, res: Response) => {
         status,
       },
       include: {
-        employee: { select: { id: true, name: true } },
+        employee: { select: { id: true, name: true, phone_number: true } },
         assignedBy: { select: { id: true, name: true } },
       },
     });
@@ -590,7 +590,8 @@ export const updateAppointment = async (req: Request, res: Response) => {
       updated?.deposit_amount
     } via ${updated?.deposit_category}`;
 
-    await sendSMS(user.phone_number, artistBody);
+    updated?.employee?.phone_number &&
+      (await sendSMS(updated?.employee?.phone_number, artistBody));
     // }
     res.json(updated);
   } catch (err) {
