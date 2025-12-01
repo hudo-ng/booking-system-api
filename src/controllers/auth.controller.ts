@@ -171,8 +171,8 @@ export const logInByIdToken = async (req: Request, res: Response) => {
 
 export const createPaymentRequest = async (req: Request, res: Response) => {
   try {
-    const { artist, Cash, Card, item_service } = req.body;
-
+    const { artist, Cash, Card, item_service, is_cashapp } = req.body;
+    let isCashApp = is_cashapp ?? false;
     if (!artist) {
       return res
         .status(400)
@@ -202,8 +202,8 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       cashRecord = await prisma.trackingPayment.create({
         data: {
           referenceId: nextReferenceId,
-          paymentType: "Cash",
-          transactionType: "CashPayment",
+          paymentType: isCashApp ? "CashApp" : "Cash",
+          transactionType: isCashApp ? "CashAppPayment" : "CashPayment",
           amount: Cash,
           artist,
           payment_method: "Cash",
