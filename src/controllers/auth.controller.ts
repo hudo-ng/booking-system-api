@@ -171,7 +171,7 @@ export const logInByIdToken = async (req: Request, res: Response) => {
 
 export const createPaymentRequest = async (req: Request, res: Response) => {
   try {
-    const { artist, Cash, Card } = req.body;
+    const { artist, Cash, Card, item_service } = req.body;
 
     if (!artist) {
       return res
@@ -207,6 +207,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
           amount: Cash,
           artist,
           payment_method: "Cash",
+          item_service: item_service ? item_service : "Undefined",
         },
       });
     }
@@ -289,6 +290,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
           detailedMessage: dejavoo?.GeneralResponse?.DetailedMessage,
           artist,
           payment_method: "Card",
+          item_service: item_service ? item_service : "Undefined",
         },
       });
     }

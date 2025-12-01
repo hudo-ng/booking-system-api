@@ -265,6 +265,7 @@ enum TimeOffStatus {
 
 model TrackingPayment {
   id                      String   @id @default(uuid())
+  item_service            String?
   referenceId             String   
   invoiceNumber           String?
   batchNumber             String?
