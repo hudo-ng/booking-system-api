@@ -6,6 +6,7 @@ import {
   createPaymentRequest,
   createVerification,
   validateVerification,
+  getTrackingPaymentById,
 } from "../controllers/auth.controller";
 import { getAllMiniPhoto } from "../controllers/management.controller";
 
@@ -16,6 +17,7 @@ router.post("/login", login);
 router.post("/login/id-token", logInByIdToken);
 router.get("/mini-photo", getAllMiniPhoto);
 router.post("/create-payment-request", createPaymentRequest);
+router.get("/payment/:id", getTrackingPaymentById);
 // Create and send verification code
 router.post("/verification/create", createVerification);
 // Validate code

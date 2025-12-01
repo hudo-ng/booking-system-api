@@ -320,6 +320,42 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
   }
 };
 
+export const getTrackingPaymentById = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: "Payment ID is required",
+      });
+    }
+
+    const payment = await prisma.trackingPayment.findUnique({
+      where: { id },
+    });
+
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        error: "Payment not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      payment,
+    });
+  } catch (error) {
+    console.error("Get tracking payment error:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "Failed to fetch payment",
+    });
+  }
+};
+
 function getChicagoStartEndOfDay() {
   const now = new Date();
 
