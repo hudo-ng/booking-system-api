@@ -295,7 +295,13 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       });
     }
 
-    return res.json({ success: true, dejavoo, cashRecord, cardRecord });
+    return res.json({
+      success: true,
+      dejavoo,
+      cashRecord,
+      cardRecord,
+      id: cashRecord?.id ?? cardRecord?.id ?? "",
+    });
   } catch (err: any) {
     console.error("Payment Error:", err.response?.data || err.message);
 
