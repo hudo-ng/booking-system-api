@@ -6,6 +6,7 @@ import { config } from "../config";
 import slugify from "slugify";
 import { customAlphabet } from "nanoid";
 import axios from "axios";
+import { sendSMS } from "../utils/sms";
 
 const prisma = new PrismaClient();
 
@@ -308,5 +309,148 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
     return res
       .status(500)
       .json({ success: false, error: err.response?.data || err.message });
+  }
+};
+
+function getChicagoStartEndOfDay() {
+  const now = new Date();
+
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  const [{ value: month }, , { value: day }, , { value: year }] =
+    formatter.formatToParts(now);
+
+  const start = new Date(`${year}-${month}-${day}T00:00:00-06:00`);
+  const end = new Date(`${year}-${month}-${day}T23:59:59.999-06:00`);
+
+  return { startOfDay: start, endOfDay: end };
+}
+
+function normalizePhone(phone: string): string {
+  if (!phone) return "";
+  let digits = phone.replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("1")) {
+    digits = digits.substring(1);
+  }
+  return digits;
+}
+
+export const createVerification = async (req: Request, res: Response) => {
+  try {
+    const { phone } = req.body;
+
+    if (!phone) {
+      return res.status(400).json({ message: "Phone number is required" });
+    }
+
+    const normalizedInput = normalizePhone(phone);
+
+    if (normalizedInput.length !== 10) {
+      return res.status(400).json({ message: "Invalid phone number format" });
+    }
+
+    const { startOfDay, endOfDay } = getChicagoStartEndOfDay();
+
+    // 1. Fetch all appointments today
+    const todaysAppointments = await prisma.appointment.findMany({
+      where: {
+        startTime: {
+          gte: startOfDay,
+          lte: endOfDay,
+        },
+      },
+    });
+
+    // 2. Compare using normalized phone numbers
+    const appointment = todaysAppointments.find((appt) => {
+      const normalizedDbPhone = normalizePhone(appt.phone);
+      return normalizedDbPhone === normalizedInput;
+    });
+
+    if (!appointment) {
+      return res.status(404).json({
+        message: "No appointment found for this phone number today",
+      });
+    }
+
+    // 3. Generate code
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+    await prisma.verificationCode.create({
+      data: {
+        appointment_id: appointment.id,
+        phone: normalizePhone(appointment.phone), // store normalized
+        code,
+        expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+      },
+    });
+
+    await sendSMS(normalizedInput, `Your verification code is: ${code}`);
+
+    return res.status(200).json({
+      message: "Verification code sent successfully",
+    });
+  } catch (error) {
+    console.error("Error creating verification:", error);
+    return res.status(500).json({
+      message: "Failed to create verification",
+    });
+  }
+};
+
+export const validateVerification = async (req: Request, res: Response) => {
+  try {
+    const { phone, code } = req.body;
+
+    if (!phone || !code) {
+      return res.status(400).json({ message: "Phone and code are required" });
+    }
+
+    // Find latest valid verification record
+    const record = await prisma.verificationCode.findFirst({
+      where: {
+        phone,
+        code,
+        isUsed: false,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+      include: {
+        appointment: {
+          include: {
+            employee: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+
+    if (!record) {
+      return res.status(400).json({
+        message: "Invalid or expired verification code",
+      });
+    }
+
+    // Mark code as used
+    await prisma.verificationCode.update({
+      where: { id: record.id },
+      data: { isUsed: true },
+    });
+
+    return res.status(200).json({
+      message: "Verification successful",
+      appointment: record.appointment,
+    });
+  } catch (error) {
+    console.error("Error validating verification:", error);
+    return res.status(500).json({
+      message: "Failed to validate verification",
+    });
   }
 };
