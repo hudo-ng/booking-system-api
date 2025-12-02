@@ -7,6 +7,14 @@ const client = new SquareClient({
   environment: SquareEnvironment.Sandbox,
 });
 
+function removeBigInts(obj: any) {
+  return JSON.parse(
+    JSON.stringify(obj, (_, value) =>
+      typeof value === "bigint" ? value.toString() : value
+    )
+  );
+}
+
 export const createCardPayment = async (req: Request, res: Response) => {
   try {
     const { amount, sourceId } = req.body;
@@ -16,16 +24,18 @@ export const createCardPayment = async (req: Request, res: Response) => {
     const response = await client.payments.create({
       idempotencyKey,
       amountMoney: {
-        amount: Math.round(Number(amount) * 100),
+        amount: BigInt(Math.round(Number(amount) * 100)),
         currency: "USD",
       },
       sourceId,
       locationId: process.env.SQUARE_LOCATION_ID!,
-    } as any);
+    });
+
+    const safePayment = removeBigInts(response.payment);
 
     return res.json({
       success: true,
-      payment: response.payment,
+      payment: safePayment,
     });
   } catch (error) {
     console.error("Square error:", error);
