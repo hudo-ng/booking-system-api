@@ -7,7 +7,7 @@ const client = new SquareClient({
   environment: SquareEnvironment.Sandbox,
 });
 
-export const createCardPayment = async (req:Request, res:Response) => {
+export const createCardPayment = async (req: Request, res: Response) => {
   try {
     const { amount, sourceId } = req.body;
 
@@ -16,12 +16,12 @@ export const createCardPayment = async (req:Request, res:Response) => {
     const response = await client.payments.create({
       idempotencyKey,
       amountMoney: {
-        amount: BigInt(Math.round(Number(amount) * 100)),
+        amount: Math.round(Number(amount) * 100),
         currency: "USD",
       },
       sourceId,
       locationId: process.env.SQUARE_LOCATION_ID!,
-    });
+    } as any);
 
     return res.json({
       success: true,
@@ -31,7 +31,8 @@ export const createCardPayment = async (req:Request, res:Response) => {
     console.error("Square error:", error);
     return res.status(500).json({
       success: false,
-      message: error instanceof Error ? error.message : "An unknown error occurred",
+      message:
+        error instanceof Error ? error.message : "An unknown error occurred",
     });
   }
 };
