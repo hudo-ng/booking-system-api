@@ -577,10 +577,18 @@ export const updateAppointment = async (req: Request, res: Response) => {
       },
     });
     // ✅ Send SMS if appointment is accepted
-    // if (status === "accepted" && appointment.phone) {
-    //   const artistBody = `Your appointment with ${appointment.customerName} is confirmed. Look forward to take care your customer soon.`;
-    const customerBody = `Your appointment with ${updated.employee.name} is confirmed. Please prepare : https://ik.imagekit.io/suva2tmrt/tattoo-prep.jpg`;
-    await sendSMS(appointment.phone, customerBody);
+    if (status === "accepted" && appointment.phone) {
+      //   const artistBody = `Your appointment with ${appointment.customerName} is confirmed. Look forward to take care your customer soon.`;
+      const customerBody = `Thank you for choosing Hyper Inkers! Your appointment has been scheduled ${
+        updated.assignedBy?.name ? "by " + updated.assignedBy?.name : ""
+      } with Artist: ${updated.employee.name} on ${dayjs(
+        updated.startTime
+      ).format("MMM DD YYYY HH:mm")}. Deposit: ${
+        updated.deposit_amount
+      } USD. Prepare: https://tinyurl.com/52x5pjx4`;
+
+      await sendSMS(appointment.phone, customerBody);
+    }
 
     const artistBody = `New appointment scheduled ${
       updated?.assignedBy?.name && " by" + updated?.assignedBy?.name
