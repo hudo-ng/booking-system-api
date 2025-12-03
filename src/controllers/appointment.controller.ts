@@ -110,23 +110,27 @@ export const createAppointment = async (req: Request, res: Response) => {
     });
 
     if (is_sms_released) {
+      const chicagoTime = dayjs(newAppointment.startTime)
+        .tz("America/Chicago")
+        .format("MMM DD YYYY hh:mm A");
+
       const customerBody = `Thank you for choosing Hyper Inkers! Your appointment has been scheduled ${
         newAppointment.assignedBy?.name
           ? "by " + newAppointment.assignedBy?.name
           : ""
-      } with Artist: ${newAppointment.employee.name} on ${dayjs(
-        newAppointment.startTime
-      ).format("MMM DD YYYY HH:mm")}. Deposit: ${
+      } with Artist: ${
+        newAppointment.employee.name
+      } on ${chicagoTime}. Deposit: ${
         newAppointment.deposit_amount
       } USD. Prepare: https://tinyurl.com/52x5pjx4`;
       const artistBody = `New appointment scheduled ${
         newAppointment?.assignedBy?.name &&
         " by" + newAppointment?.assignedBy?.name
-      } with Artist: ${newAppointment?.employee?.name} on ${dayjs(
-        newAppointment?.startTime
-      ).format("MMM DD, YYYY HH:mm A")} with deposit: ${
-        newAppointment?.deposit_amount
-      } via ${newAppointment?.deposit_category}`;
+      } with Artist: ${
+        newAppointment?.employee?.name
+      } on ${chicagoTime} with deposit: ${newAppointment?.deposit_amount} via ${
+        newAppointment?.deposit_category
+      }`;
       await sendSMS(phone, customerBody);
       newAppointment?.employee?.phone_number &&
         (await sendSMS(newAppointment?.employee?.phone_number, artistBody));
@@ -231,11 +235,10 @@ export const editAppointment = async (req: Request, res: Response) => {
 
     // ✅ Send SMS if requested
     if (is_sms_released && updated.phone) {
-      const customerBody = `Your appointment with ${
-        updated.employee.name
-      } has been re-scheduled to ${dayjs(updated.startTime).format(
-        "MMM DD YYYY HH:mm"
-      )}.\nText (210) 997-9737 or your artist to reschedule when you’re ready`;
+      const chicagoTime = dayjs(updated.startTime)
+        .tz("America/Chicago")
+        .format("MMM DD YYYY hh:mm A");
+      const customerBody = `Your appointment with ${updated.employee.name} has been re-scheduled to ${chicagoTime}.\nText (210) 997-9737 or your artist to reschedule when you’re ready`;
 
       await sendSMS(updated.phone, customerBody);
     }
@@ -358,9 +361,10 @@ export const deleteAppointment = async (req: Request, res: Response) => {
     });
 
     if (is_sms_released) {
-      const customerBody = `Your appointment on ${dayjs(
-        deletedAppointment.startTime
-      )} with ${deletedAppointment.employee.name} has been canceled.
+      const chicagoTime = dayjs(deletedAppointment.startTime)
+        .tz("America/Chicago")
+        .format("MMM DD YYYY hh:mm A");
+      const customerBody = `Your appointment on ${chicagoTime} with ${deletedAppointment.employee.name} has been canceled.
 Text (210) 997-9737 or your artist to reschedule when you’re ready`;
       await sendSMS(deletedAppointment.phone, customerBody);
     }
@@ -577,13 +581,14 @@ export const updateAppointment = async (req: Request, res: Response) => {
       },
     });
     // ✅ Send SMS if appointment is accepted
+    const chicagoTime = dayjs(updated.startTime)
+      .tz("America/Chicago")
+      .format("MMM DD YYYY hh:mm A");
     if (status === "accepted" && appointment.phone) {
       //   const artistBody = `Your appointment with ${appointment.customerName} is confirmed. Look forward to take care your customer soon.`;
       const customerBody = `Thank you for choosing Hyper Inkers! Your appointment has been scheduled ${
         updated.assignedBy?.name ? "by " + updated.assignedBy?.name : ""
-      } with Artist: ${updated.employee.name} on ${dayjs(
-        updated.startTime
-      ).format("MMM DD YYYY HH:mm")}. Deposit: ${
+      } with Artist: ${updated.employee.name} on ${chicagoTime}. Deposit: ${
         updated.deposit_amount
       } USD. Prepare: https://tinyurl.com/52x5pjx4`;
 
@@ -592,9 +597,7 @@ export const updateAppointment = async (req: Request, res: Response) => {
 
     const artistBody = `New appointment scheduled ${
       updated?.assignedBy?.name && " by" + updated?.assignedBy?.name
-    } with Artist: ${updated?.employee?.name} on ${dayjs(
-      updated?.startTime
-    ).format("MMM DD, YYYY HH:mm A")} with deposit: ${
+    } with Artist: ${updated?.employee?.name} on ${chicagoTime} with deposit: ${
       updated?.deposit_amount
     } via ${updated?.deposit_category}`;
 
