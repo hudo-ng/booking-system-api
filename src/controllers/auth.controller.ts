@@ -400,13 +400,21 @@ export const createVerification = async (req: Request, res: Response) => {
 
     const { startOfDay, endOfDay } = getChicagoStartEndOfDay();
 
-    // 1. Fetch all appointments today
+    // 1. Fetch all appointments that overlap today
     const todaysAppointments = await prisma.appointment.findMany({
       where: {
-        startTime: {
-          gte: startOfDay,
-          lte: endOfDay,
-        },
+        AND: [
+          {
+            startTime: {
+              lte: endOfDay, // appointment started before day ended
+            },
+          },
+          {
+            endTime: {
+              gte: startOfDay, // appointment ends after day started
+            },
+          },
+        ],
       },
     });
 
