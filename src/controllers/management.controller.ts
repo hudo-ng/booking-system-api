@@ -28,7 +28,7 @@ export const getAllEmployees = async (req: Request, res: Response) => {
   if (currentUser?.isOwner) {
     // Return all employees
     employees = await prisma.user.findMany({
-      where: { role: "employee" },
+      where: { role: "employee", deletedAt: null },
       select: {
         id: true,
         name: true,
@@ -45,6 +45,7 @@ export const getAllEmployees = async (req: Request, res: Response) => {
         isAdmin: true,
         role: true,
         is_reception: true,
+        currentDeviceId: true,
       },
     });
   } else {
@@ -67,6 +68,7 @@ export const getAllEmployees = async (req: Request, res: Response) => {
         isAdmin: true,
         role: true,
         is_reception: true,
+        currentDeviceId: true,
       },
     });
 
@@ -147,6 +149,103 @@ export const editEmployee = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Failed to update employee", error);
     res.status(500).json({ message: "Failed to update employee" });
+  }
+};
+
+export const deleteEmployee = async (req: Request, res: Response) => {
+  const { userId } = (req as any).user as { userId?: string };
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  // Query the current user
+  const currentUser = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+
+  if (!currentUser) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  // Only admin or owner can delete staff
+  if (!currentUser?.isAdmin && !currentUser?.isOwner) {
+    return res.status(403).json({ error: "You do not have permission" });
+  }
+
+  const { staff_id } = req.body;
+
+  if (!staff_id) {
+    return res.status(400).json({ error: "staff_id is required" });
+  }
+
+  try {
+    const deletedEmployee = await prisma.user.update({
+      where: { id: staff_id },
+      data: {
+        deletedAt: new Date(),
+      },
+      select: {
+        id: true,
+        name: true,
+        deletedAt: true,
+      },
+    });
+
+    res.json({
+      message: "Employee soft-deleted successfully",
+      employee: deletedEmployee,
+    });
+  } catch (error) {
+    console.error("Failed to soft-delete employee", error);
+    res.status(500).json({ message: "Failed to delete employee" });
+  }
+};
+
+export const deleteDeviceToken = async (req: Request, res: Response) => {
+  const { userId } = (req as any).user as { userId?: string };
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  // Query the current user
+  const currentUser = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+
+  if (!currentUser) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  // Only admin or owner can delete staff
+  if (!currentUser?.isAdmin && !currentUser?.isOwner) {
+    return res.status(403).json({ error: "You do not have permission" });
+  }
+
+  const { staff_id } = req.body;
+
+  if (!staff_id) {
+    return res.status(400).json({ error: "staff_id is required" });
+  }
+
+  try {
+    const deletedEmployee = await prisma.user.update({
+      where: { id: staff_id },
+      data: {
+        currentDeviceId: null,
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
+    res.json({
+      message: "Employee soft-deleted successfully",
+      employee: deletedEmployee,
+    });
+  } catch (error) {
+    console.error("Failed to soft-delete employee", error);
+    res.status(500).json({ message: "Failed to delete employee" });
   }
 };
 

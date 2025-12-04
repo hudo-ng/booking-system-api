@@ -4,7 +4,7 @@ const prisma = new PrismaClient();
 
 export const listEmployees = async (_req: Request, res: Response) => {
   const employees = await prisma.user.findMany({
-    where: { role: "employee" },
+    where: { role: "employee", deletedAt: null },
     select: {
       id: true,
       name: true,
