@@ -63,11 +63,11 @@ export const requestBooking = async (req: Request, res: Response) => {
   if (start.isBefore(dayjs())) {
     return res.status(400).json({ message: "Cannot book past times" });
   }
-  // if (!end.isAfter(start)) {
-  //   return res
-  //     .status(400)
-  //     .json({ message: "End time must be after start time" });
-  // }
+  if (!end.isAfter(start)) {
+    return res
+      .status(400)
+      .json({ message: "End time must be after start time" });
+  }
   if (date) {
     const reqDay = dayjs(date).startOf("day");
     if (!reqDay.isValid() || !reqDay.isSame(start.startOf("day"))) {
