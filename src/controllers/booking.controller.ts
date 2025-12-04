@@ -68,14 +68,14 @@ export const requestBooking = async (req: Request, res: Response) => {
       .status(400)
       .json({ message: "End time must be after start time" });
   }
-  if (date) {
-    const reqDay = dayjs(date).startOf("day");
-    if (!reqDay.isValid() || !reqDay.isSame(start.startOf("day"))) {
-      return res
-        .status(400)
-        .json({ message: "Date does not match selected time" });
-    }
-  }
+  // if (date) {
+  //   const reqDay = dayjs(date).startOf("day");
+  //   if (!reqDay.isValid() || !reqDay.isSame(start.startOf("day"))) {
+  //     return res
+  //       .status(400)
+  //       .json({ message: "Date does not match selected time" });
+  //   }
+  // }
 
   const dayStartLocal = dayjs.tz(date, "YYYY-MM-DD", ZONE).startOf("day");
   const dayEndLocal = dayStartLocal.add(1, "day");
