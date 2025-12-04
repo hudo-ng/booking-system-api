@@ -70,6 +70,8 @@ model Appointment {
   dob                    DateTime?
   extra_deposit_category String?
   paidWith               String?
+  payment_id             String?
+  payment_status         PaymentStatus?
   quote_amount           Float?
   completed_photo_url    String?
   isException            Boolean                 @default(false)
@@ -314,4 +316,10 @@ model TrackingPayment {
 
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
+}
+
+enum PaymentStatus {
+  PAID
+  REFUNDED
+  VOIDED
 }

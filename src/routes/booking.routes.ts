@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   requestBooking,
+  bookWithPayment,
   listAttachments,
 } from "../controllers/booking.controller";
 import { imageKit } from "../utils/imagekit";
@@ -13,6 +14,7 @@ router.get("/imagekit/auth", (_req, res) => {
 });
 
 router.post("/:id/request-booking", requestBooking);
+router.post("/:id/book-with-payment", bookWithPayment);
 router.get("/:id/attachments", listAttachments);
 
 export default router;
