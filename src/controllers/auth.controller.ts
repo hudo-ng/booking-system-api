@@ -458,15 +458,12 @@ export const createVerification = async (req: Request, res: Response) => {
 export const validateVerification = async (req: Request, res: Response) => {
   try {
     const { phone, code } = req.body;
-
-    if (!phone || !code) {
-      return res.status(400).json({ message: "Phone and code are required" });
-    }
+    const normalizedInput = normalizePhone(phone);
 
     // Find latest valid verification record
     const record = await prisma.verificationCode.findFirst({
       where: {
-        phone,
+        phone: normalizedInput, // 🔥 compare using normalized phone stored in DB
         code,
         isUsed: false,
         expiresAt: { gt: new Date() },
@@ -482,7 +479,6 @@ export const validateVerification = async (req: Request, res: Response) => {
         },
       },
     });
-
     if (!record) {
       return res.status(400).json({
         message: "Invalid or expired verification code",
