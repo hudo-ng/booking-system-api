@@ -164,7 +164,6 @@ export const editAppointment = async (req: Request, res: Response) => {
       deposit_amount,
       deposit_category,
       extra_deposit_category,
-      assignedById,
       is_sms_released,
     } = req.body;
 
@@ -181,7 +180,6 @@ export const editAppointment = async (req: Request, res: Response) => {
     // ✅ Build update object ONLY with provided values
     const data: any = {};
     const fields = {
-      assignedById,
       employeeId,
       customerName,
       email,
