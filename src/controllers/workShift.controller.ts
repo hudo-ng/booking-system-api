@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import dayjs from "dayjs";
 import { getDistanceFromLatLonInKm } from "../utils/distance";
-import axios from "axios";
+import axios, { all } from "axios";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
 
@@ -36,10 +36,7 @@ export const getWorkShiftsFull = async (req: Request, res: Response) => {
 export const getWorkShiftsByMonth = async (req: Request, res: Response) => {
   try {
     const { month, year, userId } = req.query;
-    console.log("Fetching clock history for: ", userId);
-    console.log("Month:", month);
-    console.log("Year:", year);
-    console.log("UserId:", userId);
+
     if (!month || !year || !userId) {
       return res
         .status(400)
@@ -266,7 +263,7 @@ export const editClockInAndClockOutTimeByShiftId = async (
   if (!currentUser?.isOwner) {
     return res.status(403).json({ message: "Only owner can edit shifts" });
   }
-  console.log("Editing shift:", shiftId, newClockIn, newClockOut);
+
   try {
     const updatedShift = await prisma.workShift.update({
       where: { id: shiftId },
@@ -464,7 +461,6 @@ export const setWorkScheduleByUserId = async (req: Request, res: Response) => {
 export const getPiercingReport = async (req: Request, res: Response) => {
   try {
     const { startDate, endDate } = req.body;
-    console.log("Received dates:", startDate, endDate);
 
     if (!startDate || !endDate) {
       return res.status(400).json({ message: "Missing startDate or endDate" });
@@ -488,7 +484,7 @@ export const getPiercingReport = async (req: Request, res: Response) => {
         .getDate()
         .toString()
         .padStart(2, "0")}${current.getFullYear()}`;
-      console.log("formattedDate: ", formattedDate);
+
       // Fetch data for this date
       const response = await axios.post(
         "https://hyperinkersform.com/api/fetching",
@@ -501,12 +497,10 @@ export const getPiercingReport = async (req: Request, res: Response) => {
         allData.push(...response.data.data);
       }
 
-      console.log("Fetched data for date:", formattedDate);
-
       // Move to next day
       current.setDate(current.getDate() + 1);
     }
-    console.log("allData: ", allData?.length);
+
     // Filter only piercing items
     // const piercingData = allData.filter(
     //   (item) =>
@@ -514,7 +508,7 @@ export const getPiercingReport = async (req: Request, res: Response) => {
     //     ["done", "paid"].includes(item?.status?.toLowerCase())
     // );
     const piercingData = allData.filter((item) => item.color === "piercing");
-    console.log("piercingData: ", piercingData?.length);
+
     return res.json({ data: piercingData });
   } catch (error: any) {
     console.error("Error fetching piercing report:", error.message);
@@ -548,7 +542,7 @@ export const getTattooReport = async (req: Request, res: Response) => {
         .getDate()
         .toString()
         .padStart(2, "0")}${current.getFullYear()}`;
-      console.log("formattedDate: ", formattedDate);
+
       // Fetch data for this date
       const response = await axios.post(
         "https://hyperinkersform.com/api/fetching",
@@ -561,8 +555,6 @@ export const getTattooReport = async (req: Request, res: Response) => {
         allData.push(...response.data.data);
       }
 
-      console.log("Fetched data for date:", formattedDate);
-
       // Move to next day
       current.setDate(current.getDate() + 1);
     }
@@ -574,6 +566,64 @@ export const getTattooReport = async (req: Request, res: Response) => {
     //     ["done", "paid"].includes(item?.status?.toLowerCase())
     // );
     const piercingData = allData.filter((item) => item.color !== "piercing");
+
+    return res.json({ data: piercingData });
+  } catch (error: any) {
+    console.error("Error fetching piercing report:", error.message);
+    return res.status(500).json({ message: "Failed to fetch report" });
+  }
+};
+
+export const getPaymentReport = async (req: Request, res: Response) => {
+  try {
+    const { startDate, endDate, artist } = req.body;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({ message: "Missing startDate or endDate" });
+    }
+
+    const allData: any[] = [];
+
+    // Parse start and end dates safely (avoid timezone shifts)
+    const [startY, startM, startD] = startDate.split("-").map(Number);
+    const [endY, endM, endD] = endDate.split("-").map(Number);
+
+    const start = new Date(startY, startM - 1, startD); // month is 0-indexed
+    const end = new Date(endY, endM - 1, endD);
+    const current = new Date(start);
+
+    while (current <= end) {
+      // Format as MMDDYYYY
+      const formattedDate = `${(current.getMonth() + 1)
+        .toString()
+        .padStart(2, "0")}${current
+        .getDate()
+        .toString()
+        .padStart(2, "0")}${current.getFullYear()}`;
+      // Fetch data for this date
+      const response = await axios.post(
+        "https://hyperinkersform.com/api/fetching",
+        {
+          endDate: formattedDate,
+        }
+      );
+
+      if (response.data?.data) {
+        allData.push(...response.data.data);
+      }
+
+      // Move to next day
+      current.setDate(current.getDate() + 1);
+    }
+    // Filter only piercing items
+    let piercingData = allData.filter(
+      (item) => item?.status?.toLowerCase() === "paid"
+    );
+    if (artist !== "All") {
+      piercingData = piercingData?.filter(
+        (k) => k?.artist?.toLowerCase() === artist?.toLowerCase()
+      );
+    }
 
     return res.json({ data: piercingData });
   } catch (error: any) {
