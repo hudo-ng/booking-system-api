@@ -301,6 +301,8 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       cashRecord,
       cardRecord,
       id: cashRecord?.id ?? cardRecord?.id ?? "",
+      cash_id: cashRecord?.id ?? "",
+      card_id: cardRecord?.id ?? "",
     });
   } catch (err: any) {
     console.error("Payment Error:", err.response?.data || err.message);
