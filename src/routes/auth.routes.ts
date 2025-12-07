@@ -7,6 +7,7 @@ import {
   createVerification,
   validateVerification,
   getTrackingPaymentById,
+  changePassword,
 } from "../controllers/auth.controller";
 import { getAllMiniPhoto } from "../controllers/management.controller";
 
@@ -22,4 +23,5 @@ router.get("/payment/:id", getTrackingPaymentById);
 router.post("/verification/create", createVerification);
 // Validate code
 router.post("/verification/validate", validateVerification);
+router.post("/change-password", changePassword);
 export default router;
