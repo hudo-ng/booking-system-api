@@ -325,7 +325,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
           cash: Cash ?? 0,
           card: Card ?? 0,
           id: extra_data?.id,
-          tip: 0,
+          tip: dejavoo?.Amounts?.TipAmount ?? 0,
           documentId: extra_data?.documentId,
           collectionId: extra_data?.collectionId,
         }
