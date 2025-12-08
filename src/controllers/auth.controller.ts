@@ -171,7 +171,9 @@ export const logInByIdToken = async (req: Request, res: Response) => {
 
 export const createPaymentRequest = async (req: Request, res: Response) => {
   try {
-    const { artist, Cash, Card, item_service, is_cashapp } = req.body;
+    const { artist, Cash, Card, item_service, is_cashapp, extra_data } =
+      req.body;
+
     let isCashApp = is_cashapp ?? false;
     if (!artist) {
       return res
@@ -294,7 +296,37 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
         },
       });
     }
-
+    // UPDATE PAY IN FIREBASE DATABASE
+    if (extra_data?.paid_by && extra_data?.id && extra_data?.documentId) {
+      if (Card > 0) {
+        if (
+          !dejavoo?.GeneralResponse?.Message?.toLowerCase().includes("approved")
+        ) {
+          return res.json({
+            success: true,
+            dejavoo,
+            cashRecord,
+            cardRecord,
+            id: cashRecord?.id ?? cardRecord?.id ?? "",
+            cash_id: cashRecord?.id ?? "",
+            card_id: cardRecord?.id ?? "",
+          });
+        }
+      }
+      await axios.patch("https://hyperinkersform.com/api/piercing/payment", {
+        tracking_payment_id: cashRecord?.id ?? cardRecord?.id ?? "",
+        cash_id: cashRecord?.id ?? "",
+        card_id: cardRecord?.id ?? "",
+        status: "paid",
+        paid_by: extra_data?.paid_by ?? "",
+        cash: Cash ?? 0,
+        card: Card ?? 0,
+        id: extra_data?.id,
+        tip: 0,
+        documentId: extra_data?.documentId,
+        collectionId: extra_data?.collectionId,
+      });
+    }
     return res.json({
       success: true,
       dejavoo,
