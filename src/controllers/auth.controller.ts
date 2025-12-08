@@ -313,19 +313,23 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
           });
         }
       }
-      await axios.patch("https://hyperinkersform.com/api/piercing/payment", {
-        tracking_payment_id: cashRecord?.id ?? cardRecord?.id ?? "",
-        cash_id: cashRecord?.id ?? "",
-        card_id: cardRecord?.id ?? "",
-        status: "paid",
-        paid_by: extra_data?.paid_by ?? "",
-        cash: Cash ?? 0,
-        card: Card ?? 0,
-        id: extra_data?.id,
-        tip: 0,
-        documentId: extra_data?.documentId,
-        collectionId: extra_data?.collectionId,
-      });
+
+      await axios.patch(
+        `https://hyperinkersform.com/api/${item_service}/payment`,
+        {
+          tracking_payment_id: cashRecord?.id ?? cardRecord?.id ?? "",
+          cash_id: cashRecord?.id ?? "",
+          card_id: cardRecord?.id ?? "",
+          status: "paid",
+          paid_by: extra_data?.paid_by ?? "",
+          cash: Cash ?? 0,
+          card: Card ?? 0,
+          id: extra_data?.id,
+          tip: 0,
+          documentId: extra_data?.documentId,
+          collectionId: extra_data?.collectionId,
+        }
+      );
     }
     return res.json({
       success: true,
