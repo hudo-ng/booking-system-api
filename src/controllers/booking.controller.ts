@@ -54,6 +54,7 @@ export const requestBooking = async (req: Request, res: Response) => {
     deposit_amount,
     quote_amount,
     extra_deposite_category,
+    deposit_category,
   } = req.body as {
     date: string;
     startTime: string;
@@ -69,6 +70,7 @@ export const requestBooking = async (req: Request, res: Response) => {
     deposit_amount: number;
     quote_amount: number;
     extra_deposite_category: string;
+    deposit_category: string;
   };
 
   const employee = await prisma.user.findUnique({ where: { id: employeeId } });
@@ -144,7 +146,7 @@ export const requestBooking = async (req: Request, res: Response) => {
           dob: dobDate,
           address: address || null,
           paidWith: paidWith || null,
-          deposit_category: paidWith,
+          deposit_category: deposit_category ?? "",
           extra_deposit_category: extra_deposite_category ?? "",
           deposit_amount: deposit_amount,
           quote_amount: quote_amount,
