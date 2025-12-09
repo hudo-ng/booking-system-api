@@ -214,9 +214,10 @@ export const requestBooking = async (req: Request, res: Response) => {
 
 export const bookWithPayment = async (req: Request, res: Response) => {
   const { id: employeeId } = req.params;
-  const { amount, sourceId, booking } = req.body as {
+  const { amount, sourceId, method, booking } = req.body as {
     amount: number | string;
     sourceId: string;
+    method: "Debit/Credit" | "Apple Pay";
     booking: {
       date: string;
       startTime: string;
@@ -227,12 +228,15 @@ export const bookWithPayment = async (req: Request, res: Response) => {
       detail?: string;
       dob?: string;
       address?: string;
-      paidWith?: string;
       attachments?: IncomingAttachment[];
       deposit_amount: number;
       quote_amount: number;
     };
   };
+
+  if (!["Debit/Credit", "Apple Pay"].includes(method)) {
+    return res.status(400).json({ message: "Invalid payment method" });
+  }
 
   const {
     date,
@@ -244,17 +248,10 @@ export const bookWithPayment = async (req: Request, res: Response) => {
     detail,
     dob,
     address,
-    paidWith,
     attachments,
     deposit_amount,
     quote_amount,
   } = booking;
-
-  if (paidWith !== "Debit/Credit") {
-    return res
-      .status(400)
-      .json({ message: "book-with-payment is only for card payments" });
-  }
 
   const employee = await prisma.user.findUnique({ where: { id: employeeId } });
   if (!employee || employee.role !== "employee") {
@@ -263,6 +260,7 @@ export const bookWithPayment = async (req: Request, res: Response) => {
 
   const start = dayjs(startTime);
   const end = dayjs(endTime);
+
   if (!start.isValid() || !end.isValid()) {
     return res.status(400).json({ message: "Invalid start or end time" });
   }
@@ -303,14 +301,18 @@ export const bookWithPayment = async (req: Request, res: Response) => {
       endTime: { gt: start.toDate() },
     },
   });
-  if (conflict)
+
+  if (conflict) {
     return res.status(400).json({ message: "Time slot already booked!" });
+  }
 
   let dobDate: Date | null = null;
   if (dob) {
     const d = dayjs(dob, "YYYY-MM-DD", true);
-    if (!d.isValid() || !d.isAfter(dayjs())) dobDate = d.toDate();
-    else return res.status(400).json({ message: "Invalid date of birth" });
+    if (!d.isValid() || d.isAfter(dayjs())) {
+      return res.status(400).json({ message: "Invalid date of birth" });
+    }
+    dobDate = d.toDate();
   }
 
   try {
@@ -340,11 +342,13 @@ export const bookWithPayment = async (req: Request, res: Response) => {
           endTime: end.toDate(),
           dob: dobDate,
           address: address || null,
-          paidWith: paidWith || "Debit/Credit",
-          deposit_amount: deposit_amount,
-          quote_amount: quote_amount,
+          paidWith: method,
+          deposit_amount,
+          quote_amount,
           payment_id: safePayment.id,
           payment_status: "PAID",
+          deposit_category: method,
+          extra_deposit_category: `${method}:${safePayment.id}`,
         },
       });
 
@@ -388,7 +392,7 @@ export const bookWithPayment = async (req: Request, res: Response) => {
 
         if (tokens.length) {
           await sendPushAsync(tokens, {
-            title: "New booking (card paid)",
+            title: `New booking (${method} paid)`,
             body: `${customerName} paid and requested ${start
               .tz(ZONE)
               .format("MMM D, HH:mm")}–${end.tz(ZONE).format("HH:mm")}`,
@@ -407,7 +411,7 @@ export const bookWithPayment = async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error("bookWithPayment error:", err);
     return res.status(500).json({
-      message: err?.message || "Failed to complete card payment + booking",
+      message: err?.message || "Failed to complete payment + booking",
     });
   }
 };
