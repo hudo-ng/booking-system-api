@@ -125,7 +125,7 @@ export const createAppointment = async (req: Request, res: Response) => {
       } USD. Prepare: https://tinyurl.com/52x5pjx4`;
       const artistBody = `New appointment scheduled ${
         newAppointment?.assignedBy?.name &&
-        " by" + newAppointment?.assignedBy?.name
+        ` by ${newAppointment?.assignedBy?.name}`
       } with Artist: ${
         newAppointment?.employee?.name
       } on ${chicagoTime} with deposit: ${newAppointment?.deposit_amount} via ${
@@ -594,7 +594,7 @@ export const updateAppointment = async (req: Request, res: Response) => {
     }
 
     const artistBody = `New appointment scheduled ${
-      updated?.assignedBy?.name && " by" + updated?.assignedBy?.name
+      updated?.assignedBy?.name && ` by ${updated?.assignedBy?.name}`
     } with Artist: ${updated?.employee?.name} on ${chicagoTime} with deposit: ${
       updated?.deposit_amount
     } via ${updated?.deposit_category}`;
