@@ -336,12 +336,12 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
     }
     // UPDATE PAY IN FIREBASE DATABASE
     if (extra_data?.paid_by && extra_data?.id && extra_data?.documentId) {
-      if (Card > 0) {
+      if (typeof Card === "number" && Card > 0) {
         if (
           !dejavoo?.GeneralResponse?.Message?.toLowerCase().includes("approved")
         ) {
           return res.json({
-            success: true,
+            success: false,
             dejavoo,
             cashRecord,
             cardRecord,
@@ -350,6 +350,17 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
             card_id: cardRecord?.id ?? "",
           });
         }
+      }
+      if (!cardRecord?.message?.includes("approved")) {
+        return res.status(400).json({
+          success: false,
+          dejavoo,
+          cashRecord,
+          cardRecord,
+          id: cashRecord?.id ?? cardRecord?.id ?? "",
+          cash_id: cashRecord?.id ?? "",
+          card_id: cardRecord?.id ?? "",
+        });
       }
 
       await axios.patch(
