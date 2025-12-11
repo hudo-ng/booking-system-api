@@ -75,6 +75,7 @@ export const login = async (req: Request, res: Response) => {
       isOwner: user.isOwner,
       is_reception: user.is_reception,
       deviceId: deviceId ?? null,
+      slug: user.slug,
     },
     config.jwtSecret,
     { expiresIn: "1y" }
@@ -149,6 +150,7 @@ export const logInByIdToken = async (req: Request, res: Response) => {
         isOwner: user.isOwner,
         is_reception: user.is_reception,
         deviceId: deviceId ?? null,
+        slug: user.slug,
       },
       config.jwtSecret,
       { expiresIn: "1y" }
