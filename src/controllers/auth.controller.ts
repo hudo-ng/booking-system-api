@@ -351,7 +351,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
           });
         }
       }
-      if (!cardRecord?.message?.includes("approved")) {
+      if (cardRecord !== null && !cardRecord?.message?.includes("approved")) {
         return res.status(400).json({
           success: false,
           dejavoo,
