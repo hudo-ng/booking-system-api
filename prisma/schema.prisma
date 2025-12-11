@@ -312,7 +312,13 @@ model TrackingPayment {
 
   // Custom fields
   artist                  String
-  payment_method           String  // "Cash" | "Card"
+  payment_method          String  // "Cash" | "Card"
+  service_price           Float?
+  jewelry_price           Float?
+  saline_price            Float?
+  document_id             String?
+  customer_name           String?
+  customer_phone          String?
 
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt

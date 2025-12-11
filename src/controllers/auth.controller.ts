@@ -210,8 +210,26 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
           transactionType: isCashApp ? "CashAppPayment" : "CashPayment",
           amount: Cash,
           artist,
-          payment_method: "Cash",
+          payment_method: extra_data?.paid_by ?? "Cash",
           item_service: item_service ? item_service : "Undefined",
+          service_price:
+            extra_data?.service_price &&
+            typeof extra_data?.service_price === "number"
+              ? extra_data?.service_price
+              : 0,
+          jewelry_price:
+            extra_data?.jewelry_price &&
+            typeof extra_data?.jewelry_price === "number"
+              ? extra_data?.jewelry_price
+              : 0,
+          saline_price:
+            extra_data?.saline_price &&
+            typeof extra_data?.saline_price === "number"
+              ? extra_data?.saline_price
+              : 0,
+          document_id: extra_data?.documentId ?? "",
+          customer_name: extra_data?.customer_name ?? "",
+          customer_phone: extra_data?.customer_phone ?? "",
         },
       });
     }
@@ -293,8 +311,26 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
           message: dejavoo?.GeneralResponse?.Message,
           detailedMessage: dejavoo?.GeneralResponse?.DetailedMessage,
           artist,
-          payment_method: "Card",
+          payment_method: extra_data?.paid_by ?? "Card",
           item_service: item_service ? item_service : "Undefined",
+          service_price:
+            extra_data?.service_price &&
+            typeof extra_data?.service_price === "number"
+              ? extra_data?.service_price
+              : 0,
+          jewelry_price:
+            extra_data?.jewelry_price &&
+            typeof extra_data?.jewelry_price === "number"
+              ? extra_data?.jewelry_price
+              : 0,
+          saline_price:
+            extra_data?.saline_price &&
+            typeof extra_data?.saline_price === "number"
+              ? extra_data?.saline_price
+              : 0,
+          document_id: extra_data?.documentId ?? "",
+          customer_name: extra_data?.customer_name ?? "",
+          customer_phone: extra_data?.customer_phone ?? "",
         },
       });
     }
