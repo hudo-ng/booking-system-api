@@ -55,6 +55,7 @@ export const requestBooking = async (req: Request, res: Response) => {
     quote_amount,
     extra_deposite_category,
     deposit_category,
+    slug,
   } = req.body as {
     date: string;
     startTime: string;
@@ -71,13 +72,15 @@ export const requestBooking = async (req: Request, res: Response) => {
     quote_amount: number;
     extra_deposite_category: string;
     deposit_category: string;
+    slug?: string;
   };
 
   const employee = await prisma.user.findUnique({ where: { id: employeeId } });
   if (!employee || employee.role !== "employee") {
     return res.status(404).json({ message: "Employee not found" });
   }
-
+  const asigneePerson = await prisma.user.findFirst({ where: { slug: slug } });
+  let assigneeId = asigneePerson ? asigneePerson.id : undefined;
   const start = dayjs(startTime);
   const end = dayjs(endTime);
   if (!start.isValid() || !end.isValid()) {
@@ -150,6 +153,7 @@ export const requestBooking = async (req: Request, res: Response) => {
           extra_deposit_category: extra_deposite_category ?? "",
           deposit_amount: deposit_amount,
           quote_amount: quote_amount,
+          ...(assigneeId ? { assignedById: assigneeId } : {}),
         },
       });
 
