@@ -366,10 +366,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
           tip: dejavoo?.Amounts?.TipAmount ?? 0,
           documentId: extra_data?.documentId,
           collectionId: extra_data?.collectionId,
-          ...(extra_data?.price &&
-            typeof extra_data?.price === "number" && {
-              price: extra_data?.price,
-            }),
+          paid_money: (Cash ?? 0) + (Card ?? 0),
         }
       );
     }
