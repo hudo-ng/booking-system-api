@@ -341,7 +341,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
           !dejavoo?.GeneralResponse?.Message?.toLowerCase().includes("approved")
         ) {
           return res.json({
-            success: false,
+            success: true,
             dejavoo,
             cashRecord,
             cardRecord,
