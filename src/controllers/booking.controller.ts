@@ -334,6 +334,7 @@ export const bookWithPayment = async (req: Request, res: Response) => {
     const safePayment = removeBigInts(paymentResp.payment);
 
     const created = await prisma.$transaction(async (tx) => {
+      const amountWithoutFees = Number(amount) * 0.97
       const appt = await tx.appointment.create({
         data: {
           employeeId,
@@ -347,7 +348,7 @@ export const bookWithPayment = async (req: Request, res: Response) => {
           dob: dobDate,
           address: address || null,
           paidWith: method,
-          deposit_amount,
+          deposit_amount: amountWithoutFees,
           quote_amount,
           payment_id: safePayment.id,
           payment_status: "PAID",
