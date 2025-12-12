@@ -75,6 +75,7 @@ model Appointment {
   quote_amount           Float?
   completed_photo_url    String?
   isException            Boolean                 @default(false)
+  deposit_has_been_used  Boolean?                @default(false)       
   occurrenceIndex        Int?
   seriesId               String?
   assignedById           String?

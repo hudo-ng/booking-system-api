@@ -365,7 +365,31 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
           card_id: cardRecord?.id ?? "",
         });
       }
+      let deposit_has_been_used = false;
+      // Check if appointment_id is provided in extra_data and update the appointment
+      if (
+        extra_data?.appointment_id &&
+        typeof extra_data?.deposit_has_been_used === "boolean" &&
+        extra_data?.deposit_has_been_used
+      ) {
+        // Fetch the current appointment to check the current value of deposit_has_been_used
+        const currentAppointment = await prisma.appointment.findUnique({
+          where: { id: extra_data.appointment_id },
+          select: { deposit_has_been_used: true },
+        });
 
+        // Only update if the current deposit_has_been_used is false
+        if (currentAppointment?.deposit_has_been_used === false) {
+          await prisma.appointment.update({
+            where: { id: extra_data.appointment_id },
+            data: {
+              deposit_has_been_used: extra_data?.deposit_has_been_used ?? false,
+            },
+          });
+          deposit_has_been_used = true;
+        }
+      }
+      // PAYMENT SUCCESFULLY
       await axios.patch(
         `https://hyperinkersform.com/api/${item_service}/payment`,
         {
@@ -381,6 +405,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
           documentId: extra_data?.documentId,
           collectionId: extra_data?.collectionId,
           paid_money: (Cash ?? 0) + (Card ?? 0),
+          deposit_has_been_used: deposit_has_been_used,
         }
       );
     }
