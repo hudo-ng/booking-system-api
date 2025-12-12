@@ -178,20 +178,18 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       req.body;
 
     let isCashApp = is_cashapp ?? false;
+
     if (!artist) {
-      return res
-        .status(400)
-        .json({ success: false, error: "Amount and artist are required" });
+      return res.status(400).json({
+        success: false,
+        error: "Amount and artist are required",
+      });
     }
 
-    // --- Generate ReferenceId ---
-    let lastPayment = await prisma.trackingPayment.findFirst({
-      orderBy: { createdAt: "desc" },
-    });
-
-    const nextReferenceId = lastPayment
-      ? (parseInt(lastPayment.referenceId) + 1).toString().padStart(6, "0")
-      : "000001";
+    // --- Generate random ReferenceId (100,000 to 100,000,000)
+    const nextReferenceId = (
+      Math.floor(Math.random() * (100_000_000 - 100_000 + 1)) + 100_000
+    ).toString();
 
     if (isNaN(Card) && isNaN(Cash)) {
       return res.status(400).json({
@@ -199,43 +197,42 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
         error: "Amount must be a valid number",
       });
     }
-    let cashRecord = null;
-    let cardRecord = null;
-    let dejavoo = null;
+
+    let cashRecord: any = null;
+    let cardRecord: any = null;
+    let dejavoo: any = null;
+
+    const tasks: Promise<any>[] = [];
+
     // --- CASH PAYMENT ---
     if (typeof Cash === "number" && Cash > 0) {
-      cashRecord = await prisma.trackingPayment.create({
-        data: {
-          referenceId: nextReferenceId,
-          paymentType: isCashApp ? "CashApp" : "Cash",
-          transactionType: isCashApp ? "CashAppPayment" : "CashPayment",
-          amount: Cash,
-          artist,
-          payment_method: extra_data?.paid_by ?? "Cash",
-          item_service: item_service ? item_service : "Undefined",
-          service_price:
-            extra_data?.service_price &&
-            typeof extra_data?.service_price === "number"
-              ? extra_data?.service_price
-              : 0,
-          jewelry_price:
-            extra_data?.jewelry_price &&
-            typeof extra_data?.jewelry_price === "number"
-              ? extra_data?.jewelry_price
-              : 0,
-          saline_price:
-            extra_data?.saline_price &&
-            typeof extra_data?.saline_price === "number"
-              ? extra_data?.saline_price
-              : 0,
-          document_id: extra_data?.documentId ?? "",
-          customer_name: extra_data?.customer_name ?? "",
-          customer_phone: extra_data?.customer_phone ?? "",
-        },
-      });
+      tasks.push(
+        prisma.trackingPayment
+          .create({
+            data: {
+              referenceId: nextReferenceId,
+              paymentType: isCashApp ? "CashApp" : "Cash",
+              transactionType: isCashApp ? "CashAppPayment" : "CashPayment",
+              amount: Cash,
+              artist,
+              payment_method: extra_data?.paid_by ?? "Cash",
+              item_service: item_service || "Undefined",
+              service_price: extra_data?.service_price || 0,
+              jewelry_price: extra_data?.jewelry_price || 0,
+              saline_price: extra_data?.saline_price || 0,
+              document_id: extra_data?.documentId ?? "",
+              customer_name: extra_data?.customer_name ?? "",
+              customer_phone: extra_data?.customer_phone ?? "",
+            },
+          })
+          .then((rec) => {
+            cashRecord = rec;
+          })
+      );
     }
+
+    // --- CARD PAYMENT ---
     if (typeof Card === "number" && Card > 0) {
-      // --- CARD PAYMENT ---
       const Tpn = process.env.DEJAVOO_TPN!;
       const Authkey = process.env.DEJAVOO_AUTH_KEY!;
       const RegisterId = process.env.DEJAVOO_REGISTER_ID!;
@@ -264,181 +261,136 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
         CustomFields: { document_id: "hello", id: "10" },
       };
 
-      const response = await axios.post(
-        "https://spinpos.net/v2/Payment/Sale",
-        payload,
-        { headers: { "Content-Type": "application/json" }, timeout: 120000 }
+      tasks.push(
+        axios
+          .post("https://spinpos.net/v2/Payment/Sale", payload, {
+            headers: { "Content-Type": "application/json" },
+            timeout: 120000,
+          })
+          .then(async (response) => {
+            dejavoo = response.data;
+
+            const rec = await prisma.trackingPayment.create({
+              data: {
+                referenceId: nextReferenceId,
+                paymentType: "Credit",
+                transactionType: dejavoo?.TransactionType ?? "CardPayment",
+                invoiceNumber: dejavoo?.InvoiceNumber,
+                batchNumber: dejavoo?.BatchNumber,
+                transactionNumber: dejavoo?.TransactionNumber,
+                authCode: dejavoo?.AuthCode,
+                voided: dejavoo?.Voided ?? false,
+                pnReferenceId: dejavoo?.PNReferenceId,
+
+                totalAmount: dejavoo?.Amounts?.TotalAmount,
+                amount: dejavoo?.Amounts?.Amount,
+                tipAmount: dejavoo?.Amounts?.TipAmount,
+                feeAmount: dejavoo?.Amounts?.FeeAmount,
+                taxAmount: dejavoo?.Amounts?.TaxAmount,
+
+                cardType: dejavoo?.CardData?.CardType,
+                entryType: dejavoo?.CardData?.EntryType,
+                last4: dejavoo?.CardData?.Last4,
+                first4: dejavoo?.CardData?.First4,
+                BIN: dejavoo?.CardData?.BIN,
+                name: dejavoo?.CardData?.Name,
+
+                emvApplicationName: dejavoo?.EMVData?.ApplicationName,
+                emvAID: dejavoo?.EMVData?.AID,
+                emvTVR: dejavoo?.EMVData?.TVR,
+                emvTSI: dejavoo?.EMVData?.TSI,
+                emvIAD: dejavoo?.EMVData?.IAD,
+                emvARC: dejavoo?.EMVData?.ARC,
+
+                hostResponseCode: dejavoo?.GeneralResponse?.HostResponseCode,
+                hostResponseMessage:
+                  dejavoo?.GeneralResponse?.HostResponseMessage,
+                resultCode: dejavoo?.GeneralResponse?.ResultCode,
+                statusCode: dejavoo?.GeneralResponse?.StatusCode,
+                message: dejavoo?.GeneralResponse?.Message,
+                detailedMessage: dejavoo?.GeneralResponse?.DetailedMessage,
+
+                artist,
+                payment_method: extra_data?.paid_by ?? "Card",
+                item_service: item_service || "Undefined",
+                service_price: extra_data?.service_price || 0,
+                jewelry_price: extra_data?.jewelry_price || 0,
+                saline_price: extra_data?.saline_price || 0,
+                document_id: extra_data?.documentId ?? "",
+                customer_name: extra_data?.customer_name ?? "",
+                customer_phone: extra_data?.customer_phone ?? "",
+              },
+            });
+
+            cardRecord = rec;
+          })
       );
-
-      dejavoo = response.data;
-
-      // --- Insert into DB ---
-      cardRecord = await prisma.trackingPayment.create({
-        data: {
-          referenceId: nextReferenceId,
-          paymentType: "Credit",
-          transactionType: dejavoo?.TransactionType ?? "CardPayment",
-          invoiceNumber: dejavoo?.InvoiceNumber,
-          batchNumber: dejavoo?.BatchNumber,
-          transactionNumber: dejavoo?.TransactionNumber,
-          authCode: dejavoo?.AuthCode,
-          voided: dejavoo?.Voided ?? false,
-          pnReferenceId: dejavoo?.PNReferenceId,
-
-          totalAmount: dejavoo?.Amounts?.TotalAmount,
-          amount: dejavoo?.Amounts?.Amount,
-          tipAmount: dejavoo?.Amounts?.TipAmount,
-          feeAmount: dejavoo?.Amounts?.FeeAmount,
-          taxAmount: dejavoo?.Amounts?.TaxAmount,
-
-          cardType: dejavoo?.CardData?.CardType,
-          entryType: dejavoo?.CardData?.EntryType,
-          last4: dejavoo?.CardData?.Last4,
-          first4: dejavoo?.CardData?.First4,
-          BIN: dejavoo?.CardData?.BIN,
-          name: dejavoo?.CardData?.Name,
-
-          emvApplicationName: dejavoo?.EMVData?.ApplicationName,
-          emvAID: dejavoo?.EMVData?.AID,
-          emvTVR: dejavoo?.EMVData?.TVR,
-          emvTSI: dejavoo?.EMVData?.TSI,
-          emvIAD: dejavoo?.EMVData?.IAD,
-          emvARC: dejavoo?.EMVData?.ARC,
-
-          hostResponseCode: dejavoo?.GeneralResponse?.HostResponseCode,
-          hostResponseMessage: dejavoo?.GeneralResponse?.HostResponseMessage,
-          resultCode: dejavoo?.GeneralResponse?.ResultCode,
-          statusCode: dejavoo?.GeneralResponse?.StatusCode,
-          message: dejavoo?.GeneralResponse?.Message,
-          detailedMessage: dejavoo?.GeneralResponse?.DetailedMessage,
-          artist,
-          payment_method: extra_data?.paid_by ?? "Card",
-          item_service: item_service ? item_service : "Undefined",
-          service_price:
-            extra_data?.service_price &&
-            typeof extra_data?.service_price === "number"
-              ? extra_data?.service_price
-              : 0,
-          jewelry_price:
-            extra_data?.jewelry_price &&
-            typeof extra_data?.jewelry_price === "number"
-              ? extra_data?.jewelry_price
-              : 0,
-          saline_price:
-            extra_data?.saline_price &&
-            typeof extra_data?.saline_price === "number"
-              ? extra_data?.saline_price
-              : 0,
-          document_id: extra_data?.documentId ?? "",
-          customer_name: extra_data?.customer_name ?? "",
-          customer_phone: extra_data?.customer_phone ?? "",
-        },
-      });
     }
-    // UPDATE PAY IN FIREBASE DATABASE
-    if (extra_data?.paid_by && extra_data?.id && extra_data?.documentId) {
-      let isFailed = false;
-      if (typeof Card === "number" && Card > 0) {
-        if (
-          !dejavoo?.GeneralResponse?.Message?.toLowerCase().includes("approved")
-        ) {
-          isFailed = true;
-          return res.json({
-            success: true,
-            dejavoo,
-            cashRecord,
-            cardRecord,
-            id: cashRecord?.id ?? cardRecord?.id ?? "",
-            cash_id: cashRecord?.id ?? "",
-            card_id: cardRecord?.id ?? "",
-          });
-        }
+
+    // run both in parallel
+    await Promise.all(tasks);
+
+    // --- DEPOSIT FLAG UPDATE ---
+    let depositHasBeenUsed = false;
+
+    if (
+      extra_data?.appointment_id &&
+      typeof extra_data?.deposit_has_been_used === "boolean" &&
+      extra_data?.deposit_has_been_used
+    ) {
+      const appointment = await prisma.appointment.findUnique({
+        where: { id: extra_data.appointment_id },
+        select: { deposit_has_been_used: true },
+      });
+
+      if (appointment?.deposit_has_been_used === false) {
+        await prisma.appointment.update({
+          where: { id: extra_data.appointment_id },
+          data: {
+            deposit_has_been_used: true,
+          },
+        });
+        depositHasBeenUsed = true;
       }
-      if (
-        cardRecord !== null &&
-        !cardRecord?.message?.toLowerCase()?.includes("approved")
-      ) {
-        isFailed = true;
-        return res.status(400).json({
-          success: false,
-          dejavoo,
-          cashRecord,
-          cardRecord,
-          id: cashRecord?.id ?? cardRecord?.id ?? "",
+    }
+
+    // --- FINAL FIREBASE UPDATE ---
+    const CashAmount = parseMoney(Cash);
+    const CardAmount = parseMoney(Card);
+
+    if (extra_data?.id && extra_data?.documentId) {
+      await axios.patch(
+        `https://hyperinkersform.com/api/${item_service}/payment`,
+        {
+          tracking_payment_id: cashRecord?.id ?? cardRecord?.id ?? "",
           cash_id: cashRecord?.id ?? "",
           card_id: cardRecord?.id ?? "",
-        });
-      }
-      if (!cashRecord?.id && !cardRecord?.id) {
-        isFailed = true;
-        return res.status(400).json({
-          success: false,
-          error: "No valid payment records found",
-        });
-      }
-      let deposit_has_been_used = false;
-      // Check if appointment_id is provided in extra_data and update the appointment
-      if (
-        extra_data?.appointment_id &&
-        typeof extra_data?.deposit_has_been_used === "boolean" &&
-        extra_data?.deposit_has_been_used
-      ) {
-        // Fetch the current appointment to check the current value of deposit_has_been_used
-        const currentAppointment = await prisma.appointment.findUnique({
-          where: { id: extra_data.appointment_id },
-          select: { deposit_has_been_used: true },
-        });
-
-        // Only update if the current deposit_has_been_used is false
-        if (currentAppointment?.deposit_has_been_used === false) {
-          await prisma.appointment.update({
-            where: { id: extra_data.appointment_id },
-            data: {
-              deposit_has_been_used: extra_data?.deposit_has_been_used ?? false,
-            },
-          });
-          deposit_has_been_used = true;
+          status: "paid",
+          paid_by: extra_data?.paid_by ?? "",
+          cash: CashAmount,
+          card: CardAmount,
+          id: extra_data?.id,
+          tip: dejavoo?.Amounts?.TipAmount ?? 0,
+          documentId: extra_data?.documentId,
+          collectionId: extra_data?.collectionId,
+          paid_money: CashAmount + CardAmount,
+          deposit_has_been_used: depositHasBeenUsed,
         }
-      }
-      // PAYMENT SUCCESFULLY
-      let CashAmount = 0;
-      let CardAmount = 0;
-      CashAmount = parseMoney(Cash);
-      CardAmount = parseMoney(Card);
-      if (!isFailed) {
-        await axios.patch(
-          `https://hyperinkersform.com/api/${item_service}/payment`,
-          {
-            tracking_payment_id: cashRecord?.id ?? cardRecord?.id ?? "",
-            cash_id: cashRecord?.id ?? "",
-            card_id: cardRecord?.id ?? "",
-            status: "paid",
-            paid_by: extra_data?.paid_by ?? "",
-            cash: CashAmount,
-            card: CardAmount,
-            id: extra_data?.id,
-            tip: dejavoo?.Amounts?.TipAmount ?? 0,
-            documentId: extra_data?.documentId,
-            collectionId: extra_data?.collectionId,
-            paid_money: CashAmount + CardAmount,
-            deposit_has_been_used: deposit_has_been_used,
-          }
-        );
-      }
+      );
     }
+
     return res.json({
       success: true,
       dejavoo,
       cashRecord,
       cardRecord,
-      id: cashRecord?.id ?? cardRecord?.id ?? "",
+      id: cashRecord?.id ?? cardRecord?.id,
       cash_id: cashRecord?.id ?? "",
       card_id: cardRecord?.id ?? "",
     });
   } catch (err: any) {
     console.error("Payment Error:", err.response?.data || err.message);
 
-    // Terminal busy
     if (err.response?.data?.GeneralResponse?.StatusCode === "2008") {
       const delay = err.response.data.GeneralResponse.DelayBeforeNextRequest;
       return res.status(429).json({
@@ -447,9 +399,10 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       });
     }
 
-    return res
-      .status(500)
-      .json({ success: false, error: err.response?.data || err.message });
+    return res.status(500).json({
+      success: false,
+      error: err.response?.data || err.message,
+    });
   }
 };
 
