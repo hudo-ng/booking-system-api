@@ -7,6 +7,7 @@ import slugify from "slugify";
 import { customAlphabet } from "nanoid";
 import axios from "axios";
 import { sendSMS } from "../utils/sms";
+import { parseMoney } from "../utils/utils";
 
 const prisma = new PrismaClient();
 
@@ -336,10 +337,12 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
     }
     // UPDATE PAY IN FIREBASE DATABASE
     if (extra_data?.paid_by && extra_data?.id && extra_data?.documentId) {
+      let isFailed = false;
       if (typeof Card === "number" && Card > 0) {
         if (
           !dejavoo?.GeneralResponse?.Message?.toLowerCase().includes("approved")
         ) {
+          isFailed = true;
           return res.json({
             success: true,
             dejavoo,
@@ -355,6 +358,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
         cardRecord !== null &&
         !cardRecord?.message?.toLowerCase()?.includes("approved")
       ) {
+        isFailed = true;
         return res.status(400).json({
           success: false,
           dejavoo,
@@ -363,6 +367,13 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
           id: cashRecord?.id ?? cardRecord?.id ?? "",
           cash_id: cashRecord?.id ?? "",
           card_id: cardRecord?.id ?? "",
+        });
+      }
+      if (!cashRecord?.id && !cardRecord?.id) {
+        isFailed = true;
+        return res.status(400).json({
+          success: false,
+          error: "No valid payment records found",
         });
       }
       let deposit_has_been_used = false;
@@ -390,24 +401,30 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
         }
       }
       // PAYMENT SUCCESFULLY
-      await axios.patch(
-        `https://hyperinkersform.com/api/${item_service}/payment`,
-        {
-          tracking_payment_id: cashRecord?.id ?? cardRecord?.id ?? "",
-          cash_id: cashRecord?.id ?? "",
-          card_id: cardRecord?.id ?? "",
-          status: "paid",
-          paid_by: extra_data?.paid_by ?? "",
-          cash: Cash ?? 0,
-          card: Card ?? 0,
-          id: extra_data?.id,
-          tip: dejavoo?.Amounts?.TipAmount ?? 0,
-          documentId: extra_data?.documentId,
-          collectionId: extra_data?.collectionId,
-          paid_money: (Cash ?? 0) + (Card ?? 0),
-          deposit_has_been_used: deposit_has_been_used,
-        }
-      );
+      let CashAmount = 0;
+      let CardAmount = 0;
+      CashAmount = parseMoney(Cash);
+      CardAmount = parseMoney(Card);
+      if (!isFailed) {
+        await axios.patch(
+          `https://hyperinkersform.com/api/${item_service}/payment`,
+          {
+            tracking_payment_id: cashRecord?.id ?? cardRecord?.id ?? "",
+            cash_id: cashRecord?.id ?? "",
+            card_id: cardRecord?.id ?? "",
+            status: "paid",
+            paid_by: extra_data?.paid_by ?? "",
+            cash: CashAmount,
+            card: CardAmount,
+            id: extra_data?.id,
+            tip: dejavoo?.Amounts?.TipAmount ?? 0,
+            documentId: extra_data?.documentId,
+            collectionId: extra_data?.collectionId,
+            paid_money: CashAmount + CardAmount,
+            deposit_has_been_used: deposit_has_been_used,
+          }
+        );
+      }
     }
     return res.json({
       success: true,

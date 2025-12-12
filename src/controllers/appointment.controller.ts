@@ -128,9 +128,9 @@ export const createAppointment = async (req: Request, res: Response) => {
         ` by ${newAppointment?.assignedBy?.name}`
       } with Artist: ${
         newAppointment?.employee?.name
-      } on ${chicagoTime} with deposit: ${newAppointment?.deposit_amount} via ${
-        newAppointment?.deposit_category
-      }`;
+      } on ${chicagoTime} with deposit: ${
+        newAppointment?.deposit_amount
+      }USD via ${newAppointment?.deposit_category}`;
       await sendSMS(phone, customerBody);
       newAppointment?.employee?.phone_number &&
         (await sendSMS(newAppointment?.employee?.phone_number, artistBody));
