@@ -394,7 +394,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
         }
       }
       // PAYMENT SUCCESFULLY
-      if (!cardRecord?.id && !cardRecord?.id) {
+      if (!cardRecord?.id && !cashRecord?.id) {
         is_failed = true;
       }
       console.log("is_failed:", is_failed);
