@@ -354,7 +354,8 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
         }
       }
       if (
-        cardRecord !== null &&
+        cardRecord?.message &&
+        cardRecord?.message?.length > 2 &&
         !cardRecord?.message?.toLowerCase()?.includes("approved")
       ) {
         is_failed = true;
@@ -396,6 +397,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       if (!cardRecord?.id && !cardRecord?.id) {
         is_failed = true;
       }
+      console.log("is_failed:", is_failed);
       if (!is_failed) {
         await axios.patch(
           `https://hyperinkersform.com/api/${item_service}/payment`,
@@ -415,6 +417,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
             deposit_has_been_used: deposit_has_been_used,
           }
         );
+        console.log("paid_money:", (Cash ?? 0) + (Card ?? 0));
       }
     }
     return res.json({
