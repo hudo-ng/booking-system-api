@@ -259,7 +259,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
         CaptureSignature: true,
         CallbackInfo: { Url: "" },
         GetExtendedData: true,
-        IsReadyForIS: false,
+        IsReadyForIS: true,
         CustomFields: { document_id: "hello", id: "10" },
       };
 
