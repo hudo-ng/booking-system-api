@@ -335,11 +335,13 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       });
     }
     // UPDATE PAY IN FIREBASE DATABASE
+    let is_failed = false;
     if (extra_data?.paid_by && extra_data?.id && extra_data?.documentId) {
-      if (Card > 0) {
+      if (typeof Card === "number" && Card > 0) {
         if (
           !dejavoo?.GeneralResponse?.Message?.toLowerCase().includes("approved")
         ) {
+          is_failed = true;
           return res.json({
             success: true,
             dejavoo,
@@ -351,24 +353,71 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
           });
         }
       }
-
-      await axios.patch(
-        `https://hyperinkersform.com/api/${item_service}/payment`,
-        {
-          tracking_payment_id: cashRecord?.id ?? cardRecord?.id ?? "",
+      if (
+        cardRecord?.message &&
+        cardRecord?.message?.length > 2 &&
+        !cardRecord?.message?.toLowerCase()?.includes("approved")
+      ) {
+        is_failed = true;
+        return res.status(400).json({
+          success: false,
+          dejavoo,
+          cashRecord,
+          cardRecord,
+          id: cashRecord?.id ?? cardRecord?.id ?? "",
           cash_id: cashRecord?.id ?? "",
           card_id: cardRecord?.id ?? "",
-          status: "paid",
-          paid_by: extra_data?.paid_by ?? "",
-          cash: Cash ?? 0,
-          card: Card ?? 0,
-          id: extra_data?.id,
-          tip: dejavoo?.Amounts?.TipAmount ?? 0,
-          documentId: extra_data?.documentId,
-          collectionId: extra_data?.collectionId,
-          paid_money: (Cash ?? 0) + (Card ?? 0),
+        });
+      }
+      let deposit_has_been_used = false;
+      // Check if appointment_id is provided in extra_data and update the appointment
+      if (
+        extra_data?.appointment_id &&
+        typeof extra_data?.deposit_has_been_used === "boolean" &&
+        extra_data?.deposit_has_been_used
+      ) {
+        // Fetch the current appointment to check the current value of deposit_has_been_used
+        const currentAppointment = await prisma.appointment.findUnique({
+          where: { id: extra_data.appointment_id },
+          select: { deposit_has_been_used: true },
+        });
+
+        // Only update if the current deposit_has_been_used is false
+        if (currentAppointment?.deposit_has_been_used === false) {
+          await prisma.appointment.update({
+            where: { id: extra_data.appointment_id },
+            data: {
+              deposit_has_been_used: extra_data?.deposit_has_been_used ?? false,
+            },
+          });
+          deposit_has_been_used = true;
         }
-      );
+      }
+      // PAYMENT SUCCESFULLY
+      if (!cardRecord?.id && !cashRecord?.id) {
+        is_failed = true;
+      }
+      console.log("is_failed:", is_failed);
+      if (!is_failed) {
+        await axios.patch(
+          `https://hyperinkersform.com/api/${item_service}/payment`,
+          {
+            tracking_payment_id: cashRecord?.id ?? cardRecord?.id ?? "",
+            cash_id: cashRecord?.id ?? "",
+            card_id: cardRecord?.id ?? "",
+            status: "paid",
+            paid_by: extra_data?.paid_by ?? "",
+            cash: Cash ?? 0,
+            card: Card ?? 0,
+            id: extra_data?.id,
+            tip: dejavoo?.Amounts?.TipAmount ?? 0,
+            documentId: extra_data?.documentId,
+            collectionId: extra_data?.collectionId,
+            paid_money: (Cash ?? 0) + (Card ?? 0),
+            deposit_has_been_used: deposit_has_been_used,
+          }
+        );
+      }
     }
     return res.json({
       success: true,
