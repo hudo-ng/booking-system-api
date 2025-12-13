@@ -266,7 +266,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       const response = await axios.post(
         "https://spinpos.net/v2/Payment/Sale",
         payload,
-        { headers: { "Content-Type": "application/json" }, timeout: 120000 }
+        { headers: { "Content-Type": "application/json" }, timeout: 240000 }
       );
 
       dejavoo = response.data;
