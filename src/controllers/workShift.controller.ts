@@ -154,13 +154,13 @@ export const clockIn = async (req: Request, res: Response) => {
   }
 
   // ✅ Compare now to schedule window
-  if (nowChicago.isBefore(startTime) || nowChicago.isAfter(endTime)) {
-    return res.status(403).json({
-      message: `You can only clock in between ${startTime.format(
-        "h:mm A"
-      )} and ${endTime.format("h:mm A")} Chicago time.`,
-    });
-  }
+  // if (nowChicago.isBefore(startTime) || nowChicago.isAfter(endTime)) {
+  //   return res.status(403).json({
+  //     message: `You can only clock in between ${startTime.format(
+  //       "h:mm A"
+  //     )} and ${endTime.format("h:mm A")} Chicago time.`,
+  //   });
+  // }
 
   // ✅ Clock in
   const shift = await prisma.workShift.create({
