@@ -261,6 +261,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
         GetExtendedData: true,
         IsReadyForIS: true,
         CustomFields: { document_id: "hello", id: "10" },
+        SPInProxyTimeout: 240,
       };
 
       const response = await axios.post(
@@ -439,6 +440,12 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
         error: `Terminal busy. Please wait ${Math.ceil(delay / 60)} min.`,
       });
     }
+    if (err.response?.data?.GeneralResponse?.StatusCode === "2007") {
+      return res.status(429).json({
+        success: false,
+        error: `Timeout waiting for card swipe. Please try again.`,
+      });
+    }
 
     return res
       .status(500)
@@ -446,6 +453,48 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
   }
 };
 
+const BASE_URL = "https://spinpos.net/v2";
+
+export const getDailyReport = async (req: Request, res: Response) => {
+  try {
+    const Tpn = process.env.DEJAVOO_TPN!;
+    const Authkey = process.env.DEJAVOO_AUTH_KEY!;
+
+    if (!Tpn || !Authkey) {
+      return res.status(500).json({
+        success: false,
+        error: "Missing Dejavoo credentials",
+      });
+    }
+
+    const payload = {
+      Tpn,
+      Authkey,
+      SPInProxyTimeout: null, // optional
+    };
+
+    const response = await axios.post(
+      `https://spinpos.net/v2/Report/Summary`,
+      payload,
+      {
+        headers: { "Content-Type": "application/json" },
+        timeout: 20000, // Daily reports can take time
+      }
+    );
+
+    return res.json({
+      success: true,
+      report: response.data,
+    });
+  } catch (err: any) {
+    console.error("Daily Report Error:", err.response?.data || err.message);
+
+    return res.status(500).json({
+      success: false,
+      error: err.response?.data || err.message,
+    });
+  }
+};
 export const getTrackingPaymentById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
