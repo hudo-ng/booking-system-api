@@ -176,40 +176,84 @@ export const clockIn = async (req: Request, res: Response) => {
   });
 };
 
-// ✅ Clock Out
 export const clockOut = async (req: Request, res: Response) => {
   const { id: userId } = (req as any).user;
 
-  // Find the latest active shift (not clocked out yet)
+  // Optional clock-out time from payload
+  const { clockOutAt } = req.body as {
+    clockOutAt?: string; // ISO string expected
+  };
+
+  // -----------------------------
+  // FIND ACTIVE SHIFT
+  // -----------------------------
   const activeShift = await prisma.workShift.findFirst({
-    where: { userId, clockOut: null },
-    orderBy: { clockIn: "desc" }, // latest shift
+    where: {
+      userId,
+      clockOut: null,
+    },
+    orderBy: { clockIn: "desc" },
   });
 
   if (!activeShift) {
     return res.status(400).json({ message: "Not clocked in" });
   }
 
+  // -----------------------------
+  // RESOLVE CLOCK-OUT TIME
+  // -----------------------------
   const now = new Date();
+  const resolvedClockOut = clockOutAt ? new Date(clockOutAt) : now;
+
+  if (isNaN(resolvedClockOut.getTime())) {
+    return res.status(400).json({ message: "Invalid clockOutAt value" });
+  }
+
   const clockInDate = new Date(activeShift.clockIn);
 
-  // Check if the shift is within the last 2 days
+  // -----------------------------
+  // VALIDATIONS
+  // -----------------------------
+
+  // ❌ Cannot clock out before clock-in
+  if (resolvedClockOut <= clockInDate) {
+    return res
+      .status(400)
+      .json({ message: "Clock-out time must be after clock-in time" });
+  }
+
+  // ❌ Cannot clock out too far in the future (anti-abuse)
+  const FUTURE_LIMIT_MIN = 10;
+  if (resolvedClockOut.getTime() > now.getTime() + FUTURE_LIMIT_MIN * 60000) {
+    return res
+      .status(400)
+      .json({ message: "Clock-out time is too far in the future" });
+  }
+
+  // ❌ Shift too old (existing rule)
   const twoDaysAgo = new Date(now);
   twoDaysAgo.setDate(now.getDate() - 2);
 
   if (clockInDate < twoDaysAgo) {
-    return res
-      .status(400)
-      .json({ message: "Active shift is older than 2 days, cannot clock out" });
+    return res.status(400).json({
+      message: "Active shift is older than 2 days, cannot clock out",
+    });
   }
 
-  // Clock out
+  // -----------------------------
+  // CLOCK OUT
+  // -----------------------------
   const shift = await prisma.workShift.update({
     where: { id: activeShift.id },
-    data: { clockOut: now },
+    data: {
+      clockOut: resolvedClockOut,
+    },
   });
 
-  res.json({ message: "Clocked out successfully", shift });
+  res.json({
+    message: "Clocked out successfully",
+    shift,
+  });
 };
 
 // ✅ Extend Shift (Owner only)
@@ -617,7 +661,9 @@ export const getPaymentReport = async (req: Request, res: Response) => {
     }
     // Filter only piercing items
     let piercingData = allData.filter(
-      (item) => item?.status?.toLowerCase() === "paid"
+      (item) =>
+        item?.status?.toLowerCase() === "paid" ||
+        item?.status?.toLowerCase() === "done"
     );
     if (artist !== "All") {
       piercingData = piercingData?.filter(
