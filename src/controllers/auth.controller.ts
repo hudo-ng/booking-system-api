@@ -313,54 +313,70 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
   }
 };
 
-// Import Network adapter separately
-
-const Network = require("escpos-network");
-
 export const printTcpReceipt = async (req: Request, res: Response) => {
   const { client, service, employee, amount, date } = req.body;
-  const PRINTER_IP = "192.168.0.200";
+
+  const PRINTER_IP = "192.168.0.200"; // <-- your printer IP
   const PORT = 9100;
 
   try {
     // Create network device
-    const device = new Network(PRINTER_IP, PORT);
+    const device = new escpos.Network(PRINTER_IP, PORT);
 
     // Open device
     await new Promise<void>((resolve, reject) => {
       device.open((err: any) => {
-        if (err) reject(err);
-        else resolve();
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
       });
     });
 
-    // Create printer instance
+    // Create printer
     const printer = new escpos.Printer(device);
 
     // Print receipt
     printer
+      .align("CT")
+      .style("B")
+      .size(1, 1)
       .text("✨ LUXURY SALON RECEIPT ✨")
       .drawLine()
+      .align("LT")
+      .style("NORMAL")
       .text(`Client: ${client}`)
       .text(`Service: ${service}`)
       .text(`Employee: ${employee}`)
       .text(`Date: ${date}`)
-      .text(`Amount: $${amount}`)
       .drawLine()
+      .align("RT")
+      .style("B")
+      .text(`TOTAL: $${amount}`)
+      .drawLine()
+      .align("CT")
+      .style("NORMAL")
       .text("Thank you for visiting!")
+      .feed(2)
       .cut();
 
-    // Close device after a short delay
+    // Close connection safely
     setTimeout(() => {
       device.close();
     }, 500);
 
-    return res.json({ success: true, message: "Printed via TCP 9100" });
-  } catch (err: any) {
+    return res.json({
+      success: true,
+      message: "Receipt printed via TCP 9100",
+    });
+  } catch (error: any) {
+    console.error("Printer Error:", error);
+
     return res.status(500).json({
       success: false,
-      message: "Printer error",
-      error: err.message,
+      message: "Printer connection failed",
+      error: error.message,
     });
   }
 };
