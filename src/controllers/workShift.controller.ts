@@ -179,14 +179,11 @@ export const clockIn = async (req: Request, res: Response) => {
 export const clockOut = async (req: Request, res: Response) => {
   const { id: userId } = (req as any).user;
 
-  // Optional clock-out time from payload
-  const { clockOutAt } = req.body as {
-    clockOutAt?: string; // ISO string expected
+  // ✅ Safe destructuring
+  const { clockOutAt } = (req?.body || {}) as {
+    clockOutAt?: string;
   };
 
-  // -----------------------------
-  // FIND ACTIVE SHIFT
-  // -----------------------------
   const activeShift = await prisma.workShift.findFirst({
     where: {
       userId,
@@ -199,9 +196,6 @@ export const clockOut = async (req: Request, res: Response) => {
     return res.status(400).json({ message: "Not clocked in" });
   }
 
-  // -----------------------------
-  // RESOLVE CLOCK-OUT TIME
-  // -----------------------------
   const now = new Date();
   const resolvedClockOut = clockOutAt ? new Date(clockOutAt) : now;
 
@@ -211,18 +205,12 @@ export const clockOut = async (req: Request, res: Response) => {
 
   const clockInDate = new Date(activeShift.clockIn);
 
-  // -----------------------------
-  // VALIDATIONS
-  // -----------------------------
-
-  // ❌ Cannot clock out before clock-in
   if (resolvedClockOut <= clockInDate) {
     return res
       .status(400)
       .json({ message: "Clock-out time must be after clock-in time" });
   }
 
-  // ❌ Cannot clock out too far in the future (anti-abuse)
   const FUTURE_LIMIT_MIN = 10;
   if (resolvedClockOut.getTime() > now.getTime() + FUTURE_LIMIT_MIN * 60000) {
     return res
@@ -230,7 +218,6 @@ export const clockOut = async (req: Request, res: Response) => {
       .json({ message: "Clock-out time is too far in the future" });
   }
 
-  // ❌ Shift too old (existing rule)
   const twoDaysAgo = new Date(now);
   twoDaysAgo.setDate(now.getDate() - 2);
 
@@ -240,9 +227,6 @@ export const clockOut = async (req: Request, res: Response) => {
     });
   }
 
-  // -----------------------------
-  // CLOCK OUT
-  // -----------------------------
   const shift = await prisma.workShift.update({
     where: { id: activeShift.id },
     data: {
