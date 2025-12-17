@@ -221,7 +221,7 @@ export const bookWithPayment = async (req: Request, res: Response) => {
   const { amount, sourceId, method, booking } = req.body as {
     amount: number | string;
     sourceId: string;
-    method: "Debit/Credit" | "Apple Pay";
+    method: "Debit/Credit" | "Apple Pay" | "Cash App Pay";
     booking: {
       date: string;
       startTime: string;
@@ -238,7 +238,7 @@ export const bookWithPayment = async (req: Request, res: Response) => {
     };
   };
 
-  if (!["Debit/Credit", "Apple Pay"].includes(method)) {
+  if (!["Debit/Credit", "Apple Pay", "Cash App Pay"].includes(method)) {
     return res.status(400).json({ message: "Invalid payment method" });
   }
 
@@ -293,7 +293,6 @@ export const bookWithPayment = async (req: Request, res: Response) => {
   });
 
   if (off) {
-    console.log(off);
     return res.status(400).json({ message: "Employee is off on that day" });
   }
 
@@ -320,7 +319,11 @@ export const bookWithPayment = async (req: Request, res: Response) => {
   }
 
   try {
-    const idempotencyKey = crypto.randomUUID();
+    const idempotencyKey = crypto
+      .createHash("sha256")
+      .update(`${sourceId}:${employeeId}`)
+      .digest("hex");
+
     const paymentResp = await squareClient.payments.create({
       idempotencyKey,
       amountMoney: {
@@ -331,10 +334,22 @@ export const bookWithPayment = async (req: Request, res: Response) => {
       locationId: process.env.SQUARE_LOCATION_ID!,
     });
 
-    const safePayment = removeBigInts(paymentResp.payment);
+    const payment = paymentResp.payment;
+
+    if (!payment || payment.status !== "COMPLETED") {
+      return res
+        .status(402)
+        .json({ message: "Payment not completed", payment });
+    }
+
+    if (payment.cardDetails?.avsStatus !== "AVS_ACCEPTED") {
+      console.warn("AVS warning: ", payment.cardDetails?.avsStatus);
+    }
+
+    const safePayment = removeBigInts(payment);
 
     const created = await prisma.$transaction(async (tx) => {
-      const amountWithoutFees = Number(amount) * 0.965
+      const amountWithoutFees = (Number(amount) * 0.965).toFixed(2);
       const appt = await tx.appointment.create({
         data: {
           employeeId,
@@ -348,7 +363,7 @@ export const bookWithPayment = async (req: Request, res: Response) => {
           dob: dobDate,
           address: address || null,
           paidWith: method,
-          deposit_amount: amountWithoutFees,
+          deposit_amount: parseFloat(amountWithoutFees),
           quote_amount,
           payment_id: safePayment.id,
           payment_status: "PAID",
