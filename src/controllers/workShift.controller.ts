@@ -183,7 +183,8 @@ export const clockOut = async (req: Request, res: Response) => {
   const { clockOutAt } = (req?.body || {}) as {
     clockOutAt?: string;
   };
-
+  console.log("userId:", userId);
+  console.log("clockOutAt:", clockOutAt);
   const activeShift = await prisma.workShift.findFirst({
     where: {
       userId,
