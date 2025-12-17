@@ -6,7 +6,6 @@ import { config } from "../config";
 import slugify from "slugify";
 import { customAlphabet } from "nanoid";
 import axios from "axios";
-import escpos from "escpos";
 import fetch from "node-fetch";
 
 const prisma = new PrismaClient();
@@ -313,69 +312,39 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
   }
 };
 
-export const printTcpReceipt = async (req: Request, res: Response) => {
-  const { client, service, employee, amount, date } = req.body;
+const escpos = require("escpos");
+const Network = require("escpos-network");
 
-  const PRINTER_IP = "192.168.0.200"; // <-- your printer IP
+export const printTcpReceipt = async (req: any, res: any) => {
+  const PRINTER_IP = "192.168.0.200";
   const PORT = 9100;
 
   try {
-    // Create network device
-    const device = new escpos.Network(PRINTER_IP, PORT);
+    const device = new Network(PRINTER_IP, PORT);
 
-    // Open device
-    await new Promise<void>((resolve, reject) => {
-      device.open((err: any) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve();
-        }
+    device.open((err: any) => {
+      if (err) {
+        console.error("Printer connection failed:", err);
+        return res.status(500).json({
+          success: false,
+          message: "Cannot connect to printer",
+        });
+      }
+
+      const printer = new escpos.Printer(device);
+
+      printer.align("CT").text("TEST PRINT").feed(2).cut().close();
+
+      return res.json({
+        success: true,
+        message: "Printed successfully",
       });
     });
-
-    // Create printer
-    const printer = new escpos.Printer(device);
-
-    // Print receipt
-    printer
-      .align("CT")
-      .style("B")
-      .size(1, 1)
-      .text("✨ LUXURY SALON RECEIPT ✨")
-      .drawLine()
-      .align("LT")
-      .style("NORMAL")
-      .text(`Client: ${client}`)
-      .text(`Service: ${service}`)
-      .text(`Employee: ${employee}`)
-      .text(`Date: ${date}`)
-      .drawLine()
-      .align("RT")
-      .style("B")
-      .text(`TOTAL: $${amount}`)
-      .drawLine()
-      .align("CT")
-      .style("NORMAL")
-      .text("Thank you for visiting!")
-      .feed(2)
-      .cut();
-
-    // Close connection safely
-    setTimeout(() => {
-      device.close();
-    }, 500);
-
-    return res.json({
-      success: true,
-      message: "Receipt printed via TCP 9100",
-    });
   } catch (error: any) {
-    console.error("Printer Error:", error);
+    console.error("Printer error:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Printer connection failed",
       error: error.message,
     });
   }
