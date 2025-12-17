@@ -322,7 +322,8 @@ export const bookWithPayment = async (req: Request, res: Response) => {
     const idempotencyKey = crypto
       .createHash("sha256")
       .update(`${sourceId}:${employeeId}`)
-      .digest("hex");
+      .digest("hex")
+      .slice(0, 45);
 
     const paymentResp = await squareClient.payments.create({
       idempotencyKey,
