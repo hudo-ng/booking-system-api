@@ -343,14 +343,30 @@ export const bookWithPayment = async (req: Request, res: Response) => {
         .json({ message: "Payment not completed", payment });
     }
 
-    if (payment.cardDetails?.avsStatus !== "AVS_ACCEPTED") {
-      console.warn("AVS warning: ", payment.cardDetails?.avsStatus);
+    const avs = payment.cardDetails?.avsStatus;
+
+    if (avs && !["AVS_ACCEPTED", "AVS_NOT_CHECKED"].includes(avs)) {
+      console.warn("AVS failed:", avs);
     }
 
     const safePayment = removeBigInts(payment);
 
     const created = await prisma.$transaction(async (tx) => {
       const amountWithoutFees = Number(amount) * 0.965;
+      const dbPayment = await tx.webPaymentTracking.create({
+        data: {
+          provider: "SQUARE",
+          providerPaymentId: payment.id!,
+          method,
+          amount: Number(amount),
+          currency: "USD",
+          status: payment.status!,
+          avsStatus: payment.cardDetails?.avsStatus ?? null,
+          cvvStatus: payment.cardDetails?.cvvStatus ?? null,
+          rawResponse: safePayment,
+        },
+      });
+
       const appt = await tx.appointment.create({
         data: {
           employeeId,
@@ -366,8 +382,6 @@ export const bookWithPayment = async (req: Request, res: Response) => {
           paidWith: method,
           deposit_amount: amountWithoutFees,
           quote_amount,
-          payment_id: safePayment.id,
-          payment_status: "PAID",
           deposit_category: method,
           extra_deposit_category: `${method}:${safePayment.id}`,
         },
@@ -387,6 +401,11 @@ export const bookWithPayment = async (req: Request, res: Response) => {
           })),
         });
       }
+
+      await tx.webPaymentTracking.update({
+        where: { id: dbPayment.id },
+        data: { bookingId: appt.id },
+      });
 
       return appt;
     });

@@ -14,7 +14,6 @@ model User {
   name                     String
   role                     Role
   createdAt                DateTime          @default(now())
-  deletedAt                DateTime?
   colour                   String?
   isAdmin                  Boolean           @default(false)
   isOwner                  Boolean           @default(false)
@@ -29,6 +28,7 @@ model User {
   wage                     Float?            @default(0)
   is_reception             Boolean           @default(false)
   currentDeviceId          String?
+  deletedAt                DateTime?
   Appointment              Appointment[]     @relation("AssignedBy")
   Appoinment               Appointment[]
   CleanSchedule            CleanSchedule[]
@@ -70,18 +70,19 @@ model Appointment {
   dob                    DateTime?
   extra_deposit_category String?
   paidWith               String?
-  payment_id             String?
-  payment_status         PaymentStatus?
   quote_amount           Float?
   completed_photo_url    String?
   isException            Boolean                 @default(false)
-  deposit_has_been_used  Boolean?                @default(false)       
   occurrenceIndex        Int?
   seriesId               String?
   assignedById           String?
+  payment_id             String?
+  payment_status         PaymentStatus?
+  deposit_has_been_used  Boolean?                @default(false)
   assignedBy             User?                   @relation("AssignedBy", fields: [assignedById], references: [id])
   employee               User                    @relation(fields: [employeeId], references: [id])
   RecurringSeries        RecurringSeries?        @relation(fields: [seriesId], references: [id])
+  webPayment             WebPaymentTracking?
   AppointmentAttachment  AppointmentAttachment[]
   AppointmentHistory     AppointmentHistory[]
   VerificationCodes      VerificationCode[]
@@ -95,10 +96,8 @@ model VerificationCode {
   createdAt      DateTime    @default(now())
   expiresAt      DateTime
   isUsed         Boolean     @default(false)
-
   appointment    Appointment @relation(fields: [appointment_id], references: [id])
 }
-
 
 model Notification {
   id                     String   @id @default(uuid())
@@ -121,16 +120,15 @@ model Notification {
 }
 
 model MiniPhoto {
-  id                     String   @id @default(uuid())
-  custom_id              String   
-  photo_url              String
-  style                  String
-  category               String
-  is_showed              Boolean  @default(false)
-  updated_at             DateTime @updatedAt @map("updated_at")
-  created_at             DateTime @default(now()) @map("created_at")
-  created_by             String
-
+  id         String   @id @default(uuid())
+  custom_id  String
+  photo_url  String
+  style      String
+  category   String
+  is_showed  Boolean  @default(false)
+  updated_at DateTime @updatedAt @map("updated_at")
+  created_at DateTime @default(now()) @map("created_at")
+  created_by String
 }
 
 model AppointmentAttachment {
@@ -172,16 +170,16 @@ model WorkingHours {
 }
 
 model TimeOff {
-  id         String   @id @default(uuid())
+  id         String        @id @default(uuid())
   employeeId String
   date       DateTime
   reason     String?
-  employee   User     @relation(fields: [employeeId], references: [id])
-  status      TimeOffStatus   @default(PENDING)
-  batchId     String?
-  createdAt   DateTime        @default(now())
-  reviewedAt  DateTime?
-  reviewedBy  String?
+  batchId    String?
+  createdAt  DateTime      @default(now())
+  reviewedAt DateTime?
+  reviewedBy String?
+  status     TimeOffStatus @default(PENDING)
+  employee   User          @relation(fields: [employeeId], references: [id])
 
   @@unique([employeeId, date])
 }
@@ -244,6 +242,74 @@ model RecurringSeries {
   employee     User           @relation(fields: [employeeId], references: [id])
 }
 
+model TrackingPayment {
+  id                  String   @id @default(uuid())
+  referenceId         String
+  invoiceNumber       String?
+  batchNumber         String?
+  transactionNumber   String?
+  paymentType         String
+  transactionType     String
+  authCode            String?
+  voided              Boolean  @default(false)
+  pnReferenceId       String?
+  totalAmount         Float?
+  amount              Float?
+  tipAmount           Float?
+  feeAmount           Float?
+  taxAmount           Float?
+  cardType            String?
+  entryType           String?
+  last4               String?
+  first4              String?
+  BIN                 String?
+  name                String?
+  emvApplicationName  String?
+  emvAID              String?
+  emvTVR              String?
+  emvTSI              String?
+  emvIAD              String?
+  emvARC              String?
+  hostResponseCode    String?
+  hostResponseMessage String?
+  resultCode          String?
+  statusCode          String?
+  message             String?
+  detailedMessage     String?
+  artist              String
+  payment_method      String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  item_service        String?
+  document_id         String?
+  saline_price        Float?
+  service_price       Float?
+  customer_name       String?
+  customer_phone      String?
+  jewelry_price       Float?
+}
+
+model WebPaymentTracking {
+  id                String @id @default(cuid())
+  provider          String
+  providerPaymentId String @unique
+  method            String
+
+  amount   Decimal
+  currency String
+
+  status    String
+  avsStatus String?
+  cvvStatus String?
+
+  bookingId String?      @unique
+  booking   Appointment? @relation(fields: [bookingId], references: [id])
+
+  rawResponse Json
+
+  createdAt DateTime @default(now())
+}
+
 enum AppointmentStatus {
   pending
   accepted
@@ -265,64 +331,6 @@ enum TimeOffStatus {
   PENDING
   APPROVED
   REJECTED
- }
-
-model TrackingPayment {
-  id                      String   @id @default(uuid())
-  item_service            String?
-  referenceId             String   
-  invoiceNumber           String?
-  batchNumber             String?
-  transactionNumber       String?
-  paymentType             String
-  transactionType         String
-  authCode                String?
-  voided                  Boolean  @default(false)
-  pnReferenceId           String?
-
-  // Amounts
-  totalAmount             Float?
-  amount                  Float?
-  tipAmount               Float?
-  feeAmount               Float?
-  taxAmount               Float?
-
-  // Card info
-  cardType                String?
-  entryType               String?
-  last4                   String?
-  first4                  String?
-  BIN                     String?
-  name                    String?
-
-  // EMV Data
-  emvApplicationName      String?
-  emvAID                  String?
-  emvTVR                  String?
-  emvTSI                  String?
-  emvIAD                  String?
-  emvARC                  String?
-
-  // Host / General response
-  hostResponseCode        String?
-  hostResponseMessage     String?
-  resultCode              String?
-  statusCode              String?
-  message                 String?
-  detailedMessage         String?
-
-  // Custom fields
-  artist                  String
-  payment_method          String  // "Cash" | "Card"
-  service_price           Float?
-  jewelry_price           Float?
-  saline_price            Float?
-  document_id             String?
-  customer_name           String?
-  customer_phone          String?
-
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
 }
 
 enum PaymentStatus {
