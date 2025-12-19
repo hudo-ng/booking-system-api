@@ -114,19 +114,14 @@ export const createAppointment = async (req: Request, res: Response) => {
         .tz("America/Chicago")
         .format("MMM DD YYYY hh:mm A");
 
-      const customerBody = `Thank you for choosing Hyper Inkers! Your appointment has been scheduled ${
-        newAppointment.assignedBy?.name
-          ? "by " + newAppointment.assignedBy?.name
+      const customerBody = `Thank you for choosing Hyper Inkers! Your appointment has been scheduled with Artist: ${newAppointment.employee.name} on ${chicagoTime}. Deposit: ${newAppointment.deposit_amount} USD. Prepare: https://tinyurl.com/52x5pjx4`;
+      const artistBody = `New appointment with customer ${
+        newAppointment.customerName
+      } has been scheduled ${
+        newAppointment?.assignedBy?.name
+          ? ` by ${newAppointment?.assignedBy?.name}`
           : ""
-      } with Artist: ${
-        newAppointment.employee.name
-      } on ${chicagoTime}. Deposit: ${
-        newAppointment.deposit_amount
-      } USD. Prepare: https://tinyurl.com/52x5pjx4`;
-      const artistBody = `New appointment scheduled ${
-        newAppointment?.assignedBy?.name !== undefined &&
-        ` by ${newAppointment?.assignedBy?.name}`
-      } with Artist: ${
+      }} with Artist: ${
         newAppointment?.employee?.name
       } on ${chicagoTime} with deposit: ${
         newAppointment?.deposit_amount
@@ -522,7 +517,7 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
 
 export const updateAppointment = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { startTime, endTime, status } = req.body;
+  const { startTime, endTime, status, issendSMS } = req.body;
 
   const { userId } = (req as any).user as {
     userId: string;
@@ -579,30 +574,41 @@ export const updateAppointment = async (req: Request, res: Response) => {
       },
     });
     // ✅ Send SMS if appointment is accepted
-    const chicagoTime = dayjs(updated.startTime)
-      .tz("America/Chicago")
-      .format("MMM DD YYYY hh:mm A");
-    if (status === "accepted" && appointment.phone) {
-      //   const artistBody = `Your appointment with ${appointment.customerName} is confirmed. Look forward to take care your customer soon.`;
-      const customerBody = `Thank you for choosing Hyper Inkers! Your appointment has been scheduled ${
-        updated.assignedBy?.name ? "by " + updated.assignedBy?.name : ""
-      } with Artist: ${updated.employee.name} on ${chicagoTime}. Deposit: ${
-        updated.deposit_amount
-      } USD. Prepare: https://tinyurl.com/52x5pjx4`;
+    if (issendSMS === true) {
+      const chicagoTime = dayjs(updated.startTime)
+        .tz("America/Chicago")
+        .format("MMM DD YYYY hh:mm A");
+      if (status === "accepted" && appointment.phone) {
+        //   const artistBody = `Your appointment with ${appointment.customerName} is confirmed. Look forward to take care your customer soon.`;
+        const customerBody = `Thank you for choosing Hyper Inkers! Your appointment has been scheduled ${
+          updated.assignedBy?.name ? "by " + updated.assignedBy?.name : ""
+        } with Artist: ${updated.employee.name} on ${chicagoTime}. Deposit: ${
+          updated.deposit_amount
+        } USD. Prepare: https://tinyurl.com/52x5pjx4`;
 
-      await sendSMS(appointment.phone, customerBody);
+        await sendSMS(appointment.phone, customerBody);
+
+        const artistBody = `New appointment with customer ${
+          appointment.customerName
+        } has been scheduled${
+          updated?.assignedBy?.name ? ` by ${updated?.assignedBy?.name}` : ""
+        } with Artist: ${
+          updated?.employee?.name
+        } on ${chicagoTime} with deposit: ${updated?.deposit_amount} via ${
+          updated?.deposit_category
+        }`;
+
+        updated?.employee?.phone_number &&
+          (await sendSMS(updated?.employee?.phone_number, artistBody));
+      } else {
+        const customerBodyCancel = `Your appointment on ${chicagoTime} with Artist ${updated.employee.name} has been canceled.
+Text (210) 997-9737 or your artist to reschedule when you’re ready`;
+        await sendSMS(appointment.phone, customerBodyCancel);
+        const artistBodyCancel = `The appointment with customer ${appointment.customerName} on ${chicagoTime} has been canceled.`;
+        updated?.employee?.phone_number &&
+          (await sendSMS(updated?.employee?.phone_number, artistBodyCancel));
+      }
     }
-
-    const artistBody = `New appointment scheduled ${
-      updated?.assignedBy?.name !== undefined &&
-      ` by ${updated?.assignedBy?.name}`
-    } with Artist: ${updated?.employee?.name} on ${chicagoTime} with deposit: ${
-      updated?.deposit_amount
-    } via ${updated?.deposit_category}`;
-
-    updated?.employee?.phone_number &&
-      (await sendSMS(updated?.employee?.phone_number, artistBody));
-    // }
     res.json(updated);
   } catch (err) {
     console.error("Update failed", err);
