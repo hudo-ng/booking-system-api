@@ -66,6 +66,7 @@ model Appointment {
   createdAt              DateTime?               @default(now())
   address                String?
   deposit_amount         Float?
+  deposit_status         AppointmentStatus       @default(accepted)
   deposit_category       String?
   dob                    DateTime?
   extra_deposit_category String?
@@ -86,6 +87,20 @@ model Appointment {
   AppointmentAttachment  AppointmentAttachment[]
   AppointmentHistory     AppointmentHistory[]
   VerificationCodes      VerificationCode[]
+  DepositAppointment     DepositAppointment[]
+}
+
+model DepositAppointment {
+    id             String      @id @default(uuid())
+    status                 AppointmentStatus       @default(pending)
+    updatedAt              DateTime?               @default(now())
+    createdAt              DateTime?               @default(now())
+    attachment_url         String?
+    deposit_amount         Float?
+    deposit_category       String?
+    extra_deposit_category String?
+    appointment_id String
+    appointment    Appointment @relation(fields: [appointment_id], references: [id])
 }
 
 model VerificationCode {

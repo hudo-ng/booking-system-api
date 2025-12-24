@@ -17,6 +17,9 @@ import {
   editRecurringAppointments,
   deleteRecurringAppointments,
   getAppointmentsByAssigneeAndDate,
+  getLatestDepositAppointment,
+  createDepositAppointment,
+  updateDepositAppointment,
 } from "../controllers/appointment.controller";
 import { enforceDevice } from "../middleware/enforceDevice";
 
@@ -40,5 +43,9 @@ router.delete("/recurring/:seriesId", deleteRecurringAppointments);
 router.put("/edit", editAppointment);
 router.delete("/delete", deleteAppointment);
 router.get("/by-assignee/:assigneeId", getAppointmentsByAssigneeAndDate);
+// DePOSIT
+router.get("/deposit-appointments/latest", getLatestDepositAppointment);
+router.post("/deposit-appointments", createDepositAppointment);
+router.put("/deposit-appointments", updateDepositAppointment);
 
 export default router;

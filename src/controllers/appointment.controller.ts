@@ -33,7 +33,7 @@ export const getAppointments = async (req: Request, res: Response) => {
 export const createAppointment = async (req: Request, res: Response) => {
   const { userId } = (req as any).user as { userId?: string };
   if (!userId) {
-    return res.json([]);
+    return res.status(401).json({ message: "Unauthorized" });
   }
 
   try {
@@ -45,7 +45,6 @@ export const createAppointment = async (req: Request, res: Response) => {
       detail,
       startTime,
       endTime,
-      // ✅ New fields for Notification
       quote_amount,
       deposit_amount,
       deposit_category,
@@ -66,75 +65,257 @@ export const createAppointment = async (req: Request, res: Response) => {
       }
     }
 
-    // ✅ Create Appointment
-    const newAppointment = await prisma.appointment.create({
-      data: {
-        employeeId: employeeId ? employeeId : userId,
-        assignedById: assignedById ?? userId,
-        customerName,
-        email,
-        phone,
-        detail,
-        status: "accepted",
-        startTime: startTime ? new Date(startTime) : null,
-        endTime: endTime ? new Date(endTime) : null,
-        quote_amount,
-        deposit_amount,
-        deposit_category,
-        extra_deposit_category,
-      },
-      include: {
-        employee: {
-          select: { id: true, name: true, phone_number: true },
+    // ✅ Use transaction to ensure consistency
+    const result = await prisma.$transaction(async (tx) => {
+      // 1️⃣ Create Appointment
+      const appointment = await tx.appointment.create({
+        data: {
+          employeeId: employeeId ?? userId,
+          assignedById: assignedById ?? userId,
+          customerName,
+          email,
+          phone,
+          detail,
+          status: "accepted",
+
+          startTime: startTime ? new Date(startTime) : null,
+          endTime: endTime ? new Date(endTime) : null,
+
+          quote_amount,
+          deposit_amount,
+          deposit_category,
+          extra_deposit_category,
+
+          // ✅ Force deposit status to pending
+          deposit_status: "pending",
         },
-        assignedBy: {
-          select: { id: true, name: true },
+        include: {
+          employee: {
+            select: { id: true, name: true, phone_number: true },
+          },
+          assignedBy: {
+            select: { id: true, name: true },
+          },
         },
-      },
+      });
+
+      // 2️⃣ Create DepositAppointment
+      await tx.depositAppointment.create({
+        data: {
+          appointment_id: appointment.id,
+          status: "pending",
+          deposit_amount,
+          deposit_category,
+          extra_deposit_category,
+          updatedAt: new Date(),
+          createdAt: new Date(),
+        },
+      });
+
+      // 3️⃣ Create Notification
+      await tx.notification.create({
+        data: {
+          created_by: userId,
+          title: "created new appointment",
+          description: detail ?? "No description provided",
+          customer_name: customerName ?? "No name provided",
+          quote_amount,
+          deposit_amount,
+          deposit_category,
+          extra_deposit_category,
+          appointment_start_time: startTime ? new Date(startTime) : new Date(),
+          appointment_end_time: endTime ? new Date(endTime) : new Date(),
+        },
+      });
+
+      return appointment;
     });
 
-    // ✅ Create Notification after successful appointment
-    await prisma.notification.create({
-      data: {
-        created_by: userId,
-        description: detail ? detail : "No description provided",
-        title: "created new appointment",
-        customer_name: customerName ? customerName : "No name provided",
-        quote_amount,
-        deposit_amount,
-        deposit_category,
-        extra_deposit_category,
-        appointment_start_time: startTime ? new Date(startTime) : new Date(),
-        appointment_end_time: endTime ? new Date(endTime) : new Date(),
-      },
-    });
-
+    // ✅ SMS Notifications
     if (is_sms_released) {
-      const chicagoTime = dayjs(newAppointment.startTime)
+      const chicagoTime = dayjs(result.startTime)
         .tz("America/Chicago")
         .format("MMM DD YYYY hh:mm A");
 
-      const customerBody = `Thank you for choosing Hyper Inkers! Your appointment has been scheduled with Artist: ${newAppointment.employee.name} on ${chicagoTime}. Deposit: ${newAppointment.deposit_amount} USD. Prepare: https://tinyurl.com/52x5pjx4`;
+      const customerBody = `Thank you for choosing Hyper Inkers! Your appointment has been scheduled with Artist: ${result.employee.name} on ${chicagoTime}. Deposit: ${result.deposit_amount} USD. Prepare: https://tinyurl.com/52x5pjx4`;
       const artistBody = `New appointment with customer ${
-        newAppointment.customerName
+        result.customerName
       } has been scheduled ${
-        newAppointment?.assignedBy?.name
-          ? ` by ${newAppointment?.assignedBy?.name}`
-          : ""
+        result?.assignedBy?.name ? ` by ${result?.assignedBy?.name}` : ""
       }} with Artist: ${
-        newAppointment?.employee?.name
-      } on ${chicagoTime} with deposit: ${
-        newAppointment?.deposit_amount
-      }USD via ${newAppointment?.deposit_category}`;
+        result?.employee?.name
+      } on ${chicagoTime} with deposit: ${result?.deposit_amount}USD via ${
+        result?.deposit_category
+      }`;
       await sendSMS(phone, customerBody);
-      newAppointment?.employee?.phone_number &&
-        (await sendSMS(newAppointment?.employee?.phone_number, artistBody));
+      result?.employee?.phone_number &&
+        (await sendSMS(result?.employee?.phone_number, artistBody));
     }
 
-    res.status(201).json(newAppointment);
+    return res.status(201).json(result);
   } catch (error) {
     console.error("Failed to create appointment", error);
-    res.status(500).json({ message: "Failed to create appointment" });
+    return res.status(500).json({ message: "Failed to create appointment" });
+  }
+};
+
+export const getLatestDepositAppointment = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const deposits = await prisma.depositAppointment.findMany({
+      take: 100,
+      orderBy: {
+        createdAt: "desc",
+      },
+      include: {
+        appointment: {
+          select: {
+            id: true,
+            customerName: true,
+            startTime: true,
+            endTime: true,
+            deposit_amount: true,
+            deposit_category: true,
+            employee: {
+              select: { id: true, name: true, colour: true },
+            },
+          },
+        },
+      },
+    });
+
+    return res.json(deposits);
+  } catch (error) {
+    console.error("Failed to fetch latest deposit appointments", error);
+    return res
+      .status(500)
+      .json({ message: "Failed to fetch deposit appointments" });
+  }
+};
+export const updateDepositAppointment = async (req: Request, res: Response) => {
+  const {
+    id,
+    status,
+    deposit_amount,
+    deposit_category,
+    extra_deposit_category,
+  } = req.body;
+
+  if (!id) {
+    return res
+      .status(400)
+      .json({ message: "DepositAppointment id is required" });
+  }
+
+  if (!status) {
+    return res.status(400).json({ message: "status is required" });
+  }
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      // 1️⃣ Update DepositAppointment
+      const updatedDeposit = await tx.depositAppointment.update({
+        where: { id },
+        data: {
+          status,
+          deposit_amount,
+          deposit_category,
+          extra_deposit_category,
+          updatedAt: new Date(),
+        },
+      });
+
+      // 2️⃣ Sync Appointment.deposit_status
+      await tx.appointment.update({
+        where: { id: updatedDeposit.appointment_id },
+        data: {
+          deposit_status: status,
+        },
+      });
+
+      return updatedDeposit;
+    });
+
+    return res.json(result);
+  } catch (error) {
+    console.error("Failed to update deposit appointment", error);
+    return res
+      .status(500)
+      .json({ message: "Failed to update deposit appointment" });
+  }
+};
+
+export const createDepositAppointment = async (req: Request, res: Response) => {
+  try {
+    const {
+      appointment_id,
+      deposit_amount,
+      deposit_category,
+      extra_deposit_category,
+      attachment_url,
+    } = req.body;
+
+    if (!appointment_id) {
+      return res.status(400).json({
+        message: "appointment_id is required",
+      });
+    }
+
+    // Find existing deposit appointment
+    const existingDeposit = await prisma.depositAppointment.findFirst({
+      where: { appointment_id },
+    });
+
+    let deposit;
+
+    if (existingDeposit) {
+      // Update existing deposit appointment
+      deposit = await prisma.depositAppointment.update({
+        where: { id: existingDeposit.id },
+        data: {
+          deposit_amount,
+          deposit_category,
+          extra_deposit_category,
+          attachment_url,
+          updatedAt: new Date(),
+          status: "pending",
+        },
+      });
+    } else {
+      // Create new deposit appointment
+      deposit = await prisma.depositAppointment.create({
+        data: {
+          appointment_id,
+          status: "pending",
+          deposit_amount,
+          deposit_category,
+          extra_deposit_category,
+          attachment_url,
+          updatedAt: new Date(),
+          createdAt: new Date(),
+        },
+      });
+    }
+
+    // Update the corresponding Appointment record
+    await prisma.appointment.update({
+      where: { id: appointment_id },
+      data: {
+        deposit_amount,
+        deposit_category,
+        extra_deposit_category,
+        deposit_status: "pending",
+      },
+    });
+
+    return res.status(existingDeposit ? 200 : 201).json(deposit);
+  } catch (error) {
+    console.error("Failed to create/update deposit appointment", error);
+    return res.status(500).json({
+      message: "Failed to create/update deposit appointment",
+    });
   }
 };
 
@@ -428,6 +609,7 @@ export const getAllAppointmentsBySelectedDate = async (
       where: {
         startTime: { lte: endOfDay },
         endTime: { gte: startOfDay },
+        status: "accepted",
       },
       orderBy: { startTime: "asc" },
       include: {
