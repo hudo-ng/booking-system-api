@@ -352,7 +352,7 @@ export const bookWithPayment = async (req: Request, res: Response) => {
     const safePayment = removeBigInts(payment);
 
     const created = await prisma.$transaction(async (tx) => {
-      const amountWithoutFees = Number(amount) * 0.965;
+      const amountWithoutFees = Number(amount) / (1+ 0.035);
       const dbPayment = await tx.webPaymentTracking.create({
         data: {
           provider: "SQUARE",
