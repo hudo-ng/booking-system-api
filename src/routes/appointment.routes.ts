@@ -20,6 +20,7 @@ import {
   getLatestDepositAppointment,
   createDepositAppointment,
   updateDepositAppointment,
+  duplicateAppointment,
 } from "../controllers/appointment.controller";
 import { enforceDevice } from "../middleware/enforceDevice";
 
@@ -37,6 +38,7 @@ router.patch("/:id", updateAppointment);
 router.put("/completed", updateCompletedPhotoUrlAppointmentById);
 router.get("/:id", getAppointmentById);
 router.post("/create", createAppointment);
+router.post("/duplicate", duplicateAppointment);
 router.post("/recurring", createRecurringAppointments);
 router.put("/recurring/:seriesId", editRecurringAppointments);
 router.delete("/recurring/:seriesId", deleteRecurringAppointments);

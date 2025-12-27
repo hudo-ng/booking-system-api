@@ -87,7 +87,7 @@ export const createAppointment = async (req: Request, res: Response) => {
           extra_deposit_category,
 
           // ✅ Force deposit status to pending
-          deposit_status: "pending",
+          deposit_status: deposit_amount > 0 ? "pending" : "ignored",
         },
         include: {
           employee: {
@@ -98,20 +98,19 @@ export const createAppointment = async (req: Request, res: Response) => {
           },
         },
       });
-
-      // 2️⃣ Create DepositAppointment
-      await tx.depositAppointment.create({
-        data: {
-          appointment_id: appointment.id,
-          status: "pending",
-          deposit_amount,
-          deposit_category,
-          extra_deposit_category,
-          updatedAt: new Date(),
-          createdAt: new Date(),
-        },
-      });
-
+      if (deposit_amount > 0) {
+        await tx.depositAppointment.create({
+          data: {
+            appointment_id: appointment.id,
+            status: "pending",
+            deposit_amount,
+            deposit_category,
+            extra_deposit_category,
+            updatedAt: new Date(),
+            createdAt: new Date(),
+          },
+        });
+      }
       // 3️⃣ Create Notification
       await tx.notification.create({
         data: {
@@ -156,6 +155,183 @@ export const createAppointment = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Failed to create appointment", error);
     return res.status(500).json({ message: "Failed to create appointment" });
+  }
+};
+
+export const duplicateAppointment = async (req: Request, res: Response) => {
+  const { userId } = (req as any).user as { userId?: string };
+  if (!userId) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  try {
+    const {
+      current_appointment_id,
+      transfer_deposit,
+
+      employeeId,
+      customerName,
+      email,
+      phone,
+      detail,
+      startTime,
+      endTime,
+      quote_amount,
+      assignedById,
+      is_sms_released,
+    } = req.body;
+
+    if (!current_appointment_id) {
+      return res.status(400).json({
+        message: "current_appointment_id is required",
+      });
+    }
+
+    // ✅ Validate time
+    if (startTime && endTime) {
+      const start = new Date(startTime);
+      const end = new Date(endTime);
+
+      if (end <= start) {
+        return res.status(400).json({
+          message: "End time must be after start time",
+        });
+      }
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      // 1️⃣ Get current appointment + deposit record
+      const currentAppointment = await tx.appointment.findUnique({
+        where: { id: current_appointment_id },
+        include: {
+          DepositAppointment: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+          },
+        },
+      });
+
+      if (!currentAppointment) {
+        throw new Error("Original appointment not found");
+      }
+
+      const currentDeposit = currentAppointment.DepositAppointment?.[0];
+
+      // 2️⃣ Decide deposit values for NEW appointment
+      const newDepositAmount = transfer_deposit
+        ? currentAppointment.deposit_amount ?? 0
+        : 0;
+
+      const newDepositCategory =
+        transfer_deposit && currentAppointment?.deposit_category
+          ? currentAppointment?.deposit_category
+          : "No deposit";
+
+      const newExtraDepositCategory = transfer_deposit
+        ? currentAppointment.extra_deposit_category
+        : "";
+
+      // 3️⃣ Create NEW appointment
+      const newAppointment = await tx.appointment.create({
+        data: {
+          employeeId: employeeId ?? currentAppointment.employeeId,
+          assignedById: assignedById ?? userId,
+
+          customerName,
+          email,
+          phone,
+          detail,
+          status: "accepted",
+
+          startTime: startTime ? new Date(startTime) : null,
+          endTime: endTime ? new Date(endTime) : null,
+
+          quote_amount,
+          deposit_amount: newDepositAmount,
+          deposit_category: newDepositCategory,
+          extra_deposit_category: newExtraDepositCategory,
+
+          deposit_status: currentAppointment.deposit_status,
+        },
+        include: {
+          employee: {
+            select: { id: true, name: true, phone_number: true },
+          },
+          assignedBy: {
+            select: { id: true, name: true },
+          },
+        },
+      });
+
+      // 4️⃣ Transfer DepositAppointment (MOVE it)
+      if (transfer_deposit && currentDeposit) {
+        // Move deposit record to new appointment
+        await tx.depositAppointment.update({
+          where: { id: currentDeposit.id },
+          data: {
+            appointment_id: newAppointment.id,
+            updatedAt: new Date(),
+          },
+        });
+
+        // Reset deposit info on ORIGINAL appointment
+        await tx.appointment.update({
+          where: { id: current_appointment_id },
+          data: {
+            deposit_amount: 0,
+            deposit_category: "Has been moved",
+            extra_deposit_category: "",
+            deposit_status: "ignored",
+          },
+        });
+      }
+
+      // 5️⃣ Notification
+      await tx.notification.create({
+        data: {
+          created_by: userId,
+          title: "duplicated appointment",
+          description: detail ?? "No description provided",
+          customer_name: customerName ?? "No name provided",
+          quote_amount,
+          deposit_amount: newDepositAmount,
+          deposit_category: newDepositCategory,
+          extra_deposit_category: newExtraDepositCategory,
+          appointment_start_time: startTime ? new Date(startTime) : new Date(),
+          appointment_end_time: endTime ? new Date(endTime) : new Date(),
+        },
+      });
+
+      return newAppointment;
+    });
+
+    // 6️⃣ SMS (optional)
+    if (is_sms_released) {
+      const chicagoTime = dayjs(result.startTime)
+        .tz("America/Chicago")
+        .format("MMM DD YYYY hh:mm A");
+
+      const customerBody = `Thank you for choosing Hyper Inkers! Your appointment has been scheduled with Artist: ${result.employee.name} on ${chicagoTime}. Deposit: ${result.deposit_amount} USD. Prepare: https://tinyurl.com/52x5pjx4`;
+      const artistBody = `New appointment with customer ${
+        result.customerName
+      } has been scheduled ${
+        result?.assignedBy?.name ? ` by ${result?.assignedBy?.name}` : ""
+      }} with Artist: ${
+        result?.employee?.name
+      } on ${chicagoTime} with deposit: ${result?.deposit_amount}USD via ${
+        result?.deposit_category
+      }`;
+      await sendSMS(phone, customerBody);
+      result?.employee?.phone_number &&
+        (await sendSMS(result?.employee?.phone_number, artistBody));
+    }
+
+    return res.status(201).json(result);
+  } catch (error) {
+    console.error("Failed to duplicate appointment", error);
+    return res.status(500).json({
+      message: "Failed to duplicate appointment",
+    });
   }
 };
 
@@ -272,31 +448,35 @@ export const createDepositAppointment = async (req: Request, res: Response) => {
 
     if (existingDeposit) {
       // Update existing deposit appointment
-      deposit = await prisma.depositAppointment.update({
-        where: { id: existingDeposit.id },
-        data: {
-          deposit_amount,
-          deposit_category,
-          extra_deposit_category,
-          attachment_url,
-          updatedAt: new Date(),
-          status: "pending",
-        },
-      });
+      if (deposit_amount > 0) {
+        deposit = await prisma.depositAppointment.update({
+          where: { id: existingDeposit.id },
+          data: {
+            deposit_amount,
+            deposit_category,
+            extra_deposit_category,
+            attachment_url,
+            updatedAt: new Date(),
+            status: "pending",
+          },
+        });
+      }
     } else {
       // Create new deposit appointment
-      deposit = await prisma.depositAppointment.create({
-        data: {
-          appointment_id,
-          status: "pending",
-          deposit_amount,
-          deposit_category,
-          extra_deposit_category,
-          attachment_url,
-          updatedAt: new Date(),
-          createdAt: new Date(),
-        },
-      });
+      if (deposit_amount > 0) {
+        deposit = await prisma.depositAppointment.create({
+          data: {
+            appointment_id,
+            status: "pending",
+            deposit_amount,
+            deposit_category,
+            extra_deposit_category,
+            attachment_url,
+            updatedAt: new Date(),
+            createdAt: new Date(),
+          },
+        });
+      }
     }
 
     // Update the corresponding Appointment record
@@ -306,7 +486,7 @@ export const createDepositAppointment = async (req: Request, res: Response) => {
         deposit_amount,
         deposit_category,
         extra_deposit_category,
-        deposit_status: "pending",
+        deposit_status: deposit_amount > 0 ? "pending" : "ignored",
       },
     });
 
@@ -682,7 +862,7 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
     select: { name: true },
   });
   if (!user) throw new Error("User not found");
-  const changedBy = user.name;
+
   // await trackAppointmentHistory(
   //   id,
   //   appt,

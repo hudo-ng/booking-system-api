@@ -66,7 +66,7 @@ model Appointment {
   createdAt              DateTime?               @default(now())
   address                String?
   deposit_amount         Float?
-  deposit_status         AppointmentStatus       @default(accepted)
+  deposit_status         DepositStatus           @default(ignored)
   deposit_category       String?
   dob                    DateTime?
   extra_deposit_category String?
@@ -92,7 +92,7 @@ model Appointment {
 
 model DepositAppointment {
     id             String      @id @default(uuid())
-    status                 AppointmentStatus       @default(pending)
+    status                 DepositStatus       @default(pending)
     updatedAt              DateTime?               @default(now())
     createdAt              DateTime?               @default(now())
     attachment_url         String?
@@ -331,6 +331,12 @@ enum AppointmentStatus {
   declined
 }
 
+enum DepositStatus {
+  pending
+  accepted
+  declined
+  ignored
+}
 enum Role {
   admin
   employee
