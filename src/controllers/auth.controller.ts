@@ -794,7 +794,8 @@ export const updateSignInCustomerByDocumentId = async (
   res: Response
 ) => {
   try {
-    const { document_id } = req.params;
+    const { spending_artist, spending_services, spending_amount, document_id } =
+      req.body;
 
     if (!document_id) {
       return res.status(400).json({
@@ -811,8 +812,6 @@ export const updateSignInCustomerByDocumentId = async (
         message: "Customer not found",
       });
     }
-
-    const { spending_artist, spending_services, spending_amount } = req.body;
 
     const updatedCustomer = await prisma.signInCustomer.update({
       where: { document_id },
