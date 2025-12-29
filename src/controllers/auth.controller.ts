@@ -727,3 +727,107 @@ export const changePassword = async (req: Request, res: Response) => {
     return res.status(500).json({ message: "Failed to change password" });
   }
 };
+
+export const createSignInCustomer = async (req: Request, res: Response) => {
+  try {
+    const {
+      name,
+      email,
+      dob,
+      phone,
+      address,
+      city,
+      state,
+      zip_code,
+      document_id,
+      service,
+      spending_artist,
+      spending_services,
+      spending_amount,
+    } = req.body;
+
+    if (!document_id || !name || !phone) {
+      return res.status(400).json({
+        message: "document_id, name, and phone are required",
+      });
+    }
+
+    const existingCustomer = await prisma.signInCustomer.findUnique({
+      where: { document_id },
+    });
+
+    if (existingCustomer) {
+      return res.status(409).json({
+        message: "Customer with this document_id already exists",
+      });
+    }
+
+    const customer = await prisma.signInCustomer.create({
+      data: {
+        name,
+        email,
+        dob,
+        phone,
+        address,
+        city,
+        state,
+        zip_code,
+        document_id,
+        service,
+        spending_artist,
+        spending_services,
+        spending_amount,
+      },
+    });
+
+    return res.status(201).json(customer);
+  } catch (error) {
+    console.error("Create SignInCustomer failed", error);
+    return res.status(500).json({
+      message: "Failed to create sign-in customer",
+    });
+  }
+};
+
+export const updateSignInCustomerByDocumentId = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const { document_id } = req.params;
+
+    if (!document_id) {
+      return res.status(400).json({
+        message: "document_id is required",
+      });
+    }
+
+    const existingCustomer = await prisma.signInCustomer.findUnique({
+      where: { document_id },
+    });
+
+    if (!existingCustomer) {
+      return res.status(404).json({
+        message: "Customer not found",
+      });
+    }
+
+    const { spending_artist, spending_services, spending_amount } = req.body;
+
+    const updatedCustomer = await prisma.signInCustomer.update({
+      where: { document_id },
+      data: {
+        spending_artist,
+        spending_services,
+        spending_amount,
+      },
+    });
+
+    return res.status(200).json(updatedCustomer);
+  } catch (error) {
+    console.error("Update SignInCustomer failed", error);
+    return res.status(500).json({
+      message: "Failed to update sign-in customer",
+    });
+  }
+};

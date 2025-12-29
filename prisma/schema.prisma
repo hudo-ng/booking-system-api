@@ -64,6 +64,7 @@ model Appointment {
   startTime              DateTime?
   endTime                DateTime?
   createdAt              DateTime?               @default(now())
+  updatedAt              DateTime                @default(now()) @updatedAt
   address                String?
   deposit_amount         Float?
   deposit_status         DepositStatus           @default(ignored)
@@ -302,6 +303,25 @@ model TrackingPayment {
   customer_name       String?
   customer_phone      String?
   jewelry_price       Float?
+}
+
+model SignInCustomer {
+  id           String         @id @default(uuid())
+  name         String
+  email        String
+  dob          String
+  phone        String
+  address      String
+  city         String
+  state        String 
+  zip_code     String
+  document_id         String @unique
+  service             String
+  spending_artist     String
+  spending_services   String?
+  spending_amount     Float?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 }
 
 model WebPaymentTracking {

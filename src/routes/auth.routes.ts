@@ -8,6 +8,8 @@ import {
   validateVerification,
   getTrackingPaymentById,
   changePassword,
+  createSignInCustomer,
+  updateSignInCustomerByDocumentId,
 } from "../controllers/auth.controller";
 import { getAllMiniPhoto } from "../controllers/management.controller";
 
@@ -24,4 +26,6 @@ router.post("/verification/create", createVerification);
 // Validate code
 router.post("/verification/validate", validateVerification);
 router.post("/change-password", changePassword);
+router.post("/form", createSignInCustomer);
+router.put("/form", updateSignInCustomerByDocumentId);
 export default router;
