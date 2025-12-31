@@ -211,8 +211,8 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
     const nextReferenceId = lastPaymentToday
       ? (parseInt(lastPaymentToday.referenceId, 10) + 1)
           .toString()
-          .padStart(6, "0")
-      : "000001";
+          .padStart(3, "0")
+      : "001";
 
     if (isNaN(Card) && isNaN(Cash)) {
       return res.status(400).json({
