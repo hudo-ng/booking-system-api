@@ -372,6 +372,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
             id: cashRecord?.id ?? cardRecord?.id ?? "",
             cash_id: cashRecord?.id ?? "",
             card_id: cardRecord?.id ?? "",
+            referenceId: nextReferenceId,
           });
         }
       }
@@ -389,6 +390,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
           id: cashRecord?.id ?? cardRecord?.id ?? "",
           cash_id: cashRecord?.id ?? "",
           card_id: cardRecord?.id ?? "",
+          referenceId: nextReferenceId,
         });
       }
       let deposit_has_been_used = false;
@@ -449,6 +451,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       id: cashRecord?.id ?? cardRecord?.id ?? "",
       cash_id: cashRecord?.id ?? "",
       card_id: cardRecord?.id ?? "",
+      referenceId: nextReferenceId,
     });
   } catch (err: any) {
     console.error("Payment Error:", err.response?.data || err.message);
