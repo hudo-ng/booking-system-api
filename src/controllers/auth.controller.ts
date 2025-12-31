@@ -14,7 +14,6 @@ import timezone from "dayjs/plugin/timezone";
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
-const CHICAGO_TZ = "America/Chicago";
 const prisma = new PrismaClient();
 
 export const register = async (req: Request, res: Response) => {
@@ -191,15 +190,17 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
     }
 
     // --- Generate ReferenceId ---
-    const startOfTodayChicago = dayjs().tz(CHICAGO_TZ).startOf("day").toDate();
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
 
-    const endOfTodayChicago = dayjs().tz(CHICAGO_TZ).endOf("day").toDate();
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
 
     const lastPaymentToday = await prisma.trackingPayment.findFirst({
       where: {
         createdAt: {
-          gte: startOfTodayChicago,
-          lte: endOfTodayChicago,
+          gte: startOfToday,
+          lte: endOfToday,
         },
       },
       orderBy: {
