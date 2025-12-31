@@ -7,7 +7,14 @@ import slugify from "slugify";
 import { customAlphabet } from "nanoid";
 import axios from "axios";
 import { sendSMS } from "../utils/sms";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
 
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
+const CHICAGO_TZ = "America/Chicago";
 const prisma = new PrismaClient();
 
 export const register = async (req: Request, res: Response) => {
@@ -184,12 +191,26 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
     }
 
     // --- Generate ReferenceId ---
-    let lastPayment = await prisma.trackingPayment.findFirst({
-      orderBy: { createdAt: "desc" },
+    const startOfTodayChicago = dayjs().tz(CHICAGO_TZ).startOf("day").toDate();
+
+    const endOfTodayChicago = dayjs().tz(CHICAGO_TZ).endOf("day").toDate();
+
+    const lastPaymentToday = await prisma.trackingPayment.findFirst({
+      where: {
+        createdAt: {
+          gte: startOfTodayChicago,
+          lte: endOfTodayChicago,
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
     });
 
-    const nextReferenceId = lastPayment
-      ? (parseInt(lastPayment.referenceId) + 1).toString().padStart(6, "0")
+    const nextReferenceId = lastPaymentToday
+      ? (parseInt(lastPaymentToday.referenceId, 10) + 1)
+          .toString()
+          .padStart(6, "0")
       : "000001";
 
     if (isNaN(Card) && isNaN(Cash)) {
