@@ -153,6 +153,7 @@ export const requestBooking = async (req: Request, res: Response) => {
           extra_deposit_category: extra_deposite_category ?? "",
           deposit_amount: deposit_amount,
           quote_amount: quote_amount,
+          deposit_status: deposit_amount > 0 ? "pending" : "ignored",
           ...(assigneeId ? { assignedById: assigneeId } : {}),
         },
       });
@@ -171,7 +172,19 @@ export const requestBooking = async (req: Request, res: Response) => {
           })),
         });
       }
-
+      if (deposit_amount > 0) {
+        await tx.depositAppointment.create({
+          data: {
+            appointment_id: appt.id,
+            status: "pending",
+            deposit_amount,
+            deposit_category: appt.deposit_category,
+            extra_deposit_category: appt.extra_deposit_category,
+            updatedAt: new Date(),
+            createdAt: new Date(),
+          },
+        });
+      }
       return appt;
     });
 
@@ -352,7 +365,7 @@ export const bookWithPayment = async (req: Request, res: Response) => {
     const safePayment = removeBigInts(payment);
 
     const created = await prisma.$transaction(async (tx) => {
-      const amountWithoutFees = Number(amount) / (1+ 0.035);
+      const amountWithoutFees = Number(amount) / (1 + 0.035);
       const dbPayment = await tx.webPaymentTracking.create({
         data: {
           provider: "SQUARE",

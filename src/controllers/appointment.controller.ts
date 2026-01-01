@@ -423,6 +423,67 @@ export const updateDepositAppointment = async (req: Request, res: Response) => {
   }
 };
 
+export const updateDepositStatusInAppointment = async (
+  req: Request,
+  res: Response
+) => {
+  const { appointment_id, status } = req.body;
+
+  if (!appointment_id) {
+    return res.status(400).json({
+      message: "appointment_id is required",
+    });
+  }
+
+  if (!status) {
+    return res.status(400).json({
+      message: "status is required",
+    });
+  }
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      // 1️⃣ Update appointment deposit_status
+      await tx.appointment.update({
+        where: { id: appointment_id },
+        data: {
+          deposit_status: status,
+        },
+      });
+
+      // 2️⃣ Find deposits
+      const deposits = await tx.depositAppointment.findMany({
+        where: { appointment_id },
+        select: { id: true },
+      });
+
+      // 3️⃣ Update ALL deposits if any exist
+      if (deposits.length > 0) {
+        await tx.depositAppointment.updateMany({
+          where: { appointment_id },
+          data: {
+            status,
+            updatedAt: new Date(),
+          },
+        });
+      }
+
+      return {
+        appointment_id,
+        deposit_status: status,
+        updated_deposits: deposits.length,
+      };
+    });
+
+    return res.json(result);
+  } catch (error) {
+    console.error("Failed to sync deposit status", error);
+    return res.status(500).json({
+      message: "Failed to update deposit status in appointment",
+    });
+  }
+};
+
 export const createDepositAppointment = async (req: Request, res: Response) => {
   try {
     const {

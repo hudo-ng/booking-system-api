@@ -21,6 +21,7 @@ import {
   createDepositAppointment,
   updateDepositAppointment,
   duplicateAppointment,
+  updateDepositStatusInAppointment,
 } from "../controllers/appointment.controller";
 import { enforceDevice } from "../middleware/enforceDevice";
 
@@ -49,5 +50,9 @@ router.get("/by-assignee/:assigneeId", getAppointmentsByAssigneeAndDate);
 router.get("/deposit-appointments/latest", getLatestDepositAppointment);
 router.post("/deposit-appointments", createDepositAppointment);
 router.put("/deposit-appointments", updateDepositAppointment);
+router.put(
+  "/deposit-appointments/appointment",
+  updateDepositStatusInAppointment
+);
 
 export default router;
