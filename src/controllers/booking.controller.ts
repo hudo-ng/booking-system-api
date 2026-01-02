@@ -149,6 +149,7 @@ export const requestBooking = async (req: Request, res: Response) => {
           dob: dobDate,
           address: address || null,
           paidWith: paidWith || null,
+          source_booking: "web",
           deposit_category: deposit_category ?? "",
           extra_deposit_category: extra_deposite_category ?? "",
           deposit_amount: deposit_amount,
@@ -398,6 +399,7 @@ export const bookWithPayment = async (req: Request, res: Response) => {
           deposit_category: method,
           extra_deposit_category: `${method}:${safePayment.id}`,
           deposit_status: "accepted",
+          source_booking: "web",
         },
       });
 

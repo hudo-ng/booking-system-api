@@ -69,6 +69,7 @@ model Appointment {
   deposit_amount         Float?
   deposit_status         DepositStatus           @default(ignored)
   deposit_category       String?
+  source_booking         String?                 
   dob                    DateTime?
   extra_deposit_category String?
   paidWith               String?

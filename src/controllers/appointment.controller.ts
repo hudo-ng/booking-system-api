@@ -85,7 +85,7 @@ export const createAppointment = async (req: Request, res: Response) => {
           deposit_amount,
           deposit_category,
           extra_deposit_category,
-
+          source_booking: "manual",
           // ✅ Force deposit status to pending
           deposit_status: deposit_amount > 0 ? "pending" : "ignored",
         },
@@ -242,7 +242,7 @@ export const duplicateAppointment = async (req: Request, res: Response) => {
           phone,
           detail,
           status: "accepted",
-
+          source_booking: "manual",
           startTime: startTime ? new Date(startTime) : null,
           endTime: endTime ? new Date(endTime) : null,
 
@@ -1164,6 +1164,7 @@ export const createRecurringAppointments = async (
               extra_deposit_category,
               seriesId: series.id,
               occurrenceIndex: index + 1,
+              source_booking: "manual",
             },
           })
         )
