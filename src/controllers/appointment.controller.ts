@@ -124,6 +124,7 @@ export const createAppointment = async (req: Request, res: Response) => {
           extra_deposit_category,
           appointment_start_time: startTime ? new Date(startTime) : new Date(),
           appointment_end_time: endTime ? new Date(endTime) : new Date(),
+          appointment_id: appointment.id,
         },
       });
 
@@ -299,6 +300,7 @@ export const duplicateAppointment = async (req: Request, res: Response) => {
           extra_deposit_category: newExtraDepositCategory,
           appointment_start_time: startTime ? new Date(startTime) : new Date(),
           appointment_end_time: endTime ? new Date(endTime) : new Date(),
+          appointment_id: newAppointment.id,
         },
       });
 
@@ -493,7 +495,10 @@ export const createDepositAppointment = async (req: Request, res: Response) => {
       extra_deposit_category,
       attachment_url,
     } = req.body;
-
+    const { userId } = (req as any).user as { userId?: string };
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
     if (!appointment_id) {
       return res.status(400).json({
         message: "appointment_id is required",
@@ -541,13 +546,38 @@ export const createDepositAppointment = async (req: Request, res: Response) => {
     }
 
     // Update the corresponding Appointment record
-    await prisma.appointment.update({
+    const updated = await prisma.appointment.update({
       where: { id: appointment_id },
       data: {
         deposit_amount,
         deposit_category,
         extra_deposit_category,
         deposit_status: deposit_amount > 0 ? "pending" : "ignored",
+      },
+    });
+
+    // ✅ Create notification
+    await prisma.notification.create({
+      data: {
+        created_by: userId,
+        description: updated?.detail
+          ? updated?.detail
+          : "No description provided",
+        title: "edit deposit",
+        customer_name: updated?.customerName
+          ? updated?.customerName
+          : "No name provided",
+        quote_amount: updated?.quote_amount ? updated?.quote_amount : 0,
+        deposit_amount,
+        deposit_category,
+        extra_deposit_category,
+        appointment_start_time: updated?.startTime
+          ? new Date(updated?.startTime)
+          : new Date(),
+        appointment_end_time: updated?.endTime
+          ? new Date(updated?.endTime)
+          : new Date(),
+        appointment_id: updated.id,
       },
     });
 
@@ -645,6 +675,7 @@ export const editAppointment = async (req: Request, res: Response) => {
         extra_deposit_category,
         appointment_start_time: startTime ? new Date(startTime) : new Date(),
         appointment_end_time: endTime ? new Date(endTime) : new Date(),
+        appointment_id: updated.id,
       },
     });
 

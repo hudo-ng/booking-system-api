@@ -132,6 +132,7 @@ model Notification {
   title                  String?
   not_read               Boolean  @default(true)
   createdBy              User     @relation(fields: [created_by], references: [id])
+  appointment_id         String?
 
   @@map("notifications")
 }

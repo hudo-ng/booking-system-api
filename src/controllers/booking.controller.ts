@@ -186,6 +186,22 @@ export const requestBooking = async (req: Request, res: Response) => {
           },
         });
       }
+
+      await tx.notification.create({
+        data: {
+          created_by: employee.id,
+          title: "has new booking",
+          description: detail ?? "No description provided",
+          customer_name: customerName ?? "No name provided",
+          quote_amount,
+          deposit_amount,
+          deposit_category,
+          extra_deposit_category: extra_deposite_category,
+          appointment_start_time: startTime ? new Date(startTime) : new Date(),
+          appointment_end_time: endTime ? new Date(endTime) : new Date(),
+          appointment_id: appt.id,
+        },
+      });
       return appt;
     });
 
@@ -402,7 +418,21 @@ export const bookWithPayment = async (req: Request, res: Response) => {
           source_booking: "web",
         },
       });
-
+      await tx.notification.create({
+        data: {
+          created_by: employee.id,
+          title: "has new booking",
+          description: detail ?? "No description provided",
+          customer_name: customerName ?? "No name provided",
+          quote_amount,
+          deposit_amount,
+          deposit_category: method,
+          extra_deposit_category: `${method}:${safePayment.id}`,
+          appointment_start_time: startTime ? new Date(startTime) : new Date(),
+          appointment_end_time: endTime ? new Date(endTime) : new Date(),
+          appointment_id: appt.id,
+        },
+      });
       if (attachments?.length) {
         await tx.appointmentAttachment.createMany({
           data: attachments.map((a) => ({
