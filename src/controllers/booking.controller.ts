@@ -397,6 +397,7 @@ export const bookWithPayment = async (req: Request, res: Response) => {
           quote_amount,
           deposit_category: method,
           extra_deposit_category: `${method}:${safePayment.id}`,
+          deposit_status: "accepted",
         },
       });
 
