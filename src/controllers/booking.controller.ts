@@ -265,9 +265,13 @@ export const bookWithPayment = async (req: Request, res: Response) => {
       attachments?: IncomingAttachment[];
       deposit_amount: number;
       quote_amount: number;
+      slug?: string;
     };
   };
-
+  const asigneePerson = await prisma.user.findFirst({
+    where: { slug: booking.slug },
+  });
+  let assigneeId = asigneePerson ? asigneePerson.id : undefined;
   if (!["Debit/Credit", "Apple Pay", "Cash App Pay"].includes(method)) {
     return res.status(400).json({ message: "Invalid payment method" });
   }
@@ -416,6 +420,7 @@ export const bookWithPayment = async (req: Request, res: Response) => {
           extra_deposit_category: `${method}:${safePayment.id}`,
           deposit_status: "accepted",
           source_booking: "web",
+          ...(assigneeId ? { assignedById: assigneeId } : {}),
         },
       });
       await tx.notification.create({

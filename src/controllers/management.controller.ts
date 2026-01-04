@@ -329,6 +329,34 @@ export const getAllNotification = async (req: Request, res: Response) => {
   }
 };
 
+export const getAllNotificationByAppointmentId = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const { appointment_id } = req.query;
+
+    if (!appointment_id || typeof appointment_id !== "string") {
+      return res.status(400).json({ message: "appointment_id is required" });
+    }
+
+    const notifications = await prisma.notification.findMany({
+      where: { appointment_id },
+      orderBy: { created_at: "desc" },
+      include: {
+        createdBy: {
+          select: { id: true, name: true },
+        },
+      },
+    });
+
+    res.json(notifications);
+  } catch (err) {
+    console.error("Error fetching notifications by appointment_id:", err);
+    res.status(500).json({ message: "Failed to fetch notifications" });
+  }
+};
+
 export const getCleanSchedules = async (req: Request, res: Response) => {
   try {
     const { userId } = (req as any).user as { userId?: string };

@@ -10,6 +10,7 @@ import {
   getAllEmployees,
   getAllMiniPhoto,
   getAllNotification,
+  getAllNotificationByAppointmentId,
   getCleanSchedules,
   releaseSms,
   updateMiniPhoto,
@@ -25,6 +26,7 @@ router.post("/employee/delete/deviceId", deleteDeviceToken);
 router.put("/employees/edit", editEmployee);
 router.post("/employees/add", addEmployee);
 router.get("/notification/all", getAllNotification);
+router.get("/notification/appointment/all", getAllNotificationByAppointmentId);
 router.get("/clean-schedule", getCleanSchedules);
 router.put("/clean-schedule/edit", assignUserToCleanSchedule);
 router.post("/sms/release", releaseSms);
