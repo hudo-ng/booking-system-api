@@ -265,16 +265,17 @@ export const duplicateAppointment = async (req: Request, res: Response) => {
       });
 
       // 4️⃣ Transfer DepositAppointment (MOVE it)
-      if (transfer_deposit && currentDeposit) {
-        // Move deposit record to new appointment
-        await tx.depositAppointment.update({
-          where: { id: currentDeposit.id },
-          data: {
-            appointment_id: newAppointment.id,
-            updatedAt: new Date(),
-          },
-        });
-
+      if (transfer_deposit) {
+        if (currentDeposit) {
+          // Move deposit record to new appointment
+          await tx.depositAppointment.update({
+            where: { id: currentDeposit.id },
+            data: {
+              appointment_id: newAppointment.id,
+              updatedAt: new Date(),
+            },
+          });
+        }
         // Reset deposit info on ORIGINAL appointment
         await tx.appointment.update({
           where: { id: current_appointment_id },
