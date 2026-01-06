@@ -190,17 +190,21 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
     }
 
     // --- Generate ReferenceId ---
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
+    const CHICAGO_TZ = "America/Chicago";
 
-    const endOfToday = new Date();
-    endOfToday.setHours(23, 59, 59, 999);
+    // Start & end of TODAY in Chicago time
+    const startOfChicagoDay = dayjs().tz(CHICAGO_TZ).startOf("day");
+    const endOfChicagoDay = dayjs().tz(CHICAGO_TZ).endOf("day");
+
+    // Convert to UTC Dates for Prisma
+    const startUTC = startOfChicagoDay.utc().toDate();
+    const endUTC = endOfChicagoDay.utc().toDate();
 
     const lastPaymentToday = await prisma.trackingPayment.findFirst({
       where: {
         createdAt: {
-          gte: startOfToday,
-          lte: endOfToday,
+          gte: startUTC,
+          lte: endUTC,
         },
       },
       orderBy: {
