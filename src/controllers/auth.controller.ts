@@ -189,22 +189,21 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
         .json({ success: false, error: "Amount and artist are required" });
     }
 
-    // --- Generate ReferenceId ---
-    const CHICAGO_TZ = "America/Chicago";
+    // --- Generate ReferenceId (day starts at 06:00) ---
 
-    // Start & end of TODAY in Chicago time
-    const startOfChicagoDay = dayjs().tz(CHICAGO_TZ).startOf("day");
-    const endOfChicagoDay = dayjs().tz(CHICAGO_TZ).endOf("day");
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    startOfToday.setHours(startOfToday.getHours() + 6);
 
-    // Convert to UTC Dates for Prisma
-    const startUTC = startOfChicagoDay.utc().toDate();
-    const endUTC = endOfChicagoDay.utc().toDate();
+    const endOfToday = new Date();
+    endOfToday.setHours(23, 59, 59, 999);
+    endOfToday.setHours(endOfToday.getHours() + 6);
 
     const lastPaymentToday = await prisma.trackingPayment.findFirst({
       where: {
         createdAt: {
-          gte: startUTC,
-          lte: endUTC,
+          gte: startOfToday,
+          lte: endOfToday,
         },
       },
       orderBy: {
