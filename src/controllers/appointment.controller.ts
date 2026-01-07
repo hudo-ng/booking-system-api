@@ -800,7 +800,9 @@ export const deleteAppointment = async (req: Request, res: Response) => {
     await prisma.appointmentAttachment.deleteMany({
       where: { appointmentId },
     });
-
+    await prisma.depositAppointment.deleteMany({
+      where: { appointment_id: appointmentId },
+    });
     // ✅ Step 2: Delete appointment itself
     const deletedAppointment = await prisma.appointment.delete({
       where: { id: appointmentId },
