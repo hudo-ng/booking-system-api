@@ -638,7 +638,11 @@ export const getPaymentReport = async (req: Request, res: Response) => {
       );
 
       if (response.data?.data) {
-        allData.push(...response.data.data);
+        const filter = response.data.data.map((item: any) => ({
+          ...item,
+          created_at: formattedDate,
+        }));
+        allData.push(...filter);
       }
 
       // Move to next day
