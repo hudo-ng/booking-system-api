@@ -191,43 +191,35 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
 
     // --- Generate ReferenceId (day starts at 06:00) ---
 
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-    startOfToday.setHours(startOfToday.getHours() + 6);
+    const startOfTodayUTC = dayjs()
+      .tz("America/Chicago")
+      .startOf("day")
+      .utc()
+      .toDate();
 
-    const endOfToday = new Date();
-    endOfToday.setHours(23, 59, 59, 999);
-    endOfToday.setHours(endOfToday.getHours() + 6);
+    const endOfTodayUTC = dayjs()
+      .tz("America/Chicago")
+      .endOf("day")
+      .utc()
+      .toDate();
 
-    const lastPayment = await prisma.trackingPayment.findFirst({
-      orderBy: {
-        referenceId: "desc",
+    const lastPaymentToday = await prisma.trackingPayment.findFirst({
+      where: {
+        createdAt: {
+          gte: startOfTodayUTC,
+          lte: endOfTodayUTC,
+        },
       },
-      select: {
-        referenceId: true,
+      orderBy: {
+        createdAt: "desc",
       },
     });
-    const nextReferenceIdSaving = lastPayment
-      ? (parseInt(lastPayment.referenceId) + 1).toString().padStart(6, "0")
-      : "000001";
 
-    // const lastPaymentToday = await prisma.trackingPayment.findFirst({
-    //   where: {
-    //     createdAt: {
-    //       gte: startOfToday,
-    //       lte: endOfToday,
-    //     },
-    //   },
-    //   orderBy: {
-    //     createdAt: "desc",
-    //   },
-    // });
-
-    // const nextReferenceId = lastPaymentToday
-    //   ? (parseInt(lastPaymentToday.referenceId, 10) + 1)
-    //       .toString()
-    //       .padStart(3, "0")
-    //   : "001";
+    const nextReferenceId = lastPaymentToday
+      ? (parseInt(lastPaymentToday.referenceId, 10) + 1)
+          .toString()
+          .padStart(3, "0")
+      : "001";
 
     if (isNaN(Card) && isNaN(Cash)) {
       return res.status(400).json({
@@ -242,7 +234,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
     if (typeof Cash === "number" && Cash > 0) {
       cashRecord = await prisma.trackingPayment.create({
         data: {
-          referenceId: nextReferenceIdSaving,
+          referenceId: nextReferenceId,
           paymentType: isCashApp ? "CashApp" : "Cash",
           transactionType: isCashApp ? "CashAppPayment" : "CashPayment",
           amount: Cash,
@@ -286,7 +278,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       const payload = {
         Amount: Card,
         PaymentType: "Credit",
-        ReferenceId: nextReferenceIdSaving,
+        ReferenceId: nextReferenceId,
         Tpn,
         RegisterId,
         Authkey,
@@ -312,7 +304,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       // --- Insert into DB ---
       cardRecord = await prisma.trackingPayment.create({
         data: {
-          referenceId: nextReferenceIdSaving,
+          referenceId: nextReferenceId,
           paymentType: "Credit",
           transactionType: dejavoo?.TransactionType ?? "CardPayment",
           invoiceNumber: dejavoo?.InvoiceNumber,
@@ -388,7 +380,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
             id: cashRecord?.id ?? cardRecord?.id ?? "",
             cash_id: cashRecord?.id ?? "",
             card_id: cardRecord?.id ?? "",
-            referenceId: nextReferenceIdSaving,
+            referenceId: nextReferenceId,
           });
         }
       }
@@ -406,7 +398,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
           id: cashRecord?.id ?? cardRecord?.id ?? "",
           cash_id: cashRecord?.id ?? "",
           card_id: cardRecord?.id ?? "",
-          referenceId: nextReferenceIdSaving,
+          referenceId: nextReferenceId,
         });
       }
       let deposit_has_been_used = false;
@@ -467,7 +459,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       id: cashRecord?.id ?? cardRecord?.id ?? "",
       cash_id: cashRecord?.id ?? "",
       card_id: cardRecord?.id ?? "",
-      referenceId: nextReferenceIdSaving,
+      referenceId: nextReferenceId,
     });
   } catch (err: any) {
     console.error("Payment Error:", err.response?.data || err.message);
