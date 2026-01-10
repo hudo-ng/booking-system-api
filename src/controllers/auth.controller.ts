@@ -300,7 +300,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       );
 
       dejavoo = response.data;
-
+      console.log("Dejavoo Response:", dejavoo);
       // --- Insert into DB ---
       cardRecord = await prisma.trackingPayment.create({
         data: {
