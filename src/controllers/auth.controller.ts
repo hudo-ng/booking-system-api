@@ -176,6 +176,7 @@ export const logInByIdToken = async (req: Request, res: Response) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
 export const createPaymentRequest = async (req: Request, res: Response) => {
   try {
@@ -300,7 +301,68 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       );
 
       dejavoo = response.data;
-      console.log("Dejavoo Response:", dejavoo);
+      // ** Retry once if request format error **
+      if (
+        dejavoo?.GeneralResponse?.StatusCode === "1999" &&
+        dejavoo?.GeneralResponse?.Message === "Request format error"
+      ) {
+        console.log("Dejavoo format error → polling StatusList…");
+
+        const lastCardPaymentToday = await prisma.trackingPayment.findFirst({
+          where: {
+            createdAt: {
+              gte: startOfTodayUTC,
+              lte: endOfTodayUTC,
+            },
+            statusCode: "0000",
+          },
+          orderBy: { createdAt: "desc" },
+        });
+
+        const transactionIndex =
+          Number(lastCardPaymentToday?.transactionNumber || 0) + 1;
+
+        for (let attempt = 1; attempt <= 10; attempt++) {
+          console.log(`StatusList attempt ${attempt}/10`);
+
+          const statusPayload = {
+            PaymentType: "Credit",
+            Tpn,
+            Authkey,
+            RegisterId,
+            MerchantNumber,
+            TransactionFromIndex: transactionIndex,
+            TransactionToIndex: transactionIndex,
+          };
+
+          try {
+            const statusRes = await axios.post(
+              "https://spinpos.net/v2/Payment/StatusList",
+              statusPayload,
+              { timeout: 240000 }
+            );
+
+            const match = statusRes.data?.Transactions?.find(
+              (t: any) => t?.ReferenceId === nextReferenceId
+            );
+
+            if (match?.GeneralResponse?.StatusCode === "0000") {
+              console.log("Dejavoo recovered transaction!");
+              dejavoo = match;
+              break;
+            }
+          } catch (err) {
+            console.error("StatusList error:", err);
+          }
+
+          // Wait 500ms before next poll
+          await sleep(500);
+        }
+      }
+
+      if (dejavoo?.GeneralResponse?.StatusCode! != "0000") {
+        console.log("Dejavoo Response:", dejavoo);
+      }
       // --- Insert into DB ---
       cardRecord = await prisma.trackingPayment.create({
         data: {
