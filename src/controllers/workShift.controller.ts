@@ -178,7 +178,33 @@ export const clockIn = async (req: Request, res: Response) => {
 
 export const clockOut = async (req: Request, res: Response) => {
   const { id: userId } = (req as any).user;
+  const { latitude, longitude } = req.body;
 
+  if (!latitude || !longitude) {
+    return res.status(400).json({ message: "Location required" });
+  }
+
+  // ✅ Check distance from allowed locations
+  if (latitude && longitude) {
+    const distanceA = getDistanceFromLatLonInKm(
+      latitude,
+      longitude,
+      51.03869,
+      -114.060243
+    );
+    const distanceB = getDistanceFromLatLonInKm(
+      latitude,
+      longitude,
+      29.51305,
+      -98.551407
+    );
+
+    if (distanceB > 2 && distanceA > 2) {
+      return res.status(403).json({
+        message: "You are not within 50m of the expected location",
+      });
+    }
+  }
   // ✅ Safe destructuring
   const { clockOutAt } = (req?.body || {}) as {
     clockOutAt?: string;
