@@ -64,12 +64,9 @@ model Appointment {
   startTime              DateTime?
   endTime                DateTime?
   createdAt              DateTime?               @default(now())
-  updatedAt              DateTime                @default(now()) @updatedAt
   address                String?
   deposit_amount         Float?
-  deposit_status         DepositStatus           @default(ignored)
   deposit_category       String?
-  source_booking         String?                 
   dob                    DateTime?
   extra_deposit_category String?
   paidWith               String?
@@ -82,27 +79,30 @@ model Appointment {
   payment_id             String?
   payment_status         PaymentStatus?
   deposit_has_been_used  Boolean?                @default(false)
+  deposit_status         DepositStatus           @default(ignored)
+  updatedAt              DateTime                @default(now()) @updatedAt
+  source_booking         String?
   assignedBy             User?                   @relation("AssignedBy", fields: [assignedById], references: [id])
   employee               User                    @relation(fields: [employeeId], references: [id])
   RecurringSeries        RecurringSeries?        @relation(fields: [seriesId], references: [id])
-  webPayment             WebPaymentTracking?
   AppointmentAttachment  AppointmentAttachment[]
   AppointmentHistory     AppointmentHistory[]
-  VerificationCodes      VerificationCode[]
   DepositAppointment     DepositAppointment[]
+  VerificationCodes      VerificationCode[]
+  webPayment             WebPaymentTracking?
 }
 
 model DepositAppointment {
-    id             String      @id @default(uuid())
-    status                 DepositStatus       @default(pending)
-    updatedAt              DateTime?               @default(now())
-    createdAt              DateTime?               @default(now())
-    attachment_url         String?
-    deposit_amount         Float?
-    deposit_category       String?
-    extra_deposit_category String?
-    appointment_id String
-    appointment    Appointment @relation(fields: [appointment_id], references: [id])
+  id                     String        @id @default(uuid())
+  updatedAt              DateTime?     @default(now())
+  createdAt              DateTime?     @default(now())
+  attachment_url         String?
+  deposit_amount         Float?
+  deposit_category       String?
+  extra_deposit_category String?
+  appointment_id         String
+  status                 DepositStatus @default(pending)
+  appointment            Appointment   @relation(fields: [appointment_id], references: [id])
 }
 
 model VerificationCode {
@@ -131,8 +131,8 @@ model Notification {
   appointment_end_time   DateTime
   title                  String?
   not_read               Boolean  @default(true)
-  createdBy              User     @relation(fields: [created_by], references: [id])
   appointment_id         String?
+  createdBy              User     @relation(fields: [created_by], references: [id])
 
   @@map("notifications")
 }
@@ -308,43 +308,38 @@ model TrackingPayment {
 }
 
 model SignInCustomer {
-  id           String         @id @default(uuid())
-  name         String
-  email        String
-  dob          String
-  phone        String
-  address      String
-  city         String
-  state        String 
-  zip_code     String
-  document_id         String @unique
-  service             String
-  spending_artist     String
-  spending_services   String?
-  spending_amount     Float?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  id                String   @id @default(uuid())
+  name              String
+  email             String
+  dob               String
+  phone             String
+  address           String
+  city              String
+  state             String
+  zip_code          String
+  document_id       String   @unique
+  service           String
+  spending_artist   String
+  spending_services String?
+  spending_amount   Float?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
 
 model WebPaymentTracking {
-  id                String @id @default(cuid())
+  id                String       @id @default(cuid())
   provider          String
-  providerPaymentId String @unique
+  providerPaymentId String       @unique
   method            String
-
-  amount   Decimal
-  currency String
-
-  status    String
-  avsStatus String?
-  cvvStatus String?
-
-  bookingId String?      @unique
-  booking   Appointment? @relation(fields: [bookingId], references: [id])
-
-  rawResponse Json
-
-  createdAt DateTime @default(now())
+  amount            Decimal
+  currency          String
+  status            String
+  avsStatus         String?
+  cvvStatus         String?
+  bookingId         String?      @unique
+  rawResponse       Json
+  createdAt         DateTime     @default(now())
+  booking           Appointment? @relation(fields: [bookingId], references: [id])
 }
 
 enum AppointmentStatus {
@@ -359,6 +354,7 @@ enum DepositStatus {
   declined
   ignored
 }
+
 enum Role {
   admin
   employee
