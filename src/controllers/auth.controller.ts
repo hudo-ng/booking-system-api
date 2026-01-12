@@ -301,10 +301,13 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       );
 
       dejavoo = response.data;
+      if (dejavoo?.GeneralResponse?.StatusCode! != "0000") {
+        console.log("Dejavoo Response:", dejavoo);
+      }
       // ** Retry once if request format error **
       if (
         dejavoo?.GeneralResponse?.StatusCode === "1999" &&
-        dejavoo?.GeneralResponse?.Message === "Request format error"
+        dejavoo?.GeneralResponse?.DetailedMessage === "Request format error"
       ) {
         console.log("Dejavoo format error → polling StatusList…");
 
@@ -347,7 +350,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
             );
 
             if (match?.GeneralResponse?.StatusCode === "0000") {
-              console.log("Dejavoo recovered transaction!");
+              console.log("Dejavoo recovered transaction: !", match);
               dejavoo = match;
               break;
             }
@@ -360,9 +363,6 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
         }
       }
 
-      if (dejavoo?.GeneralResponse?.StatusCode! != "0000") {
-        console.log("Dejavoo Response:", dejavoo);
-      }
       // --- Insert into DB ---
       cardRecord = await prisma.trackingPayment.create({
         data: {
