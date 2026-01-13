@@ -305,6 +305,7 @@ model TrackingPayment {
   customer_name       String?
   customer_phone      String?
   jewelry_price       Float?
+  device_number       String? @default("terminal_1")
 }
 
 model SignInCustomer {

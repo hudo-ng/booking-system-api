@@ -318,6 +318,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
               lte: endOfTodayUTC,
             },
             statusCode: "0000",
+            device_number: "terminal_1",
           },
           orderBy: { createdAt: "desc" },
         });
@@ -525,6 +526,381 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     console.error("Payment Error:", err.response?.data || err.message);
+
+    // Terminal busy
+    if (err.response?.data?.GeneralResponse?.StatusCode === "2008") {
+      const delay = err.response.data.GeneralResponse.DelayBeforeNextRequest;
+      return res.status(429).json({
+        success: false,
+        error: `Terminal busy. Please wait ${Math.ceil(delay / 60)} min.`,
+      });
+    }
+    if (err.response?.data?.GeneralResponse?.StatusCode === "2007") {
+      return res.status(429).json({
+        success: false,
+        error: `Timeout waiting for card swipe. Please try again.`,
+      });
+    }
+
+    return res
+      .status(500)
+      .json({ success: false, error: err.response?.data || err.message });
+  }
+};
+
+export const createAdminPaymentRequest = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const { artist, Cash, Card, item_service, is_cashapp, extra_data } =
+      req.body;
+
+    let isCashApp = is_cashapp ?? false;
+    if (!artist) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Amount and artist are required" });
+    }
+
+    // --- Generate ReferenceId (day starts at 06:00) ---
+
+    const startOfTodayUTC = dayjs()
+      .tz("America/Chicago")
+      .startOf("day")
+      .utc()
+      .toDate();
+
+    const endOfTodayUTC = dayjs()
+      .tz("America/Chicago")
+      .endOf("day")
+      .utc()
+      .toDate();
+
+    const lastPaymentToday = await prisma.trackingPayment.findFirst({
+      where: {
+        createdAt: {
+          gte: startOfTodayUTC,
+          lte: endOfTodayUTC,
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    const nextReferenceId = lastPaymentToday
+      ? (parseInt(lastPaymentToday.referenceId, 10) + 1)
+          .toString()
+          .padStart(3, "0")
+      : "001";
+
+    if (isNaN(Card) && isNaN(Cash)) {
+      return res.status(400).json({
+        success: false,
+        error: "Amount must be a valid number",
+      });
+    }
+    let cashRecord = null;
+    let cardRecord = null;
+    let dejavoo = null;
+    // --- CASH PAYMENT ---
+    if (typeof Cash === "number" && Cash > 0) {
+      cashRecord = await prisma.trackingPayment.create({
+        data: {
+          referenceId: nextReferenceId,
+          paymentType: isCashApp ? "CashApp" : "Cash",
+          transactionType: isCashApp ? "CashAppPayment" : "CashPayment",
+          amount: Cash,
+          artist,
+          payment_method: extra_data?.paid_by ?? "Cash",
+          item_service: item_service ? item_service : "Undefined",
+          service_price:
+            extra_data?.service_price &&
+            typeof extra_data?.service_price === "number"
+              ? extra_data?.service_price
+              : 0,
+          jewelry_price:
+            extra_data?.jewelry_price &&
+            typeof extra_data?.jewelry_price === "number"
+              ? extra_data?.jewelry_price
+              : 0,
+          saline_price:
+            extra_data?.saline_price &&
+            typeof extra_data?.saline_price === "number"
+              ? extra_data?.saline_price
+              : 0,
+          document_id: extra_data?.documentId ?? "",
+          customer_name: extra_data?.customer_name ?? "",
+          customer_phone: extra_data?.customer_phone ?? "",
+          device_number: "terminal_2",
+        },
+      });
+    }
+    if (typeof Card === "number" && Card > 0) {
+      // --- CARD PAYMENT ---
+      const Tpn = process.env.DEJAVOO_TPN_SECOND!;
+      const Authkey = process.env.DEJAVOO_AUTH_KEY_SECOND!;
+      const RegisterId = process.env.DEJAVOO_REGISTER_ID_SECOND!;
+      const MerchantNumber = process.env.DEJAVOO_MERCHANT_NUMBER!;
+
+      if (!Tpn || !Authkey || !RegisterId) {
+        return res
+          .status(500)
+          .json({ success: false, error: "Missing terminal credentials" });
+      }
+
+      const payload = {
+        Amount: Card,
+        PaymentType: "Credit",
+        ReferenceId: nextReferenceId,
+        Tpn,
+        RegisterId,
+        Authkey,
+        MerchantNumber,
+        PrintReceipt: "No",
+        GetReceipt: "No",
+        CaptureSignature: true,
+        CallbackInfo: { Url: "" },
+        GetExtendedData: true,
+        IsReadyForIS: true,
+        CustomFields: { document_id: "hello", id: "10" },
+        SPInProxyTimeout: 240,
+      };
+
+      const response = await axios.post(
+        "https://spinpos.net/v2/Payment/Sale",
+        payload,
+        { headers: { "Content-Type": "application/json" }, timeout: 240000 }
+      );
+
+      dejavoo = response.data;
+      if (dejavoo?.GeneralResponse?.StatusCode! != "0000") {
+        console.log("Dejavoo Response:", dejavoo);
+      }
+      // ** Retry once if request format error **
+      if (
+        dejavoo?.GeneralResponse?.StatusCode === "1999" &&
+        dejavoo?.GeneralResponse?.DetailedMessage === "Request format error"
+      ) {
+        console.log("Dejavoo format error → polling StatusList…");
+
+        const lastCardPaymentToday = await prisma.trackingPayment.findFirst({
+          where: {
+            createdAt: {
+              gte: startOfTodayUTC,
+              lte: endOfTodayUTC,
+            },
+            statusCode: "0000",
+            device_number: "terminal_2",
+          },
+          orderBy: { createdAt: "desc" },
+        });
+
+        const transactionIndex =
+          Number(lastCardPaymentToday?.transactionNumber || 0) + 1;
+
+        for (let attempt = 1; attempt <= 10; attempt++) {
+          console.log(`StatusList attempt ${attempt}/10`);
+
+          const statusPayload = {
+            PaymentType: "Credit",
+            Tpn,
+            Authkey,
+            RegisterId,
+            MerchantNumber,
+            TransactionFromIndex: transactionIndex,
+            TransactionToIndex: transactionIndex,
+          };
+
+          try {
+            const statusRes = await axios.post(
+              "https://spinpos.net/v2/Payment/StatusList",
+              statusPayload,
+              { timeout: 240000 }
+            );
+
+            const match = statusRes.data?.Transactions?.find(
+              (t: any) => t?.ReferenceId === nextReferenceId
+            );
+
+            if (match?.GeneralResponse?.StatusCode === "0000") {
+              console.log("Dejavoo recovered transaction: !", match);
+              dejavoo = match;
+              break;
+            }
+          } catch (err) {
+            console.error("StatusList error:", err);
+          }
+
+          // Wait 500ms before next poll
+          await sleep(500);
+        }
+      }
+
+      // --- Insert into DB ---
+      cardRecord = await prisma.trackingPayment.create({
+        data: {
+          referenceId: nextReferenceId,
+          paymentType: "Credit",
+          transactionType: dejavoo?.TransactionType ?? "CardPayment",
+          invoiceNumber: dejavoo?.InvoiceNumber,
+          batchNumber: dejavoo?.BatchNumber,
+          transactionNumber: dejavoo?.TransactionNumber,
+          authCode: dejavoo?.AuthCode,
+          voided: dejavoo?.Voided ?? false,
+          pnReferenceId: dejavoo?.PNReferenceId,
+
+          totalAmount: dejavoo?.Amounts?.TotalAmount,
+          amount: dejavoo?.Amounts?.Amount,
+          tipAmount: dejavoo?.Amounts?.TipAmount,
+          feeAmount: dejavoo?.Amounts?.FeeAmount,
+          taxAmount: dejavoo?.Amounts?.TaxAmount,
+
+          cardType: dejavoo?.CardData?.CardType,
+          entryType: dejavoo?.CardData?.EntryType,
+          last4: dejavoo?.CardData?.Last4,
+          first4: dejavoo?.CardData?.First4,
+          BIN: dejavoo?.CardData?.BIN,
+          name: dejavoo?.CardData?.Name,
+
+          emvApplicationName: dejavoo?.EMVData?.ApplicationName,
+          emvAID: dejavoo?.EMVData?.AID,
+          emvTVR: dejavoo?.EMVData?.TVR,
+          emvTSI: dejavoo?.EMVData?.TSI,
+          emvIAD: dejavoo?.EMVData?.IAD,
+          emvARC: dejavoo?.EMVData?.ARC,
+
+          hostResponseCode: dejavoo?.GeneralResponse?.HostResponseCode,
+          hostResponseMessage: dejavoo?.GeneralResponse?.HostResponseMessage,
+          resultCode: dejavoo?.GeneralResponse?.ResultCode,
+          statusCode: dejavoo?.GeneralResponse?.StatusCode,
+          message: dejavoo?.GeneralResponse?.Message,
+          detailedMessage: dejavoo?.GeneralResponse?.DetailedMessage,
+          artist,
+          payment_method: extra_data?.paid_by ?? "Card",
+          item_service: item_service ? item_service : "Undefined",
+          service_price:
+            extra_data?.service_price &&
+            typeof extra_data?.service_price === "number"
+              ? extra_data?.service_price
+              : 0,
+          jewelry_price:
+            extra_data?.jewelry_price &&
+            typeof extra_data?.jewelry_price === "number"
+              ? extra_data?.jewelry_price
+              : 0,
+          saline_price:
+            extra_data?.saline_price &&
+            typeof extra_data?.saline_price === "number"
+              ? extra_data?.saline_price
+              : 0,
+          document_id: extra_data?.documentId ?? "",
+          customer_name: extra_data?.customer_name ?? "",
+          customer_phone: extra_data?.customer_phone ?? "",
+          device_number: "terminal_2",
+        },
+      });
+    }
+    // UPDATE PAY IN FIREBASE DATABASE
+    let is_failed = false;
+    if (extra_data?.paid_by && extra_data?.id && extra_data?.documentId) {
+      if (typeof Card === "number" && Card > 0) {
+        if (
+          !dejavoo?.GeneralResponse?.Message?.toLowerCase().includes("approved")
+        ) {
+          is_failed = true;
+          return res.json({
+            success: true,
+            dejavoo,
+            cashRecord,
+            cardRecord,
+            id: cashRecord?.id ?? cardRecord?.id ?? "",
+            cash_id: cashRecord?.id ?? "",
+            card_id: cardRecord?.id ?? "",
+            referenceId: nextReferenceId,
+          });
+        }
+      }
+      if (
+        cardRecord?.message &&
+        cardRecord?.message?.length > 2 &&
+        !cardRecord?.message?.toLowerCase()?.includes("approved")
+      ) {
+        is_failed = true;
+        return res.status(400).json({
+          success: false,
+          dejavoo,
+          cashRecord,
+          cardRecord,
+          id: cashRecord?.id ?? cardRecord?.id ?? "",
+          cash_id: cashRecord?.id ?? "",
+          card_id: cardRecord?.id ?? "",
+          referenceId: nextReferenceId,
+        });
+      }
+      let deposit_has_been_used = false;
+      // Check if appointment_id is provided in extra_data and update the appointment
+      if (
+        extra_data?.appointment_id &&
+        typeof extra_data?.deposit_has_been_used === "boolean" &&
+        extra_data?.deposit_has_been_used
+      ) {
+        // Fetch the current appointment to check the current value of deposit_has_been_used
+        const currentAppointment = await prisma.appointment.findUnique({
+          where: { id: extra_data.appointment_id },
+          select: { deposit_has_been_used: true },
+        });
+
+        // Only update if the current deposit_has_been_used is false
+        if (currentAppointment?.deposit_has_been_used === false) {
+          await prisma.appointment.update({
+            where: { id: extra_data.appointment_id },
+            data: {
+              deposit_has_been_used: extra_data?.deposit_has_been_used ?? false,
+            },
+          });
+          deposit_has_been_used = true;
+        }
+      }
+      // PAYMENT SUCCESFULLY
+      if (!cardRecord?.id && !cashRecord?.id) {
+        is_failed = true;
+      }
+      console.log("is_failed:", is_failed);
+      if (!is_failed) {
+        await axios.patch(
+          `https://hyperinkersform.com/api/${item_service}/payment`,
+          {
+            tracking_payment_id: cashRecord?.id ?? cardRecord?.id ?? "",
+            cash_id: cashRecord?.id ?? "",
+            card_id: cardRecord?.id ?? "",
+            status: "paid",
+            paid_by: extra_data?.paid_by ?? "",
+            cash: Cash ?? 0,
+            card: Card ?? 0,
+            id: extra_data?.id,
+            tip: dejavoo?.Amounts?.TipAmount ?? 0,
+            documentId: extra_data?.documentId,
+            collectionId: extra_data?.collectionId,
+            paid_money: (Cash ?? 0) + (Card ?? 0),
+            deposit_has_been_used: deposit_has_been_used,
+          }
+        );
+      }
+    }
+    return res.json({
+      success: true,
+      dejavoo,
+      cashRecord,
+      cardRecord,
+      id: cashRecord?.id ?? cardRecord?.id ?? "",
+      cash_id: cashRecord?.id ?? "",
+      card_id: cardRecord?.id ?? "",
+      referenceId: nextReferenceId,
+    });
+  } catch (err: any) {
+    console.error("Payment Error Second:", err.response?.data || err.message);
 
     // Terminal busy
     if (err.response?.data?.GeneralResponse?.StatusCode === "2008") {

@@ -10,6 +10,7 @@ import {
   changePassword,
   createSignInCustomer,
   updateSignInCustomerByDocumentId,
+  createAdminPaymentRequest,
 } from "../controllers/auth.controller";
 import { getAllMiniPhoto } from "../controllers/management.controller";
 
@@ -20,6 +21,7 @@ router.post("/login", login);
 router.post("/login/id-token", logInByIdToken);
 router.get("/mini-photo", getAllMiniPhoto);
 router.post("/create-payment-request", createPaymentRequest);
+router.post("/create-payment-request/admin", createAdminPaymentRequest);
 router.get("/payment/:id", getTrackingPaymentById);
 // Create and send verification code
 router.post("/verification/create", createVerification);
