@@ -220,7 +220,7 @@ export const duplicateAppointment = async (req: Request, res: Response) => {
 
       // 2️⃣ Decide deposit values for NEW appointment
       const newDepositAmount = transfer_deposit
-        ? currentAppointment.deposit_amount ?? 0
+        ? (currentAppointment.deposit_amount ?? 0)
         : 0;
 
       const newDepositCategory =
@@ -340,7 +340,7 @@ export const duplicateAppointment = async (req: Request, res: Response) => {
 
 export const getLatestDepositAppointment = async (
   req: Request,
-  res: Response
+  res: Response,
 ) => {
   try {
     const deposits = await prisma.depositAppointment.findMany({
@@ -428,7 +428,7 @@ export const updateDepositAppointment = async (req: Request, res: Response) => {
 
 export const updateDepositStatusInAppointment = async (
   req: Request,
-  res: Response
+  res: Response,
 ) => {
   const { appointment_id, status } = req.body;
 
@@ -750,7 +750,7 @@ export const getAllAppointments = async (req: Request, res: Response) => {
 
 export const getCountAppointmentPending = async (
   req: Request,
-  res: Response
+  res: Response,
 ) => {
   const { userId } = (req as any).user as { userId?: string };
   if (!userId) {
@@ -803,6 +803,9 @@ export const deleteAppointment = async (req: Request, res: Response) => {
     await prisma.depositAppointment.deleteMany({
       where: { appointment_id: appointmentId },
     });
+    await prisma.verificationCode.deleteMany({
+      where: { appointment_id: appointmentId },
+    });
     // ✅ Step 2: Delete appointment itself
     const deletedAppointment = await prisma.appointment.delete({
       where: { id: appointmentId },
@@ -845,7 +848,7 @@ Text (210) 997-9737 or your artist to reschedule when you’re ready`;
 
 export const getAllAppointmentsBySelectedDate = async (
   req: Request,
-  res: Response
+  res: Response,
 ) => {
   try {
     const { userId } = (req as any).user as { userId?: string };
@@ -1075,7 +1078,7 @@ Text (210) 997-9737 or your artist to reschedule when you’re ready`;
 
 export const updateCompletedPhotoUrlAppointmentById = async (
   req: Request,
-  res: Response
+  res: Response,
 ) => {
   const { id, completedPhotoUrl } = req.body;
   console.log("Updating appointment ID:", id);
@@ -1121,7 +1124,7 @@ export const getAppointmentHistory = async (req: Request, res: Response) => {
 
 export const createRecurringAppointments = async (
   req: Request,
-  res: Response
+  res: Response,
 ) => {
   const { userId } = (req as any).user as { userId?: string };
   if (!userId) return res.status(401).json({ message: "Unauthorized" });
@@ -1163,7 +1166,7 @@ export const createRecurringAppointments = async (
       series,
       startTime,
       endTime,
-      "America/Chicago"
+      "America/Chicago",
     );
 
     const validOccurrences: { start: Date; end: Date }[] = [];
@@ -1200,8 +1203,8 @@ export const createRecurringAppointments = async (
               occurrenceIndex: index + 1,
               source_booking: "manual",
             },
-          })
-        )
+          }),
+        ),
       );
     });
 
@@ -1236,7 +1239,7 @@ export const createRecurringAppointments = async (
 
 export const editRecurringAppointments = async (
   req: Request,
-  res: Response
+  res: Response,
 ) => {
   const { seriesId } = req.params;
   const { updateAll } = req.query;
@@ -1324,7 +1327,7 @@ export const editRecurringAppointments = async (
 
 export const deleteRecurringAppointments = async (
   req: Request,
-  res: Response
+  res: Response,
 ) => {
   const { seriesId } = req.params;
 
@@ -1368,7 +1371,7 @@ export const deleteRecurringAppointments = async (
 
 export const getAppointmentsByAssigneeAndDate = async (
   req: Request,
-  res: Response
+  res: Response,
 ) => {
   const { assigneeId } = req.params;
   const { startDate, endDate } = req.query;

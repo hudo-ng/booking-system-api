@@ -356,6 +356,55 @@ export const getAllNotificationByAppointmentId = async (
     res.status(500).json({ message: "Failed to fetch notifications" });
   }
 };
+export const searchAllNotification = async (req: Request, res: Response) => {
+  try {
+    const { search } = req.query;
+
+    if (!search || typeof search !== "string") {
+      return res.status(400).json({ message: "Search parameter is required" });
+    }
+
+    const notifications = await prisma.notification.findMany({
+      where: {
+        OR: [
+          {
+            title: {
+              contains: search,
+              mode: "insensitive",
+            },
+          },
+          {
+            customer_name: {
+              contains: search,
+              mode: "insensitive",
+            },
+          },
+          {
+            description: {
+              contains: search,
+              mode: "insensitive",
+            },
+          },
+        ],
+      },
+      orderBy: { created_at: "desc" },
+      take: 30,
+      include: {
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    res.json(notifications);
+  } catch (err) {
+    console.error("Error searching notifications:", err);
+    res.status(500).json({ message: "Failed to search notifications" });
+  }
+};
 
 export const getCleanSchedules = async (req: Request, res: Response) => {
   try {
