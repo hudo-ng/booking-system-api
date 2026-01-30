@@ -22,8 +22,8 @@ const squareClient = new SquareClient({
 function removeBigInts(obj: any) {
   return JSON.parse(
     JSON.stringify(obj, (_, value) =>
-      typeof value === "bigint" ? value.toString() : value
-    )
+      typeof value === "bigint" ? value.toString() : value,
+    ),
   );
 }
 
@@ -115,16 +115,32 @@ export const requestBooking = async (req: Request, res: Response) => {
     return res.status(400).json({ message: "Employee is off on that day" });
   }
 
+  // const conflict = await prisma.appointment.findFirst({
+  //   where: {
+  //     employeeId,
+  //     status: "accepted",
+  //     startTime: { lt: end.toDate() },
+  //     endTime: { gt: start.toDate() },
+  //   },
+  // });
   const conflict = await prisma.appointment.findFirst({
     where: {
       employeeId,
       status: "accepted",
-      startTime: { lt: end.toDate() },
+      startTime: { lte: start.toDate() },
       endTime: { gt: start.toDate() },
     },
   });
   if (conflict)
     return res.status(400).json({ message: "Time slot already booked!" });
+
+  const MAX_DURATION_MINUTES = 8 * 60;
+
+  if (end.diff(start, "minute") > MAX_DURATION_MINUTES) {
+    return res.status(400).json({
+      message: "Booking duration exceeds maximum allowed time.",
+    });
+  }
 
   let dobDate: Date | null = null;
   if (dob) {
@@ -215,7 +231,7 @@ export const requestBooking = async (req: Request, res: Response) => {
         });
 
         const targetUserIds = Array.from(
-          new Set([employeeId, ...relevantUsers.map((u) => u.id)])
+          new Set([employeeId, ...relevantUsers.map((u) => u.id)]),
         );
 
         const tokens = (
@@ -330,17 +346,33 @@ export const bookWithPayment = async (req: Request, res: Response) => {
     return res.status(400).json({ message: "Employee is off on that day" });
   }
 
+  // const conflict = await prisma.appointment.findFirst({
+  //   where: {
+  //     employeeId,
+  //     status: "accepted",
+  //     startTime: { lt: end.toDate() },
+  //     endTime: { gt: start.toDate() },
+  //   },
+  // });
   const conflict = await prisma.appointment.findFirst({
     where: {
       employeeId,
       status: "accepted",
-      startTime: { lt: end.toDate() },
+      startTime: { lte: start.toDate() },
       endTime: { gt: start.toDate() },
     },
   });
 
   if (conflict) {
     return res.status(400).json({ message: "Time slot already booked!" });
+  }
+
+  const MAX_DURATION_MINUTES = 8 * 60;
+
+  if (end.diff(start, "minute") > MAX_DURATION_MINUTES) {
+    return res.status(400).json({
+      message: "Booking duration exceeds maximum allowed time.",
+    });
   }
 
   let dobDate: Date | null = null;
@@ -471,7 +503,7 @@ export const bookWithPayment = async (req: Request, res: Response) => {
         });
 
         const targetUserIds = Array.from(
-          new Set([employeeId, ...relevantUsers.map((u) => u.id)])
+          new Set([employeeId, ...relevantUsers.map((u) => u.id)]),
         );
 
         const tokens = (
