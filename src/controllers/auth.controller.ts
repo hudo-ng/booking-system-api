@@ -1613,7 +1613,7 @@ export const sendWeeklyReceptionPaystub = async (
                 <span>7 Days</span>
               </div>
               <div class="summary-box">
-                <small>NET PAY</small>
+                <small>GROSS PAY</small>
                 <span>$${gross.toFixed(2)}</span>
               </div>
             </div>
@@ -1736,15 +1736,13 @@ const formatDate = (d: Date) => d.toISOString().split("T")[0];
 
 export const sendArtistPaystub = async (req: Request, res: Response) => {
   try {
-    // 1. Inputs from Query
     const artistName = (req.query.artist_name as string) || "Zoe";
     const isHourlyPaid = String(req.query.is_hourly_paid) === "true";
     const hourlyRate = parseFloat(req.query.hourly_rate as string) || 35.0;
     const targetEmail = (req.query.email as string) || "canhducc@gmail.com";
     const commRate = 0.5;
-    const commPercent = commRate * 100; // For dynamic labels
+    const commPercent = commRate * 100;
 
-    // 2. Date Logic (Last 2 full weeks ending last Saturday)
     const now = new Date();
     const dayOfWeek = now.getDay();
     const toDate = new Date(now);
@@ -1754,7 +1752,6 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
 
     const periodStr = `${dayjs(fromDate).format("MMM DD, YYYY")} - ${dayjs(toDate).format("MMM DD, YYYY")}`;
 
-    // 3. Dynamic Data Fetching
     const dailyLogs: any[] = [];
     let cursor = new Date(fromDate);
 
@@ -1764,6 +1761,7 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
       let dayServiceTotal = 0;
       let dayJewelry = 0;
       let daySaline = 0;
+      let dayTips = 0; // Added tips variable
       let dayHours = 0;
 
       try {
@@ -1794,18 +1792,19 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
 
             dayJewelry += parseFloat(i.priceJewelry) || 0;
             daySaline += parseFloat(i.priceSaline) || 0;
+            dayTips += parseFloat(i.tip) || 0; // Capture tips from API
           });
 
           const timestamps = artistItems
             .map((i: any) => dayjs(i.signedDate).valueOf())
             .filter((t: number) => !isNaN(t));
-
           if (timestamps.length > 1) {
-            const firstTimestamp = Math.min(...timestamps);
-            const lastTimestamp = Math.max(...timestamps);
             dayHours = Number(
               (
-                dayjs(lastTimestamp).diff(dayjs(firstTimestamp), "minute") / 60
+                dayjs(Math.max(...timestamps)).diff(
+                  dayjs(Math.min(...timestamps)),
+                  "minute",
+                ) / 60
               ).toFixed(2),
             );
           } else if (timestamps.length === 1) {
@@ -1823,8 +1822,8 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
         saline: daySaline,
         piercingPrice: dayPiercingTotal,
         servicePrice: dayServiceTotal,
+        tips: dayTips, // Push to daily logs
       });
-
       cursor.setDate(cursor.getDate() + 1);
     }
 
@@ -1837,6 +1836,7 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
       0,
     );
     const totalService = dailyLogs.reduce((acc, d) => acc + d.servicePrice, 0);
+    const totalTips = dailyLogs.reduce((acc, d) => acc + d.tips, 0); // Total tips (100% to artist)
 
     const laborPay = isHourlyPaid ? totalHours * hourlyRate : 0;
     const piercingComm = isHourlyPaid ? 0 : totalPiercing * commRate;
@@ -1845,9 +1845,22 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
     const salineComm = totalS * commRate;
 
     const netPay =
-      laborPay + piercingComm + serviceComm + jewelryComm + salineComm;
-
-    // 5. Build HTML Content
+      laborPay +
+      piercingComm +
+      serviceComm +
+      jewelryComm +
+      salineComm +
+      totalTips;
+    const totalWorkDays = dailyLogs.filter(
+      (d) =>
+        d.hrs > 0 ||
+        d.piercingPrice > 0 ||
+        d.servicePrice > 0 ||
+        d.jewelry > 0 ||
+        d.saline > 0 ||
+        d.tips > 0,
+    ).length;
+    // 5. Build HTML Content (Added Tips Columns)
     const htmlContent = `
     <html>
       <head>
@@ -1857,20 +1870,14 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
           .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #f0f0f0; padding-bottom: 20px; }
           .company-info h1 { margin: 0; font-size: 22px; font-weight: 800; color: #000; letter-spacing: -0.5px; }
           .company-info p { margin: 4px 0; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
-          .stub-title { text-align: right; }
-          .stub-title h1 { margin: 0; font-size: 24px; color: #999; font-weight: 700; }
-          .summary-header { display: flex; justify-content: flex-end; gap: 40px; margin-top: 15px; }
           .summary-box { text-align: center; }
           .summary-box small { display: block; font-weight: 700; color: #aaa; font-size: 9px; margin-bottom: 4px; text-transform: uppercase; }
           .summary-box span { font-size: 22px; font-weight: 700; color: #000; }
           .grey-bar { background: #333; color: white; padding: 10px 15px; font-size: 9px; font-weight: 700; text-transform: uppercase; display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; margin-top: 30px; border-radius: 4px 4px 0 0; }
           .info-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; padding: 15px; border: 1px solid #eee; border-top: none; font-size: 12px; margin-bottom: 30px; border-radius: 0 0 4px 4px; }
-          .section-title { font-size: 10px; font-weight: 800; color: #555; text-transform: uppercase; margin-bottom: 10px; letter-spacing: 1px; }
           table { width: 100%; border-collapse: collapse; border: 1px solid #eee; }
           th { background: #f8f9fa; font-size: 9px; padding: 12px 8px; text-align: left; border-bottom: 1px solid #eee; color: #888; text-transform: uppercase; }
           td { padding: 10px 8px; font-size: 11px; border-bottom: 1px solid #f4f4f4; color: #444; }
-          tfoot td { background: #fafafa; font-weight: 700; color: #000; border-top: 2px solid #eee; padding: 15px 8px; }
-          .comm-label { font-size: 9px; color: #888; text-transform: uppercase; display: block; margin-bottom: 2px; }
           .bold-total { font-weight: 700; color: #000; text-align: right; }
           .footer-totals { display: flex; justify-content: flex-end; padding: 25px; background: #fcfcfc; border: 1px solid #eee; border-top: none; border-radius: 0 0 4px 4px; }
           .total-item { margin-left: 60px; text-align: center; }
@@ -1885,83 +1892,82 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
             <p>8045 Callaghan Rd, San Antonio, TX 78230</p>
             <p><strong>Pay Date:</strong> ${dayjs().format("MMM DD, YYYY")}</p>
           </div>
-          <div class="stub-title">
-            <h1>ARTIST PAY STATEMENT</h1>
-            <div class="summary-header">
-             
-              <div class="summary-box"><small>Net Payout</small><span>$${netPay.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
-            </div>
-          </div>
+          <div class="summary-box"><small>Gross Payout</small><span>$${netPay.toFixed(2)}</span></div>
         </div>
 
         <div class="grey-bar">
-          <div>Employee / Position</div><div>Rate</div><div>Status</div><div>Pay Period</div>
+          <div>Employee</div><div>Rate</div><div>Status</div><div>Pay Period</div>
         </div>
         <div class="info-row">
-          <div><strong>${artistName}</strong><br><span style="color:#888; font-size:10px;">Piercing Artist</span></div>
-          <div>${isHourlyPaid ? `$${hourlyRate.toFixed(2)}/hr` : `${commPercent}% Commission`}</div>
+          <div><strong>${artistName}</strong></div>
+          <div>${isHourlyPaid ? `$${hourlyRate}/hr` : `${commPercent}% Comm`}</div>
           <div>Active</div>
           <div>${periodStr}</div>
         </div>
 
-        <div class="section-title">Earnings Detail</div>
         <table>
           <thead>
             <tr>
-              <th style="width: 120px;">Date</th>
-              ${isHourlyPaid ? `<th>Hours ($${hourlyRate}/hr)</th>` : ""}
+              <th>Date</th>
+              ${isHourlyPaid ? `<th>Hours</th>` : ""}
               <th>Jewelry</th>
               <th>Saline</th>
-              <th>Piercing Sales</th>
-              <th>Service Sales (*)</th>
-              <th style="text-align:right">Daily Net</th>
+              <th>Piercing</th>
+              <th>Service</th>
+              <th>Tips</th> <th style="text-align:right">Daily Gross</th>
             </tr>
           </thead>
           <tbody>
             ${dailyLogs
               .map((d) => {
                 const dLabor = isHourlyPaid ? d.hrs * hourlyRate : 0;
-                const dJ = d.jewelry * commRate;
-                const dS = d.saline * commRate;
-                const dP = isHourlyPaid ? 0 : d.piercingPrice * commRate;
-                const dService = d.servicePrice * commRate;
-                const dTotal = dLabor + dJ + dS + dP + dService;
+                const dTotal =
+                  dLabor +
+                  (d.jewelry +
+                    d.saline +
+                    d.servicePrice +
+                    (isHourlyPaid ? 0 : d.piercingPrice)) *
+                    commRate +
+                  d.tips;
                 return `
                 <tr>
-                  <td style="font-weight: 500;">${d.date}</td>
-                  ${isHourlyPaid ? `<td>${d.hrs > 0 ? `${d.hrs}h ($${dLabor.toFixed(2)})` : "--"}</td>` : ""}
-                  <td>${d.jewelry > 0 ? `$${d.jewelry.toFixed(2)}` : "--"}</td>
-                  <td>${d.saline > 0 ? `$${d.saline.toFixed(2)}` : "--"}</td>
-                  <td>${d.piercingPrice > 0 ? `$${d.piercingPrice.toFixed(2)}` : "--"}</td>
-                  <td>${d.servicePrice > 0 ? `$${d.servicePrice.toFixed(2)}` : "--"}</td>
-                  <td class="bold-total">$${dTotal.toFixed(2)}</td>
-                </tr>
-              `;
+                  <td>${d.date}</td>
+                  ${isHourlyPaid ? `<td>${d.hrs}h</td>` : ""}
+                  <td>$${d.jewelry.toFixed(2)}</td>
+                  <td>$${d.saline.toFixed(2)}</td>
+                  <td>$${d.piercingPrice.toFixed(2)}</td>
+                  <td>$${d.servicePrice.toFixed(2)}</td>
+                  <td style="color: #2e7d32;">$${d.tips.toFixed(2)}</td> <td class="bold-total">$${dTotal.toFixed(2)}</td>
+                </tr>`;
               })
               .join("")}
           </tbody>
           <tfoot>
             <tr>
-              <td style="text-align:right; vertical-align: middle;">FINAL PAYOUTS:</td>
-              ${isHourlyPaid ? `<td><small class="comm-label">Labor Pay</small>$${laborPay.toFixed(2)}</td>` : ""}
-              <td><small class="comm-label">Jewelry (${commPercent}%)</small>$${jewelryComm.toFixed(2)}</td>
-              <td><small class="comm-label">Saline (${commPercent}%)</small>$${salineComm.toFixed(2)}</td>
-              <td><small class="comm-label">Piercing (${commPercent}%)</small>$${piercingComm.toFixed(2)}</td>
-              <td><small class="comm-label">Service (${commPercent}%)</small>$${serviceComm.toFixed(2)}</td>
-              <td class="bold-total"><small class="comm-label">Net Total</small>$${netPay.toFixed(2)}</td>
+              <td style="text-align:right;">TOTALS:</td>
+              ${isHourlyPaid ? `<td>$${laborPay.toFixed(2)}</td>` : ""}
+              <td>$${jewelryComm.toFixed(2)}</td>
+              <td>$${salineComm.toFixed(2)}</td>
+              <td>$${piercingComm.toFixed(2)}</td>
+              <td>$${serviceComm.toFixed(2)}</td>
+              <td>$${totalTips.toFixed(2)}</td> <td class="bold-total">$${netPay.toFixed(2)}</td>
             </tr>
           </tfoot>
         </table>
 
         <div class="footer-totals">
-          ${isHourlyPaid ? `<div class="total-item"><small>Total Hours</small><span>${totalHours.toFixed(2)}h</span></div>` : ""}
-          <div class="total-item"><small>Total Commissions</small><span>$${(piercingComm + serviceComm + jewelryComm + salineComm).toFixed(2)}</span></div>
-          <div class="total-item"><small>Total Net Payout</small><span>$${netPay.toFixed(2)}</span></div>
+          <div class="total-item">
+            <small>Total Work Days</small>
+            <span>${totalWorkDays} Days</span>
+          </div>
+          <div class="total-item"><small>Tips (100%)</small><span>$${totalTips.toFixed(2)}</span></div>
+          <div class="total-item"><small>Commissions</small><span>$${(piercingComm + serviceComm + jewelryComm + salineComm).toFixed(2)}</span></div>
+          <div class="total-item"><small>Gross Payout</small><span>$${netPay.toFixed(2)}</span></div>
         </div>
       </body>
     </html>`;
 
-    // 6. Generate Image & Send Email
+    // 6. Image Generation & Upload to ImageKit
     const browser = await puppeteer.launch({ args: ["--no-sandbox"] });
     const page = await browser.newPage();
     await page.setViewport({ width: 1200, height: 1600, deviceScaleFactor: 2 });
@@ -1969,26 +1975,45 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
     const imageBuffer = await page.screenshot({ type: "png", fullPage: true });
     await browser.close();
 
-    const mg = new Mailgun(FormData).client({
-      username: "api",
-      key: process.env.MAILGUN_API_KEY!,
-    });
-    await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
-      from: process.env.MAILGUN_FROM!,
-      to: targetEmail,
-      subject: `Earnings Statement: ${artistName} (${periodStr})`,
-      attachment: [
-        {
-          filename: `Paystub_${artistName}.png`,
-          data: Buffer.from(imageBuffer),
-        },
-      ],
-      html: `<p>Please find the bi-weekly statement for <strong>${artistName}</strong> attached.</p>`,
+    const upload = await imageKit.upload({
+      file: Buffer.from(imageBuffer),
+      fileName: `paystub_${artistName}_${dayjs().format("YYYYMMDD")}.png`,
+      folder: "/artist-paystubs",
     });
 
-    return res.json({ success: true, netPay });
-  } catch (error) {
+    // 7. Store in Prisma
+    // await prisma.paystub.create({
+    //   data: {
+    //     userId: String(req.query.userId), // Ensure userId is passed in query
+    //     imageUrl: upload.url,
+
+    //     startDate: fromDate,
+    //     endDate: toDate,
+    //     grossAmount: netPay,
+    //   },
+    // });
+
+    // 8. Email with Link & Attachment
+    // const mg = new Mailgun(FormData).client({
+    //   username: "api",
+    //   key: process.env.MAILGUN_API_KEY!,
+    // });
+    // await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
+    //   from: process.env.MAILGUN_FROM!,
+    //   to: targetEmail,
+    //   subject: `Earnings: ${artistName} (${periodStr})`,
+    //   html: `<p>Your statement is ready: <a href="${upload.url}">View Online</a></p>`,
+    //   attachment: [
+    //     {
+    //       filename: `${artistName}_Paystub.png`,
+    //       data: Buffer.from(imageBuffer),
+    //     },
+    //   ],
+    // });
+
+    return res.json({ success: true, url: upload.url });
+  } catch (error: any) {
     console.error(error);
-    return res.status(500).json({ error: "Internal Error" });
+    return res.status(500).json({ error: error.message });
   }
 };
