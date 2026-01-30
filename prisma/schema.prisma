@@ -212,6 +212,17 @@ model WorkSchedule {
   user      User     @relation(fields: [userId], references: [id])
 }
 
+model Paystub {
+  id           String   @id @default(uuid())
+  userId       String
+  imageUrl     String  
+  startDate    DateTime
+  endDate      DateTime
+  grossAmount  Float
+  createdAt    DateTime @default(now())
+
+}
+
 model WorkShift {
   id        String    @id @default(uuid())
   userId    String
