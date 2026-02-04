@@ -1485,11 +1485,11 @@ export const getPaystubForZoe = async (req: Request, res: Response) => {
 
       // Piercing only (matches your totals logic)
       if ((i.color ?? "piercing") === "piercing") {
-        grouped[dateKey].totalPrice += parseFloat(i.price) || 0;
-        grouped[dateKey].totalPriceJewelry += parseFloat(i.priceJewelry) || 0;
-        grouped[dateKey].totalPriceSanity += parseFloat(i.priceSaline) || 0;
-        grouped[dateKey].totalPiercing += parseFloat(i.price) || 0;
-        grouped[dateKey].totalTip += parseFloat(i.tip) || 0;
+        grouped[dateKey].totalPrice += i.price || 0;
+        grouped[dateKey].totalPriceJewelry += i.priceJewelry || 0;
+        grouped[dateKey].totalPriceSanity += i.priceSaline || 0;
+        grouped[dateKey].totalPiercing += i.price || 0;
+        grouped[dateKey].totalTip += i.tip || 0;
       }
     });
 
@@ -1763,7 +1763,8 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
       let daySaline = 0;
       let dayTips = 0; // Added tips variable
       let dayHours = 0;
-
+      let dayCash = 0;
+      let dayCard = 0;
       try {
         const response = await axios.post(
           "https://hyperinkersform.com/api/fetching",
@@ -1782,17 +1783,33 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
         if (artistItems.length > 0) {
           artistItems.forEach((i: any) => {
             const fullName = `${i.firstName} ${i.lastName}`;
-            const price = parseFloat(i.price) || 0;
+            const price = i?.price || 0;
+            let recordCash = i?.cash ?? 0;
+            const recordCard = i?.card ?? 0;
 
             if (fullName.includes("*")) {
               dayServiceTotal += price;
             } else {
               dayPiercingTotal += price;
             }
-
-            dayJewelry += parseFloat(i.priceJewelry) || 0;
-            daySaline += parseFloat(i.priceSaline) || 0;
-            dayTips += parseFloat(i.tip) || 0; // Capture tips from API
+            const pJewelry = i?.priceJewelry || 0;
+            const pSaline = i?.priceSaline || 0;
+            dayJewelry += pJewelry;
+            daySaline += pSaline;
+            dayTips += i?.tip || 0;
+            if (recordCash + recordCard === 0) {
+              recordCash += pJewelry + pSaline + price;
+            }
+            if (i?.paid_by?.incudes("card")) {
+              dayCard += recordCard;
+            }
+            if (recordCash + recordCard > price + pJewelry + pSaline) {
+              // Destructure parentSignature out, and collect the rest into 'logData'
+              const { signature, parentSignature, ...logData } = i;
+              console.warn("Mismatch detected for record:", logData);
+            } else {
+              dayCash += recordCash;
+            }
           });
 
           const timestamps = artistItems
@@ -1822,12 +1839,18 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
         saline: daySaline,
         piercingPrice: dayPiercingTotal,
         servicePrice: dayServiceTotal,
-        tips: dayTips, // Push to daily logs
+        tips: dayTips,
+        cash: dayCash,
+        card: dayCard,
+        totalSales: dayCash + dayCard,
       });
       cursor.setDate(cursor.getDate() + 1);
     }
 
     // 4. Aggregate Totals
+    const totalCash = dailyLogs.reduce((acc, d) => acc + d.cash, 0);
+    const totalCard = dailyLogs.reduce((acc, d) => acc + d.card, 0);
+    const totalSalesVolume = totalCash + totalCard; // Sum of all cash + card transactions
     const totalHours = dailyLogs.reduce((acc, d) => acc + d.hrs, 0);
     const totalJ = dailyLogs.reduce((acc, d) => acc + d.jewelry, 0);
     const totalS = dailyLogs.reduce((acc, d) => acc + d.saline, 0);
@@ -1982,34 +2005,254 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
     });
 
     // 7. Store in Prisma
-    // await prisma.paystub.create({
-    //   data: {
-    //     userId: String(req.query.userId), // Ensure userId is passed in query
-    //     imageUrl: upload.url,
-
-    //     startDate: fromDate,
-    //     endDate: toDate,
-    //     grossAmount: netPay,
-    //   },
-    // });
+    await prisma.paystub.create({
+      data: {
+        userId: String(req.query.userId),
+        imageUrl: upload.url,
+        name: artistName,
+        cash: totalCash,
+        card: totalCard,
+        total: totalSalesVolume,
+        startDate: fromDate,
+        endDate: toDate,
+        grossAmount: netPay,
+      },
+    });
 
     // 8. Email with Link & Attachment
-    // const mg = new Mailgun(FormData).client({
-    //   username: "api",
-    //   key: process.env.MAILGUN_API_KEY!,
-    // });
-    // await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
-    //   from: process.env.MAILGUN_FROM!,
-    //   to: targetEmail,
-    //   subject: `Earnings: ${artistName} (${periodStr})`,
-    //   html: `<p>Your statement is ready: <a href="${upload.url}">View Online</a></p>`,
-    //   attachment: [
-    //     {
-    //       filename: `${artistName}_Paystub.png`,
-    //       data: Buffer.from(imageBuffer),
-    //     },
-    //   ],
-    // });
+    const mg = new Mailgun(FormData).client({
+      username: "api",
+      key: process.env.MAILGUN_API_KEY!,
+    });
+    await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
+      from: process.env.MAILGUN_FROM!,
+      to: targetEmail,
+      subject: `Earnings: ${artistName} (${periodStr})`,
+      html: `<p>Your statement is ready: <a href="${upload.url}">View Online</a></p>`,
+      attachment: [
+        {
+          filename: `${artistName}_Paystub.png`,
+          data: Buffer.from(imageBuffer),
+        },
+      ],
+    });
+
+    return res.json({
+      success: true,
+      imageUrl: upload.url,
+      name: artistName,
+      cash: totalCash,
+      card: totalCard,
+      total: totalSalesVolume,
+      startDate: fromDate,
+      endDate: toDate,
+      grossAmount: netPay,
+    });
+  } catch (error: any) {
+    console.error(error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
+  try {
+    const targetEmail = (req.query.email as string) || "nicole@example.com";
+    const studioFeeAmount = 65.0;
+
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const toDate = new Date(now);
+    toDate.setDate(now.getDate() - dayOfWeek - 1);
+    const fromDate = new Date(toDate);
+    fromDate.setDate(toDate.getDate() - 13);
+
+    const periodStr = `${dayjs(fromDate).format("MMM DD, YYYY")} - ${dayjs(toDate).format("MMM DD, YYYY")}`;
+    const dailyLogs: any[] = [];
+    let cursor = new Date(fromDate);
+
+    while (cursor <= toDate) {
+      const formatted = dayjs(cursor).format("MMDDYYYY");
+
+      // Daily totals for Nicole
+      let dayPiercingComm = 0;
+      let dayJewelryComm = 0;
+      let daySalineComm = 0;
+      let dayServiceComm = 0;
+      let dayStudioFee = 0;
+      let dayTotalPiercingPrice = 0; // Trigger for $65 fee
+
+      let dayCash = 0;
+      let dayCard = 0;
+
+      try {
+        const response = await axios.post(
+          "https://hyperinkersform.com/api/fetching",
+          { endDate: formatted },
+        );
+        const items = response.data?.data || [];
+
+        // Filter for items belonging to Nicole, Yen, or Zoe
+        const relevantItems = items.filter(
+          (i: any) =>
+            ["nicole", "yen", "zoe"].includes(i.artist?.toLowerCase()) &&
+            (i.status?.toLowerCase() === "paid" ||
+              i.status?.toLowerCase() === "done") &&
+            (i.color ?? "piercing") === "piercing",
+        );
+
+        relevantItems.forEach((i: any) => {
+          const artist = i.artist.toLowerCase();
+          const fullName = `${i.firstName} ${i.lastName}`;
+          const price = parseFloat(i.price) || 0;
+          const pJewelry = parseFloat(i.priceJewelry) || 0;
+          const pSaline = parseFloat(i.priceSaline) || 0;
+          const pTip = parseFloat(i.tip) || 0;
+
+          let recordCash = parseFloat(i.cash) || 0;
+          const recordCard = parseFloat(i.card) || 0;
+
+          // Studio Fee Trigger: If ANYONE (Nicole, Yen, or Zoe) has a piercing price > 0
+          if (price > 0) dayTotalPiercingPrice += price;
+
+          // --- Nicole's Earnings Logic ---
+          if (artist === "nicole") {
+            // Nicole's Own Work: 60% on Piercing/Service/Jewelry, 100% on Saline
+            if (fullName.includes("*")) {
+              dayServiceComm += price * 0.6;
+            } else {
+              dayPiercingComm += price * 0.6;
+            }
+            dayJewelryComm += pJewelry * 0.6;
+            daySalineComm += pSaline * 1.0;
+          } else if (artist === "yen") {
+            // Passive from Yen: 10% Jewelry, 50% Saline
+            dayJewelryComm += pJewelry * 0.1;
+            daySalineComm += pSaline * 0.5;
+          } else if (artist === "zoe") {
+            // Passive from Zoe: 50% Jewelry, 90% Saline
+            dayJewelryComm += pJewelry * 0.5;
+            daySalineComm += pSaline * 0.9;
+          }
+
+          // --- Cash/Card Logic & Mismatch Logging ---
+          if (recordCash + recordCard === 0) {
+            recordCash = price + pJewelry + pSaline + pTip;
+          }
+          if (i.paid_by?.toLowerCase().includes("card")) {
+            dayCard += recordCard;
+          }
+          if (
+            recordCash + recordCard >
+            price + pJewelry + pSaline + pTip + 0.01
+          ) {
+            const { signature, parentSignature, ...logData } = i;
+            console.warn("Mismatch on Record:", logData);
+          }
+          dayCash += recordCash;
+        });
+
+        if (dayTotalPiercingPrice > 0) dayStudioFee = studioFeeAmount;
+      } catch (err) {
+        console.error(`Fetch failed for Nicole on ${formatted}`);
+      }
+
+      dailyLogs.push({
+        date: dayjs(cursor).format("MMM DD, YYYY"),
+        jewelry: dayJewelryComm,
+        saline: daySalineComm,
+        piercing: dayPiercingComm + dayServiceComm,
+        studioFee: dayStudioFee,
+        cash: dayCash,
+        card: dayCard,
+        dailyNet:
+          dayJewelryComm +
+          daySalineComm +
+          dayPiercingComm +
+          dayServiceComm -
+          dayStudioFee,
+      });
+
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    // 4. Final Aggregation
+    const totalJ = dailyLogs.reduce((acc, d) => acc + d.jewelry, 0);
+    const totalS = dailyLogs.reduce((acc, d) => acc + d.saline, 0);
+    const totalP = dailyLogs.reduce((acc, d) => acc + d.piercing, 0);
+    const totalFees = dailyLogs.reduce((acc, d) => acc + d.studioFee, 0);
+    const netPay = totalJ + totalS + totalP - totalFees;
+
+    // 5. HTML Template (Simplified for brevity, similar to your original style)
+    const htmlContent = `
+    <html>
+      <head>
+        <style>
+          body { font-family: 'Inter', sans-serif; padding: 40px; }
+          .header { display: flex; justify-content: space-between; border-bottom: 2px solid #eee; padding-bottom: 20px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+          th { background: #f8f9fa; padding: 10px; font-size: 10px; text-align: left; }
+          td { padding: 10px; border-bottom: 1px solid #eee; font-size: 11px; }
+          .fee { color: red; font-weight: bold; }
+          .total { font-weight: bold; text-align: right; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>NICOLE EARNINGS</h1>
+          <div style="text-align:right"><h3>$${netPay.toFixed(2)}</h3></div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th><th>Jewelry Comm</th><th>Saline Comm</th><th>Piercing/Service</th><th>Studio Fee</th><th style="text-align:right">Net</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${dailyLogs
+              .map(
+                (d) => `
+              <tr>
+                <td>${d.date}</td>
+                <td>$${d.jewelry.toFixed(2)}</td>
+                <td>$${d.saline.toFixed(2)}</td>
+                <td>$${d.piercing.toFixed(2)}</td>
+                <td class="fee">-${d.studioFee.toFixed(2)}</td>
+                <td class="total">$${d.dailyNet.toFixed(2)}</td>
+              </tr>
+            `,
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </body>
+    </html>`;
+
+    // 6. Screenshot & Delivery
+    const browser = await puppeteer.launch({ args: ["--no-sandbox"] });
+    const page = await browser.newPage();
+    await page.setContent(htmlContent);
+    const imageBuffer = await page.screenshot({ type: "png", fullPage: true });
+    await browser.close();
+
+    const upload = await imageKit.upload({
+      file: Buffer.from(imageBuffer),
+      fileName: `Nicole_Paystub_${dayjs().format("YYYYMMDD")}.png`,
+      folder: "/nicole-paystubs",
+    });
+
+    await prisma.paystub.create({
+      data: {
+        userId: String(req.query.userId),
+        imageUrl: upload.url,
+        name: "Nicole",
+        cash: dailyLogs.reduce((acc, d) => acc + d.cash, 0),
+        card: dailyLogs.reduce((acc, d) => acc + d.card, 0),
+        total: dailyLogs.reduce((acc, d) => acc + d.cash + d.card, 0),
+        startDate: fromDate,
+        endDate: toDate,
+        grossAmount: netPay,
+      },
+    });
 
     return res.json({ success: true, url: upload.url });
   } catch (error: any) {

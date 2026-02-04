@@ -214,6 +214,10 @@ model WorkSchedule {
 
 model Paystub {
   id           String   @id @default(uuid())
+  name         String?
+  cash         Float?
+  card         Float?
+  total        Float?
   userId       String
   imageUrl     String  
   startDate    DateTime

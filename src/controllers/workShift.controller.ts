@@ -82,13 +82,13 @@ export const clockIn = async (req: Request, res: Response) => {
     latitude,
     longitude,
     51.03869,
-    -114.060243
+    -114.060243,
   );
   const distanceB = getDistanceFromLatLonInKm(
     latitude,
     longitude,
     29.51305,
-    -98.551407
+    -98.551407,
   );
 
   if (distanceB > 2 && distanceA > 2) {
@@ -190,13 +190,13 @@ export const clockOut = async (req: Request, res: Response) => {
       latitude,
       longitude,
       51.03869,
-      -114.060243
+      -114.060243,
     );
     const distanceB = getDistanceFromLatLonInKm(
       latitude,
       longitude,
       29.51305,
-      -98.551407
+      -98.551407,
     );
 
     if (distanceB > 2 && distanceA > 2) {
@@ -307,7 +307,7 @@ export const extendShift = async (req: Request, res: Response) => {
 // ✅ Edit ClockIn / ClockOut (Owner only)
 export const editClockInAndClockOutTimeByShiftId = async (
   req: Request,
-  res: Response
+  res: Response,
 ) => {
   const { shiftId, newClockIn, newClockOut } = req.body;
   const currentUser = await prisma.user.findUnique({
@@ -378,7 +378,7 @@ export const getWorkShifts = async (req: Request, res: Response) => {
         ...shift,
         clockOut: endTime, // fallback if original clockOut was null
       };
-    })
+    }),
   );
 
   res.json(result);
@@ -437,8 +437,8 @@ export const getWorkSchedule = async (req: Request, res: Response) => {
                 include: {
                   user: { select: { id: true, name: true, email: true } },
                 },
-              })
-            )
+              }),
+            ),
           );
         }
 
@@ -506,8 +506,8 @@ export const setWorkScheduleByUserId = async (req: Request, res: Response) => {
           startTime: new Date(s.startTime),
           endTime: new Date(s.endTime),
         },
-      })
-    )
+      }),
+    ),
   );
 
   res.json({ message: "Schedule updated", schedules: newSchedules });
@@ -545,7 +545,7 @@ export const getPiercingReport = async (req: Request, res: Response) => {
         "https://hyperinkersform.com/api/fetching",
         {
           endDate: formattedDate,
-        }
+        },
       );
 
       if (response.data?.data) {
@@ -603,7 +603,7 @@ export const getTattooReport = async (req: Request, res: Response) => {
         "https://hyperinkersform.com/api/fetching",
         {
           endDate: formattedDate,
-        }
+        },
       );
 
       if (response.data?.data) {
@@ -664,7 +664,7 @@ export const getPaymentReport = async (req: Request, res: Response) => {
         "https://hyperinkersform.com/api/fetching",
         {
           endDate: formattedDate,
-        }
+        },
       );
 
       if (response.data?.data) {
@@ -682,11 +682,11 @@ export const getPaymentReport = async (req: Request, res: Response) => {
     let piercingData = allData.filter(
       (item) =>
         item?.status?.toLowerCase() === "paid" ||
-        item?.status?.toLowerCase() === "done"
+        item?.status?.toLowerCase() === "done",
     );
     if (artist !== "All") {
       piercingData = piercingData?.filter(
-        (k) => k?.artist?.toLowerCase() === artist?.toLowerCase()
+        (k) => k?.artist?.toLowerCase() === artist?.toLowerCase(),
       );
     }
 
@@ -694,5 +694,51 @@ export const getPaymentReport = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error("Error fetching piercing report:", error.message);
     return res.status(500).json({ message: "Failed to fetch report" });
+  }
+};
+
+export const getPaystub = async (req: Request, res: Response) => {
+  try {
+    console.log("getPaystub called ");
+    const { userId } = (req as any).user as { userId?: string };
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    // Get current user
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!currentUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // 👑 Owner → get all paystubs
+    if (currentUser.isOwner) {
+      const paystubs = await prisma.paystub.findMany({
+        orderBy: {
+          createdAt: "desc",
+        },
+      });
+      console.log("Returning all paystubs for owner:", paystubs.length);
+      return res.json(paystubs);
+    }
+
+    // 🙋 Normal user → get only their paystubs
+    const paystubs = await prisma.paystub.findMany({
+      where: {
+        userId,
+      },
+
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    return res.json(paystubs);
+  } catch (error) {
+    console.error("Error fetching paystubs:", error);
+    res.status(500).json({ message: "Internal server error" });
   }
 };
