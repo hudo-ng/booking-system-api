@@ -520,6 +520,25 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
             deposit_has_been_used: deposit_has_been_used,
           },
         );
+        if (extra_data?.item_service === "tattoo") {
+          const newPaymentAmount = (Cash ?? 0) + (Card ?? 0);
+          try {
+            await prisma.signInCustomer.update({
+              where: {
+                document_id: extra_data?.documentId,
+              },
+              data: {
+                spending_amount: {
+                  increment: newPaymentAmount,
+                },
+                spending_artist: extra_data?.artist_name ?? "",
+                spending_services: extra_data?.colour ?? "",
+              },
+            });
+          } catch (error) {
+            console.error("Tattoo payment update sign in:", error);
+          }
+        }
       }
     }
     return res.json({
@@ -895,6 +914,25 @@ export const createAdminPaymentRequest = async (
             deposit_has_been_used: deposit_has_been_used,
           },
         );
+        if (extra_data?.item_service === "tattoo") {
+          const newPaymentAmount = (Cash ?? 0) + (Card ?? 0);
+          try {
+            await prisma.signInCustomer.update({
+              where: {
+                document_id: extra_data?.documentId,
+              },
+              data: {
+                spending_amount: {
+                  increment: newPaymentAmount,
+                },
+                spending_artist: extra_data?.artist_name ?? "",
+                spending_services: extra_data?.colour ?? "",
+              },
+            });
+          } catch (error) {
+            console.error("Tattoo payment update sign in:", error);
+          }
+        }
       }
     }
     return res.json({
@@ -1565,9 +1603,18 @@ export const sendWeeklyReceptionPaystub = async (
 
     const hrs = week.totalHours || 0;
     const rate = week.user.wage || 0;
+    const totalWorkDays = week.totalWorkDays || 0;
 
-    const reg = Math.min(hrs, 40);
-    const ot = Math.max(0, hrs - 40);
+    // 🚀 NEW OVERTIME LOGIC:
+    // Base expected hours = Total Days Worked * 8
+    const expectedHours = totalWorkDays * 8;
+
+    // Regular hours is either the total hours or the cap (expectedHours)
+    const reg = Math.min(hrs, expectedHours);
+
+    // Overtime is any hours exceeding the daily-weighted cap
+    const ot = Math.max(0, hrs - expectedHours);
+
     const gross = reg * rate + ot * rate * 1.5;
 
     const htmlContent = `
@@ -1664,6 +1711,10 @@ export const sendWeeklyReceptionPaystub = async (
 
         <div class="footer-totals">
           <div class="total-item">
+            <small>WORK DAYS</small>
+            <span>${totalWorkDays} Days</span>
+          </div>
+          <div class="total-item">
             <small>TOTAL HOURS</small>
             <span>${(reg + ot).toFixed(1)}</span>
           </div>
@@ -1701,6 +1752,10 @@ export const sendWeeklyReceptionPaystub = async (
     await prisma.paystub.create({
       data: {
         userId: String(userId),
+        name: week.user.name,
+        cash: 0,
+        card: 0,
+        total: 0,
         imageUrl: uploadResponse.url,
         startDate: fromDate.toDate(),
         endDate: toDate.toDate(),
@@ -1782,12 +1837,12 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
 
         if (artistItems.length > 0) {
           artistItems.forEach((i: any) => {
-            const fullName = `${i.firstName} ${i.lastName}`;
+            const fullName = `${i?.firstName} ${i?.lastName}`;
             const price = i?.price || 0;
             let recordCash = i?.cash ?? 0;
             const recordCard = i?.card ?? 0;
 
-            if (fullName.includes("*")) {
+            if (typeof fullName === "string" && fullName.includes("*")) {
               dayServiceTotal += price;
             } else {
               dayPiercingTotal += price;
@@ -1800,7 +1855,7 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
             if (recordCash + recordCard === 0) {
               recordCash += pJewelry + pSaline + price;
             }
-            if (i?.paid_by?.incudes("card")) {
+            if (i?.paid_by?.includes("card")) {
               dayCard += recordCard;
             }
             if (recordCash + recordCard > price + pJewelry + pSaline) {
@@ -1829,7 +1884,7 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
           }
         }
       } catch (err) {
-        console.error(`Fetch failed for ${formatted}`);
+        console.error(`Fetch failed for ${formatted}: ${err}`);
       }
 
       dailyLogs.push({
@@ -2024,18 +2079,18 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
       username: "api",
       key: process.env.MAILGUN_API_KEY!,
     });
-    await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
-      from: process.env.MAILGUN_FROM!,
-      to: targetEmail,
-      subject: `Earnings: ${artistName} (${periodStr})`,
-      html: `<p>Your statement is ready: <a href="${upload.url}">View Online</a></p>`,
-      attachment: [
-        {
-          filename: `${artistName}_Paystub.png`,
-          data: Buffer.from(imageBuffer),
-        },
-      ],
-    });
+    // await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
+    //   from: process.env.MAILGUN_FROM!,
+    //   to: targetEmail,
+    //   subject: `Earnings: ${artistName} (${periodStr})`,
+    //   html: `<p>Your statement is ready: <a href="${upload.url}">View Online</a></p>`,
+    //   attachment: [
+    //     {
+    //       filename: `${artistName}_Paystub.png`,
+    //       data: Buffer.from(imageBuffer),
+    //     },
+    //   ],
+    // });
 
     return res.json({
       success: true,
@@ -2073,16 +2128,20 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
     while (cursor <= toDate) {
       const formatted = dayjs(cursor).format("MMDDYYYY");
 
-      // Daily totals for Nicole
-      let dayPiercingComm = 0;
-      let dayJewelryComm = 0;
-      let daySalineComm = 0;
-      let dayServiceComm = 0;
-      let dayStudioFee = 0;
-      let dayTotalPiercingPrice = 0; // Trigger for $65 fee
-
-      let dayCash = 0;
-      let dayCard = 0;
+      // Individual Columns Logic
+      let jDirect = 0,
+        jYen = 0,
+        jZoe = 0;
+      let sDirect = 0,
+        sYen = 0,
+        sZoe = 0;
+      let piercing = 0,
+        service = 0,
+        tips = 0,
+        studioFee = 0;
+      let totalPiercingForFee = 0;
+      let cash = 0,
+        card = 0;
 
       try {
         const response = await axios.post(
@@ -2091,7 +2150,6 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
         );
         const items = response.data?.data || [];
 
-        // Filter for items belonging to Nicole, Yen, or Zoe
         const relevantItems = items.filter(
           (i: any) =>
             ["nicole", "yen", "zoe"].includes(i.artist?.toLowerCase()) &&
@@ -2102,109 +2160,125 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
 
         relevantItems.forEach((i: any) => {
           const artist = i.artist.toLowerCase();
-          const fullName = `${i.firstName} ${i.lastName}`;
-          const price = parseFloat(i.price) || 0;
-          const pJewelry = parseFloat(i.priceJewelry) || 0;
-          const pSaline = parseFloat(i.priceSaline) || 0;
-          const pTip = parseFloat(i.tip) || 0;
+          const isService = (i.firstName + i.lastName).includes("*");
+          const p = parseFloat(i.price) || 0;
+          const pJ = parseFloat(i.priceJewelry) || 0;
+          const pS = parseFloat(i.priceSaline) || 0;
+          const pT = parseFloat(i.tip) || 0;
 
-          let recordCash = parseFloat(i.cash) || 0;
-          const recordCard = parseFloat(i.card) || 0;
+          if (p > 0) totalPiercingForFee += p;
 
-          // Studio Fee Trigger: If ANYONE (Nicole, Yen, or Zoe) has a piercing price > 0
-          if (price > 0) dayTotalPiercingPrice += price;
-
-          // --- Nicole's Earnings Logic ---
           if (artist === "nicole") {
-            // Nicole's Own Work: 60% on Piercing/Service/Jewelry, 100% on Saline
-            if (fullName.includes("*")) {
-              dayServiceComm += price * 0.6;
-            } else {
-              dayPiercingComm += price * 0.6;
-            }
-            dayJewelryComm += pJewelry * 0.6;
-            daySalineComm += pSaline * 1.0;
+            if (isService) service += p * 0.6;
+            else piercing += p * 0.6;
+            jDirect += pJ * 0.6;
+            sDirect += pS * 1.0;
+            tips += pT;
           } else if (artist === "yen") {
-            // Passive from Yen: 10% Jewelry, 50% Saline
-            dayJewelryComm += pJewelry * 0.1;
-            daySalineComm += pSaline * 0.5;
+            jYen += pJ * 0.1;
+            sYen += pS * 0.5;
           } else if (artist === "zoe") {
-            // Passive from Zoe: 50% Jewelry, 90% Saline
-            dayJewelryComm += pJewelry * 0.5;
-            daySalineComm += pSaline * 0.9;
+            jZoe += pJ * 0.5;
+            sZoe += pS * 0.9;
           }
 
-          // --- Cash/Card Logic & Mismatch Logging ---
-          if (recordCash + recordCard === 0) {
-            recordCash = price + pJewelry + pSaline + pTip;
-          }
-          if (i.paid_by?.toLowerCase().includes("card")) {
-            dayCard += recordCard;
-          }
-          if (
-            recordCash + recordCard >
-            price + pJewelry + pSaline + pTip + 0.01
-          ) {
-            const { signature, parentSignature, ...logData } = i;
-            console.warn("Mismatch on Record:", logData);
-          }
-          dayCash += recordCash;
+          let rCash = parseFloat(i.cash) || 0,
+            rCard = parseFloat(i.card) || 0;
+          if (rCash + rCard === 0) rCash = p + pJ + pS + pT;
+          if (i.paid_by?.toLowerCase().includes("card")) card += rCard;
+          cash += rCash;
         });
 
-        if (dayTotalPiercingPrice > 0) dayStudioFee = studioFeeAmount;
+        if (totalPiercingForFee > 0) studioFee = studioFeeAmount;
       } catch (err) {
-        console.error(`Fetch failed for Nicole on ${formatted}`);
+        console.error(err);
       }
 
       dailyLogs.push({
-        date: dayjs(cursor).format("MMM DD, YYYY"),
-        jewelry: dayJewelryComm,
-        saline: daySalineComm,
-        piercing: dayPiercingComm + dayServiceComm,
-        studioFee: dayStudioFee,
-        cash: dayCash,
-        card: dayCard,
+        date: dayjs(cursor).format("MMM DD"),
+        jDirect,
+        jYen,
+        jZoe,
+        sDirect,
+        sYen,
+        sZoe,
+        piercing,
+        service,
+        tips,
+        studioFee,
+        cash,
+        card,
         dailyNet:
-          dayJewelryComm +
-          daySalineComm +
-          dayPiercingComm +
-          dayServiceComm -
-          dayStudioFee,
+          jDirect +
+          jYen +
+          jZoe +
+          sDirect +
+          sYen +
+          sZoe +
+          piercing +
+          service +
+          tips -
+          studioFee,
       });
-
       cursor.setDate(cursor.getDate() + 1);
     }
 
-    // 4. Final Aggregation
-    const totalJ = dailyLogs.reduce((acc, d) => acc + d.jewelry, 0);
-    const totalS = dailyLogs.reduce((acc, d) => acc + d.saline, 0);
-    const totalP = dailyLogs.reduce((acc, d) => acc + d.piercing, 0);
-    const totalFees = dailyLogs.reduce((acc, d) => acc + d.studioFee, 0);
-    const netPay = totalJ + totalS + totalP - totalFees;
+    const netPay = dailyLogs.reduce((acc, d) => acc + d.dailyNet, 0);
+    const totalWorkDays = dailyLogs.filter(
+      (d) => d.jDirect + d.sDirect + d.piercing + d.service > 0,
+    ).length;
 
-    // 5. HTML Template (Simplified for brevity, similar to your original style)
+    // A Studio Open Day is any day where there was activity from anyone (Nicole, Yen, or Zoe)
+    // We can check if any commission or fee was generated
+    const totalOpenDays = dailyLogs.filter(
+      (d) => d.sDirect + d.sYen + d.sZoe + d.piercing + d.service > 0,
+    ).length;
     const htmlContent = `
     <html>
       <head>
         <style>
-          body { font-family: 'Inter', sans-serif; padding: 40px; }
-          .header { display: flex; justify-content: space-between; border-bottom: 2px solid #eee; padding-bottom: 20px; }
-          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-          th { background: #f8f9fa; padding: 10px; font-size: 10px; text-align: left; }
-          td { padding: 10px; border-bottom: 1px solid #eee; font-size: 11px; }
-          .fee { color: red; font-weight: bold; }
-          .total { font-weight: bold; text-align: right; }
+          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+          body { font-family: 'Inter', sans-serif; color: #1a1a1a; padding: 20px; background: #fff; width: 1200px; }
+          .header { display: flex; justify-content: space-between; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px; margin-bottom: 20px; }
+          .summary-box span { font-size: 28px; font-weight: 700; color: #000; }
+          table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+          th { background: #f8f9fa; font-size: 9px; padding: 10px 2px; text-align: center; color: #555; text-transform: uppercase; border: 1px solid #ddd; }
+          td { padding: 8px 2px; font-size: 10px; border: 1px solid #eee; text-align: center; }
+          .direct-cell { background: #ffffff; font-weight: 600; }
+          .passive-cell { background: #fcfcfc; color: #666; font-style: italic; }
+          .bold-total { font-weight: 700; background: #f4f4f4; }
+          .fee { color: #d32f2f; }
+          .footer-totals { display: flex; justify-content: flex-end; margin-top: 20px; padding: 20px; background: #fcfcfc; border: 1px solid #eee; border-radius: 8px; }
+          .total-item { margin-left: 40px; text-align: center; }
+          .total-item small { display: block; font-size: 9px; font-weight: 700; color: #aaa; text-transform: uppercase; }
+          .total-item span { font-size: 18px; font-weight: 700; }
         </style>
       </head>
       <body>
         <div class="header">
-          <h1>NICOLE EARNINGS</h1>
-          <div style="text-align:right"><h3>$${netPay.toFixed(2)}</h3></div>
+          <div><h1 style="margin:0;">HYPER INKER STUDIO</h1><p>Artist: <strong>Nicole</strong> | Period: ${periodStr}</p></div>
+          <div class="summary-box"><small>NET PAYOUT</small><br><span>$${netPay.toFixed(2)}</span></div>
         </div>
+
         <table>
           <thead>
             <tr>
-              <th>Date</th><th>Jewelry Comm</th><th>Saline Comm</th><th>Piercing/Service</th><th>Studio Fee</th><th style="text-align:right">Net</th>
+              <th rowspan="2" style="width: 70px;">Date</th>
+              <th colspan="3" style="background: #e3f2fd;">Jewelry Commission</th>
+              <th colspan="3" style="background: #e8f5e9;">Saline Commission</th>
+              <th rowspan="2">Piercing</th>
+              <th rowspan="2">Service</th>
+              <th rowspan="2">Studio Fee</th>
+              <th rowspan="2">Tips</th>
+              <th rowspan="2" class="bold-total">Daily Net</th>
+            </tr>
+            <tr>
+              <th style="background: #e3f2fd;">Direct (60%)</th>
+              <th style="background: #e3f2fd;">Yen (10%)</th>
+              <th style="background: #e3f2fd;">Zoe (50%)</th>
+              <th style="background: #e8f5e9;">Direct (100%)</th>
+              <th style="background: #e8f5e9;">Yen (50%)</th>
+              <th style="background: #e8f5e9;">Zoe (90%)</th>
             </tr>
           </thead>
           <tbody>
@@ -2212,22 +2286,44 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
               .map(
                 (d) => `
               <tr>
-                <td>${d.date}</td>
-                <td>$${d.jewelry.toFixed(2)}</td>
-                <td>$${d.saline.toFixed(2)}</td>
+                <td style="font-weight:700;">${d.date}</td>
+                <td class="direct-cell">$${d.jDirect.toFixed(2)}</td>
+                <td class="passive-cell">$${d.jYen.toFixed(2)}</td>
+                <td class="passive-cell">$${d.jZoe.toFixed(2)}</td>
+                <td class="direct-cell">$${d.sDirect.toFixed(2)}</td>
+                <td class="passive-cell">$${d.sYen.toFixed(2)}</td>
+                <td class="passive-cell">$${d.sZoe.toFixed(2)}</td>
                 <td>$${d.piercing.toFixed(2)}</td>
-                <td class="fee">-${d.studioFee.toFixed(2)}</td>
-                <td class="total">$${d.dailyNet.toFixed(2)}</td>
+                <td>$${d.service.toFixed(2)}</td>
+                <td class="fee">-$${d.studioFee.toFixed(2)}</td>
+                <td style="color:green;">$${d.tips.toFixed(2)}</td>
+                <td class="bold-total">$${d.dailyNet.toFixed(2)}</td>
               </tr>
             `,
               )
               .join("")}
           </tbody>
         </table>
+
+        <div class="footer-totals">
+          <div class="total-item">
+            <small>Total Open</small>
+              <span class="count-badge">${totalOpenDays} Days</span>
+          </div>
+          <div class="total-item">
+            <small>Total Work Days</small>
+            <span class="count-badge">${totalWorkDays} Days</span>
+          </div>
+          <div class="total-item"><small>Direct Earnings</small><span>$${dailyLogs.reduce((acc, d) => acc + d.jDirect + d.sDirect + d.piercing + d.service, 0).toFixed(2)}</span></div>
+          <div class="total-item"><small>Passive (Yen/Zoe)</small><span>$${dailyLogs.reduce((acc, d) => acc + d.jYen + d.jZoe + d.sYen + d.sZoe, 0).toFixed(2)}</span></div>
+          <div class="total-item"><small>Tips</small><span>$${dailyLogs.reduce((acc, d) => acc + d.tips, 0).toFixed(2)}</span></div>
+          <div class="total-item"><small>Studio Fees</small><span class="fee">-$${dailyLogs.reduce((acc, d) => acc + d.studioFee, 0).toFixed(2)}</span></div>
+          <div class="total-item"><small>Total Net</small><span>$${netPay.toFixed(2)}</span></div>
+        </div>
       </body>
     </html>`;
 
-    // 6. Screenshot & Delivery
+    // ... Rest of the puppeteer, imageKit and Prisma logic remains same ...
     const browser = await puppeteer.launch({ args: ["--no-sandbox"] });
     const page = await browser.newPage();
     await page.setContent(htmlContent);
@@ -2242,7 +2338,7 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
 
     await prisma.paystub.create({
       data: {
-        userId: String(req.query.userId),
+        userId: "1faf65bc-ab45-4b02-9548-5d367532ffea",
         imageUrl: upload.url,
         name: "Nicole",
         cash: dailyLogs.reduce((acc, d) => acc + d.cash, 0),

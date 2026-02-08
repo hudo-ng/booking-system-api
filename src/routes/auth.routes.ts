@@ -15,6 +15,7 @@ import {
   getPaystubForZoe,
   sendWeeklyReceptionPaystub,
   sendArtistPaystub,
+  sendPaystubArtistNicole,
 } from "../controllers/auth.controller";
 import { getAllMiniPhoto } from "../controllers/management.controller";
 
@@ -38,5 +39,6 @@ router.put("/form", updateSignInCustomerByDocumentId);
 router.get("/paystub/reception", calculateTotalCapturedHourFromWorkShift);
 router.get("/paystub/send/reception", sendWeeklyReceptionPaystub);
 router.get("/paystub/send/piercing", sendArtistPaystub);
+router.get("/paystub/send/piercing/nicole", sendPaystubArtistNicole);
 router.get("/paystub/piercings", getPaystubForZoe);
 export default router;

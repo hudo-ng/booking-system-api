@@ -331,7 +331,7 @@ export const getAllNotification = async (req: Request, res: Response) => {
 
 export const getAllNotificationByAppointmentId = async (
   req: Request,
-  res: Response
+  res: Response,
 ) => {
   try {
     const { appointment_id } = req.query;
@@ -441,7 +441,7 @@ export const getCleanSchedules = async (req: Request, res: Response) => {
 
 export const assignUserToCleanSchedule = async (
   req: Request,
-  res: Response
+  res: Response,
 ) => {
   const currentUser = await prisma.user.findUnique({
     where: { id: (req as any).user.userId },
@@ -620,5 +620,120 @@ export const updateMiniPhoto = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Failed to update mini photo:", error);
     res.status(500).json({ message: "Failed to update mini photo" });
+  }
+};
+
+export const fixMissingTattooSpending = async (req: Request, res: Response) => {
+  try {
+    // 1. Find all Tattoo customers with 0 or null spending_amount
+    const targetCustomers = await prisma.signInCustomer.findMany({
+      where: {
+        service: "tattoo",
+        OR: [{ spending_amount: 0 }, { spending_amount: null }],
+      },
+      select: {
+        id: true,
+        document_id: true,
+        name: true,
+      },
+    });
+
+    if (targetCustomers.length === 0) {
+      return res.json({
+        message: "No customers found with missing spending data.",
+      });
+    }
+
+    const results = [];
+
+    // 2. Iterate through each customer to find their payments
+    for (const customer of targetCustomers) {
+      const payments = await prisma.trackingPayment.findMany({
+        where: {
+          document_id: customer.document_id,
+          voided: false, // Ensure we don't count voided transactions
+          OR: [
+            { message: null },
+            {
+              message: {
+                contains: "approved",
+                mode: "insensitive", // case-insensitive
+              },
+            },
+          ],
+        },
+      });
+
+      // 3. Sum up the amounts (using 'amount' or 'totalAmount' depending on your business logic)
+      const totalPaid = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+
+      if (totalPaid > 0) {
+        // 4. Update the SignInCustomer record
+        await prisma.signInCustomer.update({
+          where: { id: customer.id },
+          data: { spending_amount: totalPaid },
+        });
+
+        results.push({
+          name: customer.name,
+          document_id: customer.document_id,
+          recoveredAmount: totalPaid,
+          transactionCount: payments.length,
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      processed: targetCustomers.length,
+      fixed: results.length,
+      details: results,
+    });
+  } catch (error: any) {
+    console.error("Fix spending error:", error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const getSignInCustomers = async (req: Request, res: Response) => {
+  try {
+    const { userId } = (req as any).user as { userId?: string };
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    // 1. Get current user's ownership status
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { isOwner: true },
+    });
+
+    if (!currentUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // 2. Authorization Logic
+    let customers: any[] = [];
+
+    if (currentUser.isOwner) {
+      // Owners get all data, sorted by newest first
+      customers = await prisma.signInCustomer.findMany({
+        orderBy: {
+          createdAt: "desc",
+        },
+      });
+    } else {
+      // Non-owners get an empty array as requested
+      customers = [];
+    }
+
+    return res.json({
+      success: true,
+      data: customers,
+    });
+  } catch (error: any) {
+    console.error("Get SignInCustomers error:", error);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };

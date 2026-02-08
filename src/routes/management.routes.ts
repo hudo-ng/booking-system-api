@@ -12,6 +12,7 @@ import {
   getAllNotification,
   getAllNotificationByAppointmentId,
   getCleanSchedules,
+  getSignInCustomers,
   releaseSms,
   updateMiniPhoto,
 } from "../controllers/management.controller";
@@ -33,4 +34,5 @@ router.post("/sms/release", releaseSms);
 router.post("/mini-photo", createMiniPhoto);
 router.get("/mini-photo", getAllMiniPhoto);
 router.put("/mini-photo", updateMiniPhoto);
+router.get("/sign-in-customers", getSignInCustomers);
 export default router;

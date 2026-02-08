@@ -39,10 +39,15 @@ export const getReceptionWeekData = async (
     }
   }
 
+  const uniqueDays = new Set(
+    shifts.map((shift) => dayjs(shift.clockIn).format("YYYY-MM-DD")),
+  );
+
   const totalHours = Number((totalMilliseconds / (1000 * 60 * 60)).toFixed(2));
 
   return {
     totalHours,
     user,
+    totalWorkDays: uniqueDays.size,
   };
 };
