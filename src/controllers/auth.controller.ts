@@ -2115,6 +2115,7 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
     const studioFeeAmount = 65.0;
 
     const now = new Date();
+    // now.setDate(now.getDate() - 5);
     const dayOfWeek = now.getDay();
     const toDate = new Date(now);
     toDate.setDate(now.getDate() - dayOfWeek - 1);
@@ -2247,7 +2248,8 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
           .direct-cell { background: #ffffff; font-weight: 600; }
           .passive-cell { background: #fcfcfc; color: #666; font-style: italic; }
           .bold-total { font-weight: 700; background: #f4f4f4; }
-          .fee { color: #d32f2f; }
+          .net { color: #009e3d; }
+          .fee { color: #c7c7c7; }
           .footer-totals { display: flex; justify-content: flex-end; margin-top: 20px; padding: 20px; background: #fcfcfc; border: 1px solid #eee; border-radius: 8px; }
           .total-item { margin-left: 40px; text-align: center; }
           .total-item small { display: block; font-size: 9px; font-weight: 700; color: #aaa; text-transform: uppercase; }
@@ -2318,12 +2320,11 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
           <div class="total-item"><small>Passive (Yen/Zoe)</small><span>$${dailyLogs.reduce((acc, d) => acc + d.jYen + d.jZoe + d.sYen + d.sZoe, 0).toFixed(2)}</span></div>
           <div class="total-item"><small>Tips</small><span>$${dailyLogs.reduce((acc, d) => acc + d.tips, 0).toFixed(2)}</span></div>
           <div class="total-item"><small>Studio Fees</small><span class="fee">-$${dailyLogs.reduce((acc, d) => acc + d.studioFee, 0).toFixed(2)}</span></div>
-          <div class="total-item"><small>Total Net</small><span>$${netPay.toFixed(2)}</span></div>
+          <div class="total-item"><small>Total Net</small><span class="net">$${netPay.toFixed(2)}</span></div>
         </div>
       </body>
     </html>`;
 
-    // ... Rest of the puppeteer, imageKit and Prisma logic remains same ...
     const browser = await puppeteer.launch({ args: ["--no-sandbox"] });
     const page = await browser.newPage();
     await page.setContent(htmlContent);
@@ -2353,6 +2354,78 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
     return res.json({ success: true, url: upload.url });
   } catch (error: any) {
     console.error(error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+export const fixMissingTattooSpending = async (req: Request, res: Response) => {
+  try {
+    // 1. Find all Tattoo customers with 0 or null spending_amount
+    const targetCustomers = await prisma.signInCustomer.findMany({
+      where: {
+        service: "tattoo",
+        OR: [{ spending_amount: 0 }, { spending_amount: null }],
+      },
+      select: {
+        id: true,
+        document_id: true,
+        name: true,
+      },
+    });
+
+    if (targetCustomers.length === 0) {
+      return res.json({
+        message: "No customers found with missing spending data.",
+      });
+    }
+
+    const results = [];
+
+    // 2. Iterate through each customer to find their payments
+    for (const customer of targetCustomers) {
+      const payments = await prisma.trackingPayment.findMany({
+        where: {
+          document_id: customer.document_id,
+          voided: false, // Ensure we don't count voided transactions
+          OR: [
+            { message: null },
+            {
+              message: {
+                contains: "approved",
+                mode: "insensitive", // case-insensitive
+              },
+            },
+          ],
+        },
+      });
+
+      // 3. Sum up the amounts (using 'amount' or 'totalAmount' depending on your business logic)
+      const totalPaid = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+
+      if (totalPaid > 0) {
+        // 4. Update the SignInCustomer record
+        await prisma.signInCustomer.update({
+          where: { id: customer.id },
+          data: { spending_amount: totalPaid },
+        });
+
+        results.push({
+          name: customer.name,
+          document_id: customer.document_id,
+          recoveredAmount: totalPaid,
+          transactionCount: payments.length,
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      processed: targetCustomers.length,
+      fixed: results.length,
+      details: results,
+    });
+  } catch (error: any) {
+    console.error("Fix spending error:", error);
     return res.status(500).json({ error: error.message });
   }
 };

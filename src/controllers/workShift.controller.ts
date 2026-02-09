@@ -73,30 +73,27 @@ export const clockIn = async (req: Request, res: Response) => {
     return res.status(401).json({ message: "Unauthorized: userId missing" });
   }
 
-  if (!latitude || !longitude) {
-    return res.status(400).json({ message: "Location required" });
+  if (latitude && longitude) {
+    // ✅ Check distance from allowed locations
+    const distanceA = getDistanceFromLatLonInKm(
+      latitude,
+      longitude,
+      51.03869,
+      -114.060243,
+    );
+    const distanceB = getDistanceFromLatLonInKm(
+      latitude,
+      longitude,
+      29.51305,
+      -98.551407,
+    );
+
+    if (distanceB > 2 && distanceA > 2) {
+      return res.status(403).json({
+        message: "You are not within 2km of the expected location",
+      });
+    }
   }
-
-  // ✅ Check distance from allowed locations
-  const distanceA = getDistanceFromLatLonInKm(
-    latitude,
-    longitude,
-    51.03869,
-    -114.060243,
-  );
-  const distanceB = getDistanceFromLatLonInKm(
-    latitude,
-    longitude,
-    29.51305,
-    -98.551407,
-  );
-
-  if (distanceB > 2 && distanceA > 2) {
-    return res.status(403).json({
-      message: "You are not within 2km of the expected location",
-    });
-  }
-
   // ✅ Check active shift
   const activeShift = await prisma.workShift.findFirst({
     where: { userId, clockOut: null },
@@ -177,7 +174,11 @@ export const clockIn = async (req: Request, res: Response) => {
 };
 
 export const clockOut = async (req: Request, res: Response) => {
-  const { id: userId } = (req as any).user;
+  const { userId } = (req as any).user as { userId?: string };
+  console.log("clockOut payload with userId:", userId, "and body:", req.body);
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
   const { latitude, longitude } = req.body;
 
   if (!latitude || !longitude) {

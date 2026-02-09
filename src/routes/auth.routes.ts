@@ -16,6 +16,7 @@ import {
   sendWeeklyReceptionPaystub,
   sendArtistPaystub,
   sendPaystubArtistNicole,
+  fixMissingTattooSpending,
 } from "../controllers/auth.controller";
 import { getAllMiniPhoto } from "../controllers/management.controller";
 
@@ -35,6 +36,8 @@ router.post("/verification/validate", validateVerification);
 router.post("/change-password", changePassword);
 router.post("/form", createSignInCustomer);
 router.put("/form", updateSignInCustomerByDocumentId);
+// Script
+router.get("/script/tattoo", fixMissingTattooSpending);
 // Paystub
 router.get("/paystub/reception", calculateTotalCapturedHourFromWorkShift);
 router.get("/paystub/send/reception", sendWeeklyReceptionPaystub);
