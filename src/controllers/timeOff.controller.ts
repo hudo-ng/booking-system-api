@@ -53,7 +53,23 @@ export const getTimeOffAll = async (req: Request, res: Response) => {
 
   res.json(offs);
 };
+export const getTimeOffAlls = async (req: Request, res: Response) => {
+  const { role } = (req as any).user;
 
+  if (role !== "admin")
+    return res.status(403).json({ message: "Unauthorized" });
+
+  const offs = await prisma.timeOff.findMany({
+    include: {
+      employee: {
+        select: { name: true, email: true, id: true },
+      },
+    },
+    orderBy: { date: "desc" },
+  });
+
+  res.json(offs);
+};
 export const getTimeOffWithFilter = async (req: Request, res: Response) => {
   const { userId } = (req as any).user;
   const { status } = req.query as {
@@ -80,7 +96,7 @@ export const setTimeOffBulk = async (req: Request, res: Response) => {
   }
 
   const normalized = Array.from(
-    new Set(dates.map((d) => dayjs(d).format("YYYY-MM-DD")))
+    new Set(dates.map((d) => dayjs(d).format("YYYY-MM-DD"))),
   );
 
   const toCreate: {
