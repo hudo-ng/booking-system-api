@@ -179,6 +179,9 @@ export const clockOut = async (req: Request, res: Response) => {
   if (!userId) {
     return res.status(401).json({ error: "Unauthorized" });
   }
+  if (req.body?.confirmation !== true) {
+    return res.status(400).json({ message: "Please download latest version!" });
+  }
   const { latitude, longitude } = req.body;
 
   if (!latitude || !longitude) {
@@ -510,7 +513,7 @@ export const setWorkScheduleByUserId = async (req: Request, res: Response) => {
       }),
     ),
   );
-
+  console.log("New schedules set for userId", id, newSchedules);
   res.json({ message: "Schedule updated", schedules: newSchedules });
 };
 
