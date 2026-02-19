@@ -4,6 +4,7 @@ import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
 import { randomUUID } from "crypto";
+import { sendPushAsync } from "../services/push";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -142,6 +143,47 @@ export const setTimeOffBulk = async (req: Request, res: Response) => {
     where: { batchId, employeeId: userId },
     orderBy: { date: "asc" },
   });
+
+  (async () => {
+    try {
+      const employee = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { name: true },
+      });
+
+      const relevantUsers = await prisma.user.findMany({
+        where: {
+          OR: [{ isOwner: true }, { isAdmin: true }, { is_reception: true }],
+        },
+        select: { id: true },
+      });
+
+      const targetUserIds = relevantUsers.map((u) => u.id);
+
+      const tokens = (
+        await prisma.deviceToken.findMany({
+          where: {
+            userId: { in: targetUserIds },
+            enabled: true,
+          },
+          select: { token: true },
+        })
+      ).map((d) => d.token);
+
+      if (tokens.length) {
+        await sendPushAsync(tokens, {
+          title: "New Day-Off Request",
+          body: `${employee?.name || "Employee"} requested ${toCreate.length} day(s) off`,
+          data: {
+            type: "DAY_OFF_REQUEST",
+            batchId,
+          },
+        });
+      }
+    } catch (err) {
+      console.error("Day-off push error:", err);
+    }
+  })();
 
   res.json({ batchId, count: created.count, items: createdItems });
 };

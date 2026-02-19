@@ -247,7 +247,7 @@ export const requestBooking = async (req: Request, res: Response) => {
             body: `${customerName} requested ${start
               .tz(ZONE)
               .format("MMM D, HH:mm")}–${end.tz(ZONE).format("HH:mm")}`,
-            data: { bookingId: created.id },
+            data: { bookingId: created.id, type: "BOOKING" },
           });
         }
       } catch (pushErr) {
@@ -519,7 +519,7 @@ export const bookWithPayment = async (req: Request, res: Response) => {
             body: `${customerName} paid and requested ${start
               .tz(ZONE)
               .format("MMM D, HH:mm")}–${end.tz(ZONE).format("HH:mm")}`,
-            data: { bookingId: created.id },
+            data: { bookingId: created.id, type: "BOOKING" },
           });
         }
       } catch (pushErr) {
