@@ -237,7 +237,9 @@ export const duplicateAppointment = async (req: Request, res: Response) => {
         data: {
           employeeId: employeeId ?? currentAppointment.employeeId,
           assignedById: assignedById ?? userId,
-
+          address: currentAppointment?.address,
+          dob: currentAppointment?.dob,
+          paidWith: transfer_deposit ? currentAppointment.paidWith : null,
           customerName,
           email,
           phone,
