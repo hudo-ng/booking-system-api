@@ -14,6 +14,7 @@ import workshiftRoutes from "./routes/workShift.routes";
 import devicesRouter from "./routes/devices";
 import cronRouter from "./routes/cron";
 import cardPaymentsRouter from "./routes/cardPayments.routes";
+import googleRoutes from "./routes/google.routes";
 
 const app = express();
 
@@ -37,6 +38,7 @@ app.use("/work-shifts", workshiftRoutes);
 app.use("/devices", devicesRouter);
 app.use("/cron", cronRouter);
 app.use("/card-payments", cardPaymentsRouter);
+app.use("/google", googleRoutes);
 
 app.get("/", (req: Request, res: Response) => {
   res.send("Hello from express");

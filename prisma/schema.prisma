@@ -40,6 +40,12 @@ model User {
   WorkShift                WorkShift[]
   workingHours             WorkingHours[]
   Notification             Notification[]
+
+  googleReviewKeys GoogleReviewKey[]
+
+  reviews Review[]
+
+  googleCredentials GoogleCredential[]
 }
 
 model CleanSchedule {
@@ -213,18 +219,17 @@ model WorkSchedule {
 }
 
 model Paystub {
-  id           String   @id @default(uuid())
-  name         String?
-  cash         Float?
-  card         Float?
-  total        Float?
-  userId       String
-  imageUrl     String  
-  startDate    DateTime
-  endDate      DateTime
-  grossAmount  Float
-  createdAt    DateTime @default(now())
-
+  id          String   @id @default(uuid())
+  userId      String
+  imageUrl    String
+  startDate   DateTime
+  endDate     DateTime
+  grossAmount Float
+  createdAt   DateTime @default(now())
+  card        Float?
+  cash        Float?
+  name        String?
+  total       Float?
 }
 
 model WorkShift {
@@ -320,7 +325,7 @@ model TrackingPayment {
   customer_name       String?
   customer_phone      String?
   jewelry_price       Float?
-  device_number       String? @default("terminal_1")
+  device_number       String?  @default("terminal_1")
 }
 
 model SignInCustomer {
@@ -356,6 +361,43 @@ model WebPaymentTracking {
   rawResponse       Json
   createdAt         DateTime     @default(now())
   booking           Appointment? @relation(fields: [bookingId], references: [id])
+}
+
+model Review  {
+  id               String          @id @default(uuid())
+  googleReviewId   String          @unique
+  reviewerName     String
+  starRating       Int
+  comment          String?         @db.Text
+  createTime       DateTime
+  replyText        String?         @db.Text
+  googleReviewKeyId String
+  googleReviewKey  GoogleReviewKey @relation(fields: [googleReviewKeyId], references: [id])
+  
+  userId           String
+  user             User            @relation(fields: [userId], references: [id])
+
+  @@index([userId, createTime])
+}
+
+model GoogleReviewKey {
+  id                String   @id @default(uuid())
+  locationId        String   @unique
+  displayName       String?  
+  userId            String   
+  user              User     @relation(fields: [userId], references: [id])
+  reviews           Review[]
+  createdAt         DateTime @default(now())
+}
+
+model GoogleCredential {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id])
+  accessToken  String   @db.Text
+  refreshToken String   @db.Text
+  expiryDate   BigInt
+  updatedAt    DateTime @default(now())
 }
 
 enum AppointmentStatus {
