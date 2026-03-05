@@ -10,18 +10,22 @@ import { sendSMS } from "../utils/sms";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
+import isBetween from "dayjs/plugin/isBetween";
 import { normalizeSignedDate } from "../utils/time";
 import Mailgun from "mailgun.js";
 import puppeteer from "puppeteer";
 import { getReceptionWeekData } from "../services/paystub.service";
 import minMax from "dayjs/plugin/minMax";
 import { imageKit } from "../utils/imagekit";
+import customParseFormat from "dayjs/plugin/customParseFormat";
 
 // This line is crucial for both JS logic and TS types
 dayjs.extend(minMax);
 dayjs.extend(utc);
 dayjs.extend(timezone);
-
+dayjs.extend(isBetween);
+// Extend dayjs to handle custom formats like MMDDYYYY
+dayjs.extend(customParseFormat);
 const prisma = new PrismaClient();
 
 export const register = async (req: Request, res: Response) => {
@@ -1569,54 +1573,81 @@ export const sendWeeklyReceptionPaystub = async (
 ) => {
   try {
     const { userId } = req.query;
-
-    if (!userId) {
-      return res.status(400).json({ message: "userId is required" });
-    }
+    if (!userId) return res.status(400).json({ message: "userId is required" });
 
     const now = new Date();
-
-    // 📅 Last full week (Monday → Sunday)
     const today = dayjs();
-
-    // Get last week's Monday
-    const fromDate = today
-      .startOf("week") // Sunday (by default)
-      .subtract(1, "week") // go to last week
-      .add(1, "day"); // shift to Monday
-
-    // Get last week's Sunday
+    const fromDate = today.startOf("week").subtract(1, "week").add(1, "day");
     const toDate = fromDate.add(6, "day");
-
     const format = (d: dayjs.Dayjs) => d.format("YYYY-MM-DD");
+    const formatDate = (date: Date) => dayjs(date).format("MMM DD, YYYY");
 
-    // 📊 Fetch weekly data
+    // 1. Fetch Reception Data (Hours/Wage)
     const week = await getReceptionWeekData(
       String(userId),
       format(fromDate),
       format(toDate),
     );
+    if (!week?.user) return res.status(404).json({ message: "User not found" });
 
-    if (!week?.user) {
-      return res.status(404).json({ message: "User not found" });
+    // 2. Fetch Appointments booked by this user (The IDs we need to track)
+    const bookedAppointments = await prisma.appointment.findMany({
+      where: { assignedById: String(userId) },
+      select: { id: true },
+    });
+    const bookedIds = bookedAppointments.map((a) => a.id);
+
+    // 3. Fetch External API Data for the period (Caching as before)
+    const apiDataCache = new Map<string, any[]>();
+    let fetchCursor = new Date(fromDate.toDate());
+    while (fetchCursor <= toDate.toDate()) {
+      const formatted = dayjs(fetchCursor).format("MMDDYYYY");
+      try {
+        const response = await axios.post(
+          "https://hyperinkersform.com/api/fetching",
+          { endDate: formatted },
+        );
+        apiDataCache.set(formatted, response.data?.data || []);
+      } catch (err) {
+        apiDataCache.set(formatted, []);
+      }
+      fetchCursor.setDate(fetchCursor.getDate() + 1);
     }
 
+    // 4. Calculate Commissions from the Cache
+    let totalBookingVolume = 0;
+    const bookingCommRate = 0.01; // 1%
+
+    apiDataCache.forEach((items) => {
+      const paidBookings = items.filter(
+        (i) =>
+          bookedIds.includes(i.appointment_id) &&
+          (i.status?.toLowerCase() === "paid" ||
+            i.status?.toLowerCase() === "done"),
+      );
+
+      paidBookings.forEach((i) => {
+        const paid = parseFloat(i?.paid_money) || 0;
+        const deposit =
+          i?.deposit_has_been_used !== false ? parseFloat(i?.deposit) || 0 : 0;
+        totalBookingVolume += paid + deposit;
+      });
+    });
+
+    const bookingCommission = totalBookingVolume * bookingCommRate;
+
+    // 5. Calculate Hourly Pay
     const hrs = week.totalHours || 0;
     const rate = week.user.wage || 0;
+    const bonusHourrate = 14;
     const totalWorkDays = week.totalWorkDays || 0;
-
-    // 🚀 NEW OVERTIME LOGIC:
-    // Base expected hours = Total Days Worked * 8
     const expectedHours = totalWorkDays * 8;
-
-    // Regular hours is either the total hours or the cap (expectedHours)
     const reg = Math.min(hrs, expectedHours);
-
-    // Overtime is any hours exceeding the daily-weighted cap
     const ot = Math.max(0, hrs - expectedHours);
 
-    const gross = reg * rate + ot * rate * 1.5;
+    const gross = reg * rate + ot * bonusHourrate + bookingCommission;
 
+    // 6. HTML Content (Maintained your style, added Booking Commission row)
     const htmlContent = `
     <html>
       <head>
@@ -1637,13 +1668,13 @@ export const sendWeeklyReceptionPaystub = async (
           th { background: #f2f2f2; color: #666; font-size: 10px; padding: 12px 10px; text-align: left; text-transform: uppercase; border-bottom: 1px solid #ccc; }
           td { padding: 15px 10px; font-size: 13px; border-bottom: 1px solid #eee; }
           .ot-text { color: #2563eb; font-weight: 600; }
+          .comm-text { color: #16a34a; font-weight: 600; }
           .footer-totals { display: flex; justify-content: flex-end; padding: 20px; background: #f9f9f9; border: 1px solid #ccc; border-top: none; }
           .total-item { margin-left: 50px; text-align: center; }
           .total-item small { display: block; font-weight: bold; color: #888; font-size: 10px; margin-bottom: 4px; }
           .total-item span { font-size: 18px; font-weight: bold; }
         </style>
       </head>
-
       <body>
         <div class="header">
           <div class="company-info">
@@ -1651,41 +1682,31 @@ export const sendWeeklyReceptionPaystub = async (
             <p>8045 Callaghan Rd, San Antonio, TX 78230</p>
             <p><strong>Pay Date:</strong> ${formatDate(now)}</p>
           </div>
-
           <div class="stub-title">
             <h1>RECEPTION PAY STATEMENT</h1>
             <div class="summary-header">
-              <div class="summary-box">
-                <small>PERIOD</small>
-                <span>7 Days</span>
-              </div>
-              <div class="summary-box">
-                <small>GROSS PAY</small>
-                <span>$${gross.toFixed(2)}</span>
-              </div>
+              <div class="summary-box"><small>PERIOD</small><span>7 Days</span></div>
+              <div class="summary-box"><small>GROSS PAY</small><span>$${gross.toFixed(2)}</span></div>
             </div>
           </div>
         </div>
-
         <div class="grey-bar">
           <div>Employee Information</div>
           <div>Rate</div>
           <div>Status</div>
           <div>Pay Period</div>
         </div>
-
         <div class="info-row">
           <div><strong>${week.user.name}</strong><br />Receptionist</div>
           <div>$${rate.toFixed(2)}/hr</div>
           <div>Weekly</div>
           <div>${format(fromDate)} to ${format(toDate)}</div>
         </div>
-
         <table>
           <thead>
             <tr>
-              <th>Hours Type</th>
-              <th>Hours</th>
+              <th>Pay Description</th>
+              <th>Quantity/Volume</th>
               <th>Rate</th>
               <th style="text-align:right">Total</th>
             </tr>
@@ -1693,76 +1714,73 @@ export const sendWeeklyReceptionPaystub = async (
           <tbody>
             <tr>
               <td><strong>Regular Hours</strong></td>
-              <td>${reg.toFixed(1)}</td>
+              <td>${reg.toFixed(1)} hrs</td>
               <td>$${rate.toFixed(2)}</td>
               <td style="text-align:right; font-weight:bold;">$${(reg * rate).toFixed(2)}</td>
             </tr>
             ${
-              ot > 0 &&
-              `<tr>
-              <td><strong>Extra Hours</strong></td>
-              <td class="ot-text">${ot.toFixed(1)}</td>
-              <td>$${(rate * 1.5).toFixed(2)}</td>
-              <td style="text-align:right; font-weight:bold;">$${(ot * rate * 1.5).toFixed(2)}</td>
+              ot > 0
+                ? `
+            <tr>
+              <td><strong>Bonus Hours</strong></td>
+              <td class="ot-text">${ot.toFixed(1)} hrs</td>
+              <td>$${bonusHourrate}</td>
+              <td style="text-align:right; font-weight:bold;">$${(ot * bonusHourrate).toFixed(2)}</td>
             </tr>`
+                : ""
+            }
+            ${
+              bookingCommission > 0
+                ? `
+            <tr>
+              <td><strong>Booking Commission (1%)</strong></td>
+              <td class="comm-text">$${totalBookingVolume.toFixed(2)}</td>
+              <td>1%</td>
+              <td style="text-align:right; font-weight:bold; color:#16a34a;">$${bookingCommission.toFixed(2)}</td>
+            </tr>`
+                : ""
             }
           </tbody>
         </table>
-
         <div class="footer-totals">
-          <div class="total-item">
-            <small>WORK DAYS</small>
-            <span>${totalWorkDays} Days</span>
-          </div>
-          <div class="total-item">
-            <small>TOTAL HOURS</small>
-            <span>${(reg + ot).toFixed(1)}</span>
-          </div>
-    
-          <div class="total-item" style="color:#000;">
-            <small>Gross Pay</small>
-            <span>$${gross.toFixed(2)}</span>
-          </div>
+          <div class="total-item"><small>WORK DAYS</small><span>${totalWorkDays} Days</span></div>
+          <div class="total-item"><small>TOTAL HOURS</small><span>${(reg + ot).toFixed(1)}</span></div>
+          <div class="total-item" style="color:#000;"><small>Gross Pay</small><span>$${gross.toFixed(2)}</span></div>
         </div>
       </body>
-    </html>
-    `;
+    </html>`;
 
-    // 🖼 Generate image
+    // 7. Puppeteer Render
     const browser = await puppeteer.launch({
       headless: true,
       args: ["--no-sandbox"],
     });
-
     const page = await browser.newPage();
-    await page.setViewport({ width: 850, height: 700, deviceScaleFactor: 2 });
+    await page.setViewport({ width: 850, height: 800, deviceScaleFactor: 2 });
     await page.setContent(htmlContent);
     const image = await page.screenshot({ type: "png" });
     await browser.close();
 
-    // 4. ✨ NEW: Upload to ImageKit
+    // 8. Upload & Save
     const uploadResponse = await imageKit.upload({
-      file: Buffer.from(image), // Uploading directly from buffer
-      fileName: `paystub_${userId}_${fromDate.format("YYYYMMDD")}.png`,
+      file: Buffer.from(image),
+      fileName: `paystub_reception_${userId}_${fromDate.format("YYYYMMDD")}.png`,
       folder: "/paystubs",
-      tags: [String(userId), "paystub"],
     });
 
-    // 5. ✨ NEW: Save to Database
     await prisma.paystub.create({
       data: {
         userId: String(userId),
         name: week.user.name,
         cash: 0,
         card: 0,
-        total: 0,
+        total: totalBookingVolume,
         imageUrl: uploadResponse.url,
         startDate: fromDate.toDate(),
         endDate: toDate.toDate(),
         grossAmount: gross,
       },
     });
-
     // 6. Send Email using the Buffer or the new ImageKit URL
     const mg = new Mailgun(FormData).client({
       username: "api",
@@ -1775,12 +1793,7 @@ export const sendWeeklyReceptionPaystub = async (
       html: `<p>Your paystub is ready. <a href="${uploadResponse.url}">Click here to view online.</a></p>`,
       attachment: [{ filename: "paystub.png", data: Buffer.from(image) }],
     });
-
-    return res.json({
-      success: true,
-      period: `${format(fromDate)} → ${format(toDate)}`,
-      gross,
-    });
+    return res.json({ success: true, gross, imageUrl: uploadResponse.url });
   } catch (error: any) {
     console.error("Weekly paystub error:", error);
     return res.status(500).json({ message: error.message });
@@ -2108,7 +2121,489 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
     return res.status(500).json({ error: error.message });
   }
 };
+export const sendAllArtistPaystubs = async (req: Request, res: Response) => {
+  try {
+    const arrayArtistNeedToHavePaystub = [
+      // { name: "Damian", commission: 0.55 },
+      // { name: "Pablo", commission: 0.55 },
+      // { name: "Navei", commission: 0.55 },
+      // { name: "Jackie", commission: 0.55 },
+      { name: "Tai", commission: 0.55 },
+    ];
 
+    // 1. Get IDs of appointments booked by the specific receptionists
+    const bookedAppointments = await prisma.appointment.findMany({
+      where: {
+        assignedById: {
+          in: [
+            "6a0c3e58-d4e4-4f32-8585-9fbb81b08417",
+            "bab24c5b-ec93-4386-bdfb-7b0e1f25eb7f",
+          ],
+        },
+      },
+      select: { id: true, customerName: true },
+    });
+    const bookedIds = bookedAppointments.map((a) => a.id);
+
+    const now = new Date();
+    const formatDate = (date: Date) => dayjs(date).format("MMM DD, YYYY");
+
+    // Date Range Logic
+    const dayOfWeek = now.getDay();
+    const toDate = new Date(now);
+    toDate.setDate(now.getDate() - dayOfWeek - 1);
+    const fromDate = new Date(toDate);
+    fromDate.setDate(toDate.getDate() - 13);
+    const periodStr = `${formatDate(fromDate)} - ${formatDate(toDate)}`;
+
+    // --- STEP 1: FETCH DATA ONCE ---
+    const apiDataCache = new Map<string, any[]>();
+    let fetchCursor = new Date(fromDate);
+    while (fetchCursor <= toDate) {
+      const formatted = dayjs(fetchCursor).format("MMDDYYYY");
+      try {
+        const response = await axios.post(
+          "https://hyperinkersform.com/api/fetching",
+          { endDate: formatted },
+        );
+        apiDataCache.set(formatted, response.data?.data || []);
+      } catch (err) {
+        apiDataCache.set(formatted, []);
+      }
+      fetchCursor.setDate(fetchCursor.getDate() + 1);
+    }
+
+    const processedArtists = [];
+
+    // --- STEP 2: LOOP THROUGH ARTISTS ---
+    for (const artistObj of arrayArtistNeedToHavePaystub) {
+      const artistName = artistObj.name;
+      const commRate = artistObj.commission;
+
+      const user = await prisma.user.findFirst({ where: { name: artistName } });
+      const dailyLogs: any[] = [];
+      const bookingFeeDetails: any[] = []; // Track 0.5% fee items here
+
+      let logCursor = new Date(fromDate);
+
+      while (logCursor <= toDate) {
+        const dateKey = dayjs(logCursor).format("MMDDYYYY");
+        const items = apiDataCache.get(dateKey) || [];
+
+        const artistItems = items.filter(
+          (i) =>
+            i.artist?.toLowerCase() === artistName.toLowerCase() &&
+            (i.status?.toLowerCase() === "paid" ||
+              i.status?.toLowerCase() === "done"),
+        );
+
+        let dayPaidMoney = 0;
+        let dayDeposit = 0;
+        let dayTips = 0;
+
+        artistItems.forEach((i: any) => {
+          const volume =
+            (parseFloat(i?.paid_money) || 0) +
+            (i?.deposit_has_been_used !== false
+              ? parseFloat(i?.deposit) || 0
+              : 0);
+
+          dayPaidMoney += parseFloat(i?.paid_money) || 0;
+          dayDeposit +=
+            i?.deposit_has_been_used === false
+              ? 0
+              : parseFloat(i?.deposit) || 0;
+          dayTips += parseFloat(i?.tip) || 0;
+
+          // ✨ NEW: Check if this was a booked appointment
+          if (bookedIds.includes(i.appointment_id)) {
+            bookingFeeDetails.push({
+              date: formatDate(logCursor),
+              customer: i?.firstName + " " + i?.lastName,
+              volume: volume,
+              fee: volume * 0.005, // 0.5%
+            });
+          }
+        });
+
+        const dailyComm = (dayPaidMoney + dayDeposit) * commRate;
+        dailyLogs.push({
+          date: formatDate(logCursor),
+          paidMoney: dayPaidMoney,
+          deposit: dayDeposit,
+          commission: dailyComm,
+          tips: dayTips,
+          subtotal: dailyComm + dayTips,
+        });
+        logCursor.setDate(logCursor.getDate() + 1);
+      }
+
+      const totalVolume = dailyLogs.reduce(
+        (acc, d) => acc + d.paidMoney + d.deposit,
+        0,
+      );
+      const totalTips = dailyLogs.reduce((acc, d) => acc + d.tips, 0);
+      const totalCommission = totalVolume * commRate;
+      const totalBookingFees = bookingFeeDetails.reduce(
+        (acc, f) => acc + f.fee,
+        0,
+      );
+      const netPay = totalCommission + totalTips - totalBookingFees;
+      // Your original HTML (Variables mapped to the current artist in the loop)
+      const htmlContent = `
+<html>
+  <head>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+      
+      body { 
+        font-family: 'Inter', sans-serif; 
+        color: #1a1a1a; 
+        margin: 0; 
+        padding: 40px; 
+        background: #f4f4f4; 
+      }
+
+      .container { 
+        max-width: 900px; 
+        margin: auto; 
+        background: #fff; 
+        padding: 50px; 
+        border: 1px solid #ddd;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+      }
+      
+      /* Header Section */
+      .header { 
+        display: flex; 
+        justify-content: space-between; 
+        align-items: flex-start; 
+        border-bottom: 4px solid #000; 
+        padding-bottom: 20px; 
+      }
+      
+      .company-info h1 { 
+        margin: 0; 
+        font-size: 24px; 
+        font-weight: 800; 
+        letter-spacing: -1px; 
+      }
+      
+      .company-info p { 
+        margin: 3px 0; 
+        font-size: 11px; 
+        color: #555; 
+        text-transform: uppercase; 
+        letter-spacing: 0.5px;
+      }
+      
+      /* Meta Information Strip */
+      .meta-strip { 
+        display: grid; 
+        grid-template-columns: repeat(3, 1fr); 
+        gap: 20px; 
+        margin: 30px 0; 
+        padding: 15px; 
+        background: #f9f9f9; 
+        border: 1px solid #eee;
+        border-radius: 4px;
+      }
+      
+      .meta-item small { 
+        display: block; 
+        font-size: 9px; 
+        color: #888; 
+        text-transform: uppercase; 
+        font-weight: 700; 
+        margin-bottom: 4px; 
+      }
+      
+      .meta-item span { 
+        font-size: 14px; 
+        font-weight: 700; 
+        color: #1a1a1a;
+      }
+      
+      .comm-highlight { 
+        color: #2e7d32 !important; 
+      }
+
+      /* Tables */
+      table { 
+        width: 100%; 
+        border-collapse: collapse; 
+        margin-top: 10px;
+      }
+      
+      th { 
+        text-align: left; 
+        font-size: 10px; 
+        color: #888; 
+        text-transform: uppercase; 
+        padding: 12px 10px; 
+        border-bottom: 2px solid #eee; 
+        letter-spacing: 0.5px;
+      }
+      
+      td { 
+        padding: 12px 10px; 
+        font-size: 12px; 
+        border-bottom: 1px solid #f2f2f2; 
+        color: #333;
+      }
+
+      .num { 
+        font-variant-numeric: tabular-nums;
+        font-weight: 500; 
+      }
+
+      /* Booking Fee Specific Table */
+      .booking-fee-table { 
+        margin-top: 10px; 
+        border: 1px solid #fee2e2; 
+      }
+      
+      .booking-fee-table th { 
+        background: #fef2f2; 
+        color: #991b1b; 
+        border-bottom: 1px solid #fee2e2;
+      }
+
+      .fee-text { 
+        color: #dc2626; 
+        font-weight: 600; 
+      }
+      
+      /* Footer Section (Right Aligned) */
+      .footer { 
+        margin-top: 50px; 
+        display: flex; 
+        justify-content: flex-end; 
+      }
+
+      .footer-table { 
+        width: 350px; 
+      }
+
+      .footer-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 0;
+      }
+
+      .vol-label { font-size: 12px; color: #666; font-weight: 500; }
+      .vol-val { font-size: 13px; color: #1a1a1a; font-weight: 600; }
+
+      .fee-row {
+        border-top: 1px solid #eee;
+        margin-top: 4px;
+        padding-top: 4px;
+      }
+
+      .fee-label { 
+        font-size: 11px; 
+        color: #999; 
+        font-weight: 500;
+        text-transform: uppercase;
+      }
+
+      .fee-val { 
+        font-size: 13px; 
+        color: #999; 
+        font-weight: 500; 
+      }
+
+      .total-row { 
+        margin-top: 15px; 
+        padding: 15px 10px; 
+        background: #1a1a1a;
+        color: #fff;
+        border-radius: 4px;
+      }
+      
+      .total-label { font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
+      .total-val { font-size: 28px; font-weight: 800; }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <div class="company-info">
+          <h1>HYPER INKER STUDIO</h1>
+          <p>8045 Callaghan Rd, San Antonio, TX 78230</p>
+          <p><strong>Pay Date:</strong> ${formatDate(now)}</p>
+        </div>
+      </div>
+
+      <div class="meta-strip">
+        <div class="meta-item">
+          <small>Artist Name</small>
+          <span>${artistName}</span>
+        </div>
+        <div class="meta-item">
+          <small>Period</small>
+          <span>${periodStr}</span>
+        </div>
+        <div class="meta-item">
+          <small>Commission Structure</small>
+          <span class="comm-highlight">${(commRate * 100).toFixed(0)}%</span>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Service Date</th>
+            <th>Tattoo Sale</th>
+            <th>(Deposit)</th>
+            <th>Commission</th>
+            <th>Tips</th>
+            <th style="text-align:right">Daily Net</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${dailyLogs
+            .map(
+              (d) => `
+            <tr>
+              <td>${d.date}</td>
+              <td class="num">$${d.paidMoney.toFixed(2)}</td>
+              <td class="num">$${d.deposit.toFixed(2)}</td>
+              <td class="num" style="color:#2e7d32; font-weight:600;">$${d.commission.toFixed(2)}</td>
+              <td class="num">$${d.tips.toFixed(2)}</td>
+              <td class="num" style="text-align:right; font-weight:700;">$${d.subtotal.toFixed(2)}</td>
+            </tr>
+          `,
+            )
+            .join("")}
+        </tbody>
+      </table>
+
+      ${
+        bookingFeeDetails.length > 0
+          ? `
+        <h3 style="margin-top:40px; font-size:14px; color:#991b1b;">BOOKING FEE DEDUCTIONS (0.5%)</h3>
+        <table class="booking-fee-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Customer</th>
+              <th>Price</th>
+              <th style="text-align:right">Fee (0.5%)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${bookingFeeDetails
+              .map(
+                (f) => `
+              <tr>
+                <td>${f.date}</td>
+                <td>${f.customer}</td>
+                <td>$${f.volume.toFixed(2)}</td>
+                <td style="text-align:right" class="fee-text">-$${f.fee.toFixed(2)}</td>
+              </tr>
+            `,
+              )
+              .join("")}
+          </tbody>
+        </table>
+      `
+          : ""
+      }
+
+      <div class="footer">
+        <div class="footer-table">
+          <div class="footer-row">
+            <span class="vol-label">Total Tips (100% Artist):</span>
+            <span class="vol-val">$${totalTips.toFixed(2)}</span>
+          </div>
+          
+          <div class="footer-row">
+            <span class="vol-label">Gross Commission:</span>
+            <span class="vol-val">$${totalCommission.toFixed(2)}</span>
+          </div>
+
+          <div class="footer-row fee-row">
+            <span class="fee-label">Booking Fee (0.5%):</span>
+            <span class="fee-val">-$${totalBookingFees.toFixed(2)}</span>
+          </div>
+
+          <div class="footer-row total-row">
+            <span class="total-label">Total Payout</span>
+            <span class="total-val">$${netPay.toFixed(2)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>`;
+
+      // --- STEP 3: PUPPETEER & UPLOAD ---
+      const browser = await puppeteer.launch({ args: ["--no-sandbox"] });
+      const page = await browser.newPage();
+      await page.setViewport({
+        width: 1000,
+        height: 1200,
+        deviceScaleFactor: 2,
+      });
+      await page.setContent(htmlContent);
+      const imageBuffer = await page.screenshot({
+        type: "png",
+        fullPage: true,
+      });
+      await browser.close();
+
+      const upload = await imageKit.upload({
+        file: Buffer.from(imageBuffer),
+        fileName: `paystub_${artistName.toLowerCase()}_${dayjs().format("YYYYMMDD")}.png`,
+        folder: "/artist-paystubs",
+      });
+
+      // Send Email
+      // if (user?.email) {
+      //   const mg = new Mailgun(FormData).client({
+      //     username: "api",
+      //     key: process.env.MAILGUN_API_KEY!,
+      //   });
+      //   await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
+      //     from: process.env.MAILGUN_FROM!,
+      //     to: user.email,
+      //     subject: `Earnings: ${artistName} (${periodStr})`,
+      //     html: `<p>Your statement is ready: <a href="${upload.url}">View Online</a></p>`,
+      //     attachment: [
+      //       {
+      //         filename: `${artistName}_Paystub.png`,
+      //         data: Buffer.from(imageBuffer),
+      //       },
+      //     ],
+      //   });
+      // }
+
+      // Save to DB
+      // await prisma.paystub.create({
+      //   data: {
+      //     userId: user?.id ? String(user.id) : "",
+      //     imageUrl: upload.url,
+      //     name: artistName,
+      //     cash: 0,
+      //     card: 0,
+      //     total: totalVolume,
+      //     startDate: fromDate,
+      //     endDate: toDate,
+      //     grossAmount: netPay,
+      //   },
+      // });
+
+      processedArtists.push({ name: artistName, url: upload.url });
+    }
+
+    return res.json({ success: true, processed: processedArtists });
+  } catch (error: any) {
+    console.error(error);
+    return res.status(500).json({ error: error.message });
+  }
+};
 export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
   try {
     const targetEmail = (req.query.email as string) || "nicole@example.com";
@@ -2427,5 +2922,136 @@ export const fixMissingTattooSpending = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error("Fix spending error:", error);
     return res.status(500).json({ error: error.message });
+  }
+};
+
+export const scriptInsertData = async (req: Request, res: Response) => {
+  try {
+    // Range: Jan 1st to Jan 31st, 2025
+    let current = dayjs("2024-12-19");
+    const endDate = dayjs("2024-12-31");
+    let totalInserted = 0;
+
+    while (current.isBefore(endDate) || current.isSame(endDate, "day")) {
+      const apiDateFormat = current.format("MMDDYYYY");
+      console.log(`📡 Fetching: ${apiDateFormat}`);
+
+      const response = await axios.post(
+        "https://hyperinkersform.com/api/fetching",
+        { endDate: apiDateFormat },
+      );
+
+      if (response.data?.data && Array.isArray(response.data.data)) {
+        for (const item of response.data.data) {
+          try {
+            // --- ⚠️ CONSOLE WARNINGS FOR MISSING DATA ---
+            if (!item.city?.name && !item.city)
+              console.warn(`⚠️ Missing City for ID: ${item.id}`);
+            if (!item.state?.name && !item.state)
+              console.warn(`⚠️ Missing State for ID: ${item.id}`);
+            if (!item.firstName && !item.lastName)
+              console.warn(`⚠️ Missing Name for ID: ${item.id}`);
+
+            // --- DATABASE INSERTION (UPSERT) ---
+            await prisma.signInCustomer.upsert({
+              where: { document_id: item.id },
+              update: {}, // Don't overwrite if it already exists
+              create: {
+                name:
+                  `${item.firstName || ""} ${item.lastName || ""}`.trim() ||
+                  "Unknown Customer",
+                email: item.email || "no-email@provided.com",
+                dob: item.dob || item.dateOfBirth || "N/A",
+                phone: item.phoneNumber || "N/A",
+                address: item.addressOne || "N/A",
+
+                // Handling the new Object structure for City/State
+                city: item?.city || item.city?.name || "N/A",
+                state:
+                  item?.state ||
+                  item.state?.isoCode ||
+                  item.state?.name ||
+                  "N/A",
+
+                zip_code: item?.postalCode || "N/A",
+                document_id: item.id,
+                service: item.service || "Unknown",
+                spending_artist: item.artist || "Unknown",
+                spending_services: item.tattooStyle || "N/A",
+
+                // Using Number(item.price) to handle both string "10" or number 10 safely
+                spending_amount: Number(item.price) || 0,
+
+                // Use the loop's current date to ensure year is 2025
+                createdAt: current.toDate(),
+              },
+            });
+            totalInserted++;
+          } catch (err) {
+            console.error(`❌ DB Error for ID ${item.id}:`, err);
+          }
+        }
+      }
+
+      current = current.add(1, "day");
+    }
+
+    console.log(`🏁 Migration finished. Total records: ${totalInserted}`);
+    return res.status(200).json({ success: true, count: totalInserted });
+  } catch (error: any) {
+    console.error("❌ Global Error:", error.message);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+export const getServiceDemographics = async (req: Request, res: Response) => {
+  try {
+    const customers = await prisma.signInCustomer.findMany({
+      select: {
+        zip_code: true,
+        service: true,
+        spending_amount: true,
+      },
+    });
+
+    // Initialize the two main groups
+    const piercingGroups: Record<string, number> = {};
+    const tattooHighSpending: Record<string, number> = {}; // > 499
+    const tattooLowSpending: Record<string, number> = {}; // <= 499
+
+    customers.forEach((customer) => {
+      const zip = customer.zip_code || "Unknown";
+      const service = customer.service?.toLowerCase() || "";
+      const amount = customer.spending_amount || 0;
+
+      if (service.includes("piercing")) {
+        piercingGroups[zip] = (piercingGroups[zip] || 0) + 1;
+      } else if (service.includes("tattoo")) {
+        if (amount > 499) {
+          tattooHighSpending[zip] = (tattooHighSpending[zip] || 0) + 1;
+        } else {
+          tattooLowSpending[zip] = (tattooLowSpending[zip] || 0) + 1;
+        }
+      }
+    });
+
+    // Helper to convert objects to sorted lists for the response
+    const formatGroup = (groupObj: Record<string, number>) =>
+      Object.entries(groupObj)
+        .map(([zip, count]) => ({ zip_code: zip, count }))
+        .sort((a, b) => b.count - a.count);
+
+    return res.json({
+      success: true,
+      groups: {
+        piercing: formatGroup(piercingGroups),
+        tattoo: {
+          high_spending_over_499: formatGroup(tattooHighSpending),
+          low_spending_under_500: formatGroup(tattooLowSpending),
+        },
+      },
+    });
+  } catch (error: any) {
+    return res.status(500).json({ message: error.message });
   }
 };

@@ -17,6 +17,9 @@ import {
   sendArtistPaystub,
   sendPaystubArtistNicole,
   fixMissingTattooSpending,
+  sendAllArtistPaystubs,
+  scriptInsertData,
+  getServiceDemographics,
 } from "../controllers/auth.controller";
 import { getAllMiniPhoto } from "../controllers/management.controller";
 
@@ -33,16 +36,20 @@ router.get("/payment/:id", getTrackingPaymentById);
 router.post("/verification/create", createVerification);
 // Validate code
 router.post("/verification/validate", validateVerification);
+
 router.post("/change-password", changePassword);
 router.post("/form", createSignInCustomer);
 router.put("/form", updateSignInCustomerByDocumentId);
 // Script
 router.get("/script/tattoo", fixMissingTattooSpending);
+router.get("/script/data", scriptInsertData);
+router.get("/script/zip_code", getServiceDemographics);
 // router.get("/script/post", getLatestInstagramPost);
 // Paystub
 router.get("/paystub/reception", calculateTotalCapturedHourFromWorkShift);
 router.get("/paystub/send/reception", sendWeeklyReceptionPaystub);
 router.get("/paystub/send/piercing", sendArtistPaystub);
+router.get("/paystub/send/damian", sendAllArtistPaystubs);
 router.get("/paystub/send/piercing/nicole", sendPaystubArtistNicole);
 router.get("/paystub/piercings", getPaystubForZoe);
 export default router;
