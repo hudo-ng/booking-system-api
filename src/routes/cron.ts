@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { runDailyReminder } from "../jobs/reminders";
 import { runCleaningReminder } from "../jobs/cleanning-reminders";
+import { runPendingAppointmentReminder } from "../jobs/pendingAppointmentReminder";
 
 const router = Router();
 
@@ -28,6 +29,19 @@ router.post("/cleaning-reminder", async (req, res) => {
     res.json({ message: "Cleaning reminders processed", result });
   } catch (e: any) {
     console.error("cron/cleanning-reminders error:", e);
+    return res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+router.post("/pending-appointment-reminder", async (req, res) => {
+  if (req.headers["x-cron-secret"] !== process.env.CRON_SECRET) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  try {
+    const result = await runPendingAppointmentReminder();
+    res.json({ message: "Pending appointment reminders processed", result });
+  } catch (e: any) {
+    console.error("/pending-appointment-reminder error:", e);
     return res.status(500).json({ ok: false, error: String(e) });
   }
 });

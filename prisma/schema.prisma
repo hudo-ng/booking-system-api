@@ -96,6 +96,7 @@ model Appointment {
   DepositAppointment     DepositAppointment[]
   VerificationCodes      VerificationCode[]
   webPayment             WebPaymentTracking?
+  lastReminderSentAt   DateTime?
 }
 
 model DepositAppointment {
