@@ -48,3 +48,5 @@ export const linkArtistKey = async (req: Request, res: Response) => {
 
   res.status(201).json(newKey);
 };
+
+

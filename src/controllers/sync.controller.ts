@@ -1,5 +1,6 @@
 import {
   fetchReviews,
+  fetchAllReviews,
   getFreshAccessToken,
   parseRating,
 } from "../utils/googleBusiness";
@@ -12,8 +13,10 @@ export const syncAllArtistReviews = async (ownerId: string) => {
     const token = await getFreshAccessToken(ownerId);
     const keys = await prisma.googleReviewKey.findMany();
 
+    console.log(keys);
+
     for (const key of keys) {
-      const googleReviews = await fetchReviews(token, key.locationId);
+      const googleReviews = await fetchAllReviews(token, key.locationId);
 
       for (const gr of googleReviews) {
         await prisma.review.upsert({

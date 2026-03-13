@@ -34,7 +34,6 @@ export const parseRating = (rating: GoogleReview["starRating"]): number => {
   return map[rating] || 0;
 };
 
-
 export const getFreshAccessToken = async (userId: string): Promise<string> => {
   const creds = await prisma.googleCredential.findUniqueOrThrow({
     where: { userId },
@@ -54,17 +53,51 @@ export const getFreshAccessToken = async (userId: string): Promise<string> => {
   return credentials.access_token!;
 };
 
-
 export const fetchReviews = async (
   accessToken: string,
   locationResourceName: string,
 ): Promise<GoogleReview[]> => {
   const url = `https://mybusiness.googleapis.com/v4/${locationResourceName}/reviews`;
 
+  console.log(`📡 Fetching from: ${url}`);
+
   const response = await axios.get<GoogleReviewResponse>(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
     params: { pageSize: 50 },
   });
 
+  console.log(
+    "📦 Raw Google Response:",
+    JSON.stringify(response.data, null, 2),
+  );
+
   return response.data.reviews || [];
+};
+
+export const fetchAllReviews = async (accessToken: string, locationId: string): Promise<GoogleReview[]> => {
+  let allReviews: GoogleReview[] = [];
+  let nextPageToken: string | undefined = undefined;
+
+  do {
+    const response: { data: GoogleReviewResponse } = await axios.get<GoogleReviewResponse>(
+      `https://mybusiness.googleapis.com/v4/${locationId}/reviews`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        params: { 
+          pageSize: 50, 
+          pageToken: nextPageToken // Pass the token from the last request
+        },
+      }
+    );
+
+    if (response.data.reviews) {
+      allReviews.push(...response.data.reviews);
+    }
+    
+    // Google provides this token if more reviews exist
+    nextPageToken = response.data.nextPageToken;
+
+  } while (nextPageToken); // Keep going as long as there's a "Next Page"
+
+  return allReviews;
 };
