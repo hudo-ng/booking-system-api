@@ -2,6 +2,7 @@ import { Router } from "express";
 import { runDailyReminder } from "../jobs/reminders";
 import { runCleaningReminder } from "../jobs/cleanning-reminders";
 import { runPendingAppointmentReminder } from "../jobs/pendingAppointmentReminder";
+import { testSync } from "../jobs/updateGGReviews";
 
 const router = Router();
 
@@ -42,6 +43,19 @@ router.post("/pending-appointment-reminder", async (req, res) => {
     res.json({ message: "Pending appointment reminders processed", result });
   } catch (e: any) {
     console.error("/pending-appointment-reminder error:", e);
+    return res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+router.post("/google-reviews-update", async (req, res) => {
+  if (req.headers["x-cron-secret"] !== process.env.CRON_SECRET) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  try {
+    const result = await testSync();
+    res.json({ message: "Google reviews updated", result });
+  } catch (e: any) {
+    console.error("/google-reviews-update error:", e);
     return res.status(500).json({ ok: false, error: String(e) });
   }
 });
