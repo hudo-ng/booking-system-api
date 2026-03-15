@@ -35,6 +35,25 @@ export const getDashboardData = async (
   res.json(reviews);
 };
 
+export const getGoogleReviewKeys = async (req: Request, res: Response) => {
+  try {
+    const keys = await prisma.googleReviewKey.findMany({
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+    res.json(keys);
+  } catch (error) {
+    console.error("Error fetching review keys:", error);
+    res.status(500).json({ error: "Failed to fetch review keys" });
+  }
+};
+
 export const linkArtistKey = async (req: Request, res: Response) => {
   const { userId, locationId, displayName } = req.body;
 
@@ -47,6 +66,29 @@ export const linkArtistKey = async (req: Request, res: Response) => {
   });
 
   res.status(201).json(newKey);
+};
+
+export const deleteGoogleReviewKey = async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  try {
+    const existingKey = await prisma.googleReviewKey.findUnique({
+      where: { id: id },
+    });
+
+    if (!existingKey) {
+      return res.status(404).json({ error: "Keyword not found." });
+    }
+
+    await prisma.googleReviewKey.delete({
+      where: { id: id },
+    });
+
+    res.status(200).json({ message: "Keyword deleted successfully." });
+  } catch (error) {
+    console.error("Error deleting review key:", error);
+    res.status(500).json({ error: "Failed to delete the keyword." });
+  }
 };
 
 

@@ -375,15 +375,15 @@ model Review  {
   googleReviewKeyId String
   googleReviewKey  GoogleReviewKey @relation(fields: [googleReviewKeyId], references: [id])
   
-  userId           String
-  user             User            @relation(fields: [userId], references: [id])
+  userId           String?
+  user             User?            @relation(fields: [userId], references: [id])
 
   @@index([userId, createTime])
 }
 
 model GoogleReviewKey {
   id                String   @id @default(uuid())
-  locationId        String   @unique
+  locationId        String   
   displayName       String?  
   userId            String   
   user              User     @relation(fields: [userId], references: [id])

@@ -94,10 +94,9 @@ export const fetchAllReviews = async (accessToken: string, locationId: string): 
       allReviews.push(...response.data.reviews);
     }
     
-    // Google provides this token if more reviews exist
     nextPageToken = response.data.nextPageToken;
 
-  } while (nextPageToken); // Keep going as long as there's a "Next Page"
+  } while (nextPageToken);
 
   return allReviews;
 };
