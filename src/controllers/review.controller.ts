@@ -11,6 +11,8 @@ interface DashboardQuery {
   endDate?: string;
 }
 
+import { syncAllArtistReviews } from "./sync.controller";
+
 export const getDashboardData = async (
   req: Request<{}, {}, {}, DashboardQuery>,
   res: Response,
@@ -88,6 +90,20 @@ export const deleteGoogleReviewKey = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Error deleting review key:", error);
     res.status(500).json({ error: "Failed to delete the keyword." });
+  }
+};
+
+
+export const syncGoogleReviews = async (req: Request, res: Response) => {
+  try {
+    const owner = await prisma.user.findFirst({ where: { isOwner: true } });
+    
+    if (!owner) return res.status(404).json({ error: "Owner not found" });
+    await syncAllArtistReviews(owner.id);
+
+    res.json({ message: "Sync successful" });
+  } catch (error) {
+    res.status(500).json({ error: "Sync failed" });
   }
 };
 
