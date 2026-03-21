@@ -1616,6 +1616,7 @@ export const sendWeeklyReceptionPaystub = async (
 
     // 4. Calculate Commissions from the Cache
     let totalBookingVolume = 0;
+    let qualifiedBookingCount = 0;
     const bookingCommRate = 0.01; // 1%
 
     apiDataCache.forEach((items) => {
@@ -1625,7 +1626,7 @@ export const sendWeeklyReceptionPaystub = async (
           (i.status?.toLowerCase() === "paid" ||
             i.status?.toLowerCase() === "done"),
       );
-
+      qualifiedBookingCount += paidBookings.length;
       paidBookings.forEach((i) => {
         const paid = parseFloat(i?.paid_money) || 0;
         const deposit =
@@ -1668,7 +1669,7 @@ export const sendWeeklyReceptionPaystub = async (
           th { background: #f2f2f2; color: #666; font-size: 10px; padding: 12px 10px; text-align: left; text-transform: uppercase; border-bottom: 1px solid #ccc; }
           td { padding: 15px 10px; font-size: 13px; border-bottom: 1px solid #eee; }
           .ot-text { color: #2563eb; font-weight: 600; }
-          .comm-text { color: #16a34a; font-weight: 600; }
+          .comm-text { color: #c5c5c5; font-weight: 600; }
           .footer-totals { display: flex; justify-content: flex-end; padding: 20px; background: #f9f9f9; border: 1px solid #ccc; border-top: none; }
           .total-item { margin-left: 50px; text-align: center; }
           .total-item small { display: block; font-weight: bold; color: #888; font-size: 10px; margin-bottom: 4px; }
@@ -1698,7 +1699,7 @@ export const sendWeeklyReceptionPaystub = async (
         </div>
         <div class="info-row">
           <div><strong>${week.user.name}</strong><br />Receptionist</div>
-          <div>$${rate.toFixed(2)}/hr</div>
+          <div>$${(rate - 1).toFixed(2)} + ($1 bonus) /hr</div>
           <div>Weekly</div>
           <div>${format(fromDate)} to ${format(toDate)}</div>
         </div>
@@ -1715,7 +1716,7 @@ export const sendWeeklyReceptionPaystub = async (
             <tr>
               <td><strong>Regular Hours</strong></td>
               <td>${reg.toFixed(1)} hrs</td>
-              <td>$${rate.toFixed(2)}</td>
+              <td>$${(rate - 1).toFixed(2)} + ($1 bonus)</td>
               <td style="text-align:right; font-weight:bold;">$${(reg * rate).toFixed(2)}</td>
             </tr>
             ${
@@ -1743,6 +1744,7 @@ export const sendWeeklyReceptionPaystub = async (
           </tbody>
         </table>
         <div class="footer-totals">
+          <div class="total-item"><small>BOOKINGS</small><span>${qualifiedBookingCount}</span></div>
           <div class="total-item"><small>WORK DAYS</small><span>${totalWorkDays} Days</span></div>
           <div class="total-item"><small>TOTAL HOURS</small><span>${(reg + ot).toFixed(1)}</span></div>
           <div class="total-item" style="color:#000;"><small>Gross Pay</small><span>$${gross.toFixed(2)}</span></div>
@@ -1801,6 +1803,265 @@ export const sendWeeklyReceptionPaystub = async (
 };
 
 const formatDate = (d: Date) => d.toISOString().split("T")[0];
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+export const sendZoePaystub = async (req: Request, res: Response) => {
+  try {
+    const artistName = "Zoe";
+    const hourlyRate = 12.5;
+    const commRate = 0.1; // 10%
+    const commPercent = commRate * 100;
+
+    // 1. Date Range Setup (Previous 2 Weeks)
+    const now = new Date();
+    now.setDate(now.getDate() - 3);
+    const dayOfWeek = now.getDay();
+    const toDate = new Date(now);
+    toDate.setDate(now.getDate() - dayOfWeek - 1);
+    const fromDate = new Date(toDate);
+    fromDate.setDate(toDate.getDate() - 13);
+
+    const periodStr = `${dayjs(fromDate).format("MMM DD, YYYY")} - ${dayjs(toDate).format("MMM DD, YYYY")}`;
+    const dailyLogs: any[] = [];
+    let cursor = new Date(fromDate);
+
+    while (cursor <= toDate) {
+      const formatted = dayjs(cursor).format("MMDDYYYY");
+      let dayServiceTotal = 0;
+      let dayJewelry = 0;
+      let daySaline = 0;
+      let dayTips = 0;
+      let dayHours = 0;
+
+      try {
+        const salesRes = await axios.post(
+          "https://hyperinkersform.com/api/fetching",
+          { endDate: formatted },
+        );
+        const items = salesRes.data?.data || [];
+        await delay(500);
+        const promoRes = await axios.post(
+          `https://hyperinkersform.com/api/fetching/promotion`,
+          { endDate: formatted },
+        );
+        const promoData = promoRes.data?.data || {};
+
+        const artistItems = items.filter(
+          (i: any) =>
+            i.artist?.toLowerCase() === artistName.toLowerCase() &&
+            (i.status?.toLowerCase() === "paid" ||
+              i.status?.toLowerCase() === "done"),
+        );
+
+        if (artistItems.length > 0) {
+          const trackingIds = artistItems
+            .map((i: any) => i.tracking_payment_id)
+            .filter((id: string) => !!id);
+          const payments = await prisma.trackingPayment.findMany({
+            where: { id: { in: trackingIds } },
+            select: { createdAt: true },
+          });
+
+          const sortedPayments = payments.sort(
+            (a, b) =>
+              dayjs(a.createdAt).valueOf() - dayjs(b.createdAt).valueOf(),
+          );
+
+          artistItems.forEach((i: any) => {
+            const fullName = `${i?.firstName} ${i?.lastName}`;
+            if (fullName.includes("*"))
+              dayServiceTotal += Number(i?.price) || 0;
+            dayJewelry += Number(i?.priceJewelry) || 0;
+            daySaline += Number(i?.priceSaline) || 0;
+            dayTips += Number(i?.tip) || 0;
+          });
+
+          const clockInStr =
+            promoData["Zoe"]?.fullTimestamp || promoData["Zoe"];
+          const lastPayment = sortedPayments[sortedPayments.length - 1];
+          const clockOutTime = lastPayment?.createdAt;
+
+          if (clockInStr && clockOutTime) {
+            const diffMinutes = dayjs(clockOutTime).diff(
+              dayjs(clockInStr),
+              "minute",
+            );
+            dayHours =
+              diffMinutes > 0 ? Number((diffMinutes / 60).toFixed(2)) : 0.5;
+          }
+        }
+      } catch (err) {
+        console.error(`Fetch failed for ${formatted}:`, err);
+      }
+
+      dailyLogs.push({
+        date: dayjs(cursor).format("MMM DD, YYYY"),
+        hrs: dayHours,
+        jewelry: dayJewelry,
+        saline: daySaline,
+        servicePrice: dayServiceTotal,
+        tips: dayTips,
+      });
+
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    // 2. Calculations
+    const totalHours = dailyLogs.reduce((acc, d) => acc + d.hrs, 0);
+    const laborPay = totalHours * hourlyRate;
+    const totalJ = dailyLogs.reduce((acc, d) => acc + d.jewelry, 0);
+    const totalS = dailyLogs.reduce((acc, d) => acc + d.saline, 0);
+    const totalService = dailyLogs.reduce((acc, d) => acc + d.servicePrice, 0);
+    const totalTips = dailyLogs.reduce((acc, d) => acc + d.tips, 0);
+
+    const jewelryComm = totalJ * commRate;
+    const salineComm = totalS * commRate;
+    const serviceComm = totalService * commRate;
+
+    const totalCommission = jewelryComm + salineComm + serviceComm;
+    const netPay = laborPay + totalCommission + totalTips;
+    const totalWorkDays = dailyLogs.filter(
+      (d) => d.hrs > 0 || d.tips > 0 || d.servicePrice > 0,
+    ).length;
+
+    // 3. HTML Content using your Design
+    const htmlContent = `
+    <html>
+      <head>
+        <style>
+          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+          body { font-family: 'Inter', sans-serif; color: #1a1a1a; margin: 0; padding: 40px; background: #fff; }
+          .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #f0f0f0; padding-bottom: 20px; }
+          .company-info h1 { margin: 0; font-size: 22px; font-weight: 800; color: #000; letter-spacing: -0.5px; }
+          .company-info p { margin: 4px 0; font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+          .summary-box { text-align: center; }
+          .summary-box small { display: block; font-weight: 700; color: #aaa; font-size: 9px; margin-bottom: 4px; text-transform: uppercase; }
+          .summary-box span { font-size: 22px; font-weight: 700; color: #000; }
+          .grey-bar { background: #333; color: white; padding: 10px 15px; font-size: 9px; font-weight: 700; text-transform: uppercase; display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; margin-top: 30px; border-radius: 4px 4px 0 0; }
+          .info-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; padding: 15px; border: 1px solid #eee; border-top: none; font-size: 12px; margin-bottom: 30px; border-radius: 0 0 4px 4px; }
+          table { width: 100%; border-collapse: collapse; border: 1px solid #eee; }
+          th { background: #f8f9fa; font-size: 9px; padding: 12px 8px; text-align: left; border-bottom: 1px solid #eee; color: #888; text-transform: uppercase; }
+          td { padding: 10px 8px; font-size: 11px; border-bottom: 1px solid #f4f4f4; color: #444; }
+          .bold-total { font-weight: 700; color: #000; text-align: right; }
+          .footer-totals { display: flex; justify-content: flex-end; padding: 25px; background: #fcfcfc; border: 1px solid #eee; border-top: none; border-radius: 0 0 4px 4px; }
+          .total-item { margin-left: 60px; text-align: center; }
+          .total-item small { display: block; font-weight: 700; color: #aaa; font-size: 9px; text-transform: uppercase; margin-bottom: 5px; }
+          .total-item span { font-size: 18px; font-weight: 700; color: #000; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="company-info">
+            <h1>HYPER INKER STUDIO</h1>
+            <p>8045 Callaghan Rd, San Antonio, TX 78230</p>
+            <p><strong>Pay Date:</strong> ${dayjs().format("MMM DD, YYYY")}</p>
+          </div>
+          <div class="summary-box"><small>Gross Payout</small><span>$${netPay.toFixed(2)}</span></div>
+        </div>
+
+        <div class="grey-bar">
+          <div>Employee</div><div>Rate</div><div>Status</div><div>Pay Period</div>
+        </div>
+        <div class="info-row">
+          <div><strong>${artistName}</strong></div>
+          <div>$${hourlyRate.toFixed(2)}/hr + ${commPercent}% Comm</div>
+          <div>Active</div>
+          <div>${periodStr}</div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Hours</th>
+              <th>Jewelry</th>
+              <th>Saline</th>
+              <th>Service</th>
+              <th>Tips</th> 
+              <th style="text-align:right">Daily Gross</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${dailyLogs
+              .map((d) => {
+                const dLabor = d.hrs * hourlyRate;
+                const dComm =
+                  (d.jewelry + d.saline + d.servicePrice) * commRate;
+                const dTotal = dLabor + dComm + d.tips;
+                return `
+              <tr>
+                <td>${d.date}</td>
+                <td>${d.hrs}h ($${dLabor.toFixed(2)})</td>
+                <td>$${d.jewelry.toFixed(2)}</td>
+                <td>$${d.saline.toFixed(2)}</td>
+                <td>$${d.servicePrice.toFixed(2)}</td>
+                <td style="color: #2e7d32;">$${d.tips.toFixed(2)}</td> 
+                <td class="bold-total">$${dTotal.toFixed(2)}</td>
+              </tr>`;
+              })
+              .join("")}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td style="text-align:right;">TOTALS:</td>
+              <td>$${laborPay.toFixed(2)}</td>
+              <td>$${jewelryComm.toFixed(2)}</td>
+              <td>$${salineComm.toFixed(2)}</td>
+              <td>$${serviceComm.toFixed(2)}</td>
+              <td>$${totalTips.toFixed(2)}</td> 
+              <td class="bold-total">$${netPay.toFixed(2)}</td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <div class="footer-totals">
+          <div class="total-item">
+            <small>Total Work Days</small>
+            <span>${totalWorkDays} Days</span>
+          </div>
+          <div class="total-item"><small>Tips (100%)</small><span>$${totalTips.toFixed(2)}</span></div>
+          <div class="total-item"><small>Commissions</small><span>$${totalCommission.toFixed(2)}</span></div>
+          <div class="total-item"><small>Gross Payout</small><span>$${netPay.toFixed(2)}</span></div>
+        </div>
+      </body>
+    </html>`;
+
+    // 4. Puppeteer Rendering & Upload
+    const browser = await puppeteer.launch({ args: ["--no-sandbox"] });
+    const page = await browser.newPage();
+    await page.setViewport({ width: 1200, height: 1600, deviceScaleFactor: 2 });
+    await page.setContent(htmlContent);
+    const imageBuffer = await page.screenshot({ type: "png", fullPage: true });
+    await browser.close();
+
+    const upload = await imageKit.upload({
+      file: Buffer.from(imageBuffer),
+      fileName: `zoe_paystub_${dayjs().format("YYYYMMDD")}.png`,
+      folder: "/zoe-paystubs",
+    });
+    // 7. Store in Prisma
+    await prisma.paystub.create({
+      data: {
+        userId: String(req.query.userId),
+        imageUrl: upload.url,
+        name: artistName,
+        cash: 0,
+        card: 0,
+        total: 0,
+        startDate: fromDate,
+        endDate: toDate,
+        grossAmount: netPay,
+      },
+    });
+    return res.json({
+      success: true,
+      imageUrl: upload.url,
+      netPay: netPay.toFixed(2),
+    });
+  } catch (error: any) {
+    console.error(error);
+    return res.status(500).json({ error: error.message });
+  }
+};
 
 export const sendArtistPaystub = async (req: Request, res: Response) => {
   try {
@@ -2124,10 +2385,10 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
 export const sendAllArtistPaystubs = async (req: Request, res: Response) => {
   try {
     const arrayArtistNeedToHavePaystub = [
-      // { name: "Damian", commission: 0.55 },
-      // { name: "Pablo", commission: 0.55 },
-      // { name: "Navei", commission: 0.55 },
-      // { name: "Jackie", commission: 0.55 },
+      { name: "Damian", commission: 0.55 },
+      { name: "Pablo", commission: 0.55 },
+      { name: "Navei", commission: 0.55 },
+      { name: "Jackie", commission: 0.55 },
       { name: "Tai", commission: 0.55 },
     ];
 
@@ -2561,39 +2822,39 @@ export const sendAllArtistPaystubs = async (req: Request, res: Response) => {
       });
 
       // Send Email
-      // if (user?.email) {
-      //   const mg = new Mailgun(FormData).client({
-      //     username: "api",
-      //     key: process.env.MAILGUN_API_KEY!,
-      //   });
-      //   await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
-      //     from: process.env.MAILGUN_FROM!,
-      //     to: user.email,
-      //     subject: `Earnings: ${artistName} (${periodStr})`,
-      //     html: `<p>Your statement is ready: <a href="${upload.url}">View Online</a></p>`,
-      //     attachment: [
-      //       {
-      //         filename: `${artistName}_Paystub.png`,
-      //         data: Buffer.from(imageBuffer),
-      //       },
-      //     ],
-      //   });
-      // }
+      if (user?.email) {
+        const mg = new Mailgun(FormData).client({
+          username: "api",
+          key: process.env.MAILGUN_API_KEY!,
+        });
+        await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
+          from: process.env.MAILGUN_FROM!,
+          to: user.email,
+          subject: `Earnings: ${artistName} (${periodStr})`,
+          html: `<p>Your statement is ready: <a href="${upload.url}">View Online</a></p>`,
+          attachment: [
+            {
+              filename: `${artistName}_Paystub.png`,
+              data: Buffer.from(imageBuffer),
+            },
+          ],
+        });
+      }
 
       // Save to DB
-      // await prisma.paystub.create({
-      //   data: {
-      //     userId: user?.id ? String(user.id) : "",
-      //     imageUrl: upload.url,
-      //     name: artistName,
-      //     cash: 0,
-      //     card: 0,
-      //     total: totalVolume,
-      //     startDate: fromDate,
-      //     endDate: toDate,
-      //     grossAmount: netPay,
-      //   },
-      // });
+      await prisma.paystub.create({
+        data: {
+          userId: user?.id ? String(user.id) : "",
+          imageUrl: upload.url,
+          name: artistName,
+          cash: 0,
+          card: 0,
+          total: totalVolume,
+          startDate: fromDate,
+          endDate: toDate,
+          grossAmount: netPay,
+        },
+      });
 
       processedArtists.push({ name: artistName, url: upload.url });
     }
