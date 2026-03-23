@@ -14,6 +14,7 @@ import {
   getCleanSchedules,
   getSignInCustomers,
   releaseSms,
+  requestTattooArtistPaymentByUserId,
   updateMiniPhoto,
 } from "../controllers/management.controller";
 import { enforceDevice } from "../middleware/enforceDevice";
@@ -35,4 +36,5 @@ router.post("/mini-photo", createMiniPhoto);
 router.get("/mini-photo", getAllMiniPhoto);
 router.put("/mini-photo", updateMiniPhoto);
 router.get("/sign-in-customers", getSignInCustomers);
+router.post("/tattoo-artist", requestTattooArtistPaymentByUserId);
 export default router;

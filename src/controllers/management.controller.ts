@@ -4,6 +4,8 @@ import bcrypt from "bcrypt";
 import slugify from "slugify";
 import { customAlphabet } from "nanoid";
 import { sendSMS } from "../utils/sms";
+import dayjs from "dayjs";
+import axios from "axios";
 
 const prisma = new PrismaClient();
 
@@ -663,5 +665,165 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error("Get SignInCustomers error:", error);
     return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export const requestTattooArtistPaymentByUserId = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const { user_id, start_date, end_date } = req.body;
+
+    if (!user_id || !start_date || !end_date) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+
+    // 1. Fetch Artist Details
+    const user = await prisma.user.findUnique({
+      where: { id: user_id },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "Artist not found" });
+    }
+
+    const artistName = user.name;
+    const commRate = 0.55; // Standard commission from your example
+
+    // 2. Get Booked Appointment IDs for Booking Fee logic (0.5%)
+    const bookedAppointments = await prisma.appointment.findMany({
+      where: {
+        assignedById: {
+          in: [
+            "6a0c3e58-d4e4-4f32-8585-9fbb81b08417",
+            "bab24c5b-ec93-4386-bdfb-7b0e1f25eb7f",
+          ],
+        },
+      },
+      select: { id: true },
+    });
+    const bookedIds = bookedAppointments.map((a) => a.id);
+
+    // 3. Setup Date Loop
+    const fromDate = dayjs(start_date);
+    const toDate = dayjs(end_date);
+    const dailyLogs: any[] = [];
+    const bookingFeeDetails: any[] = [];
+
+    let cursor = fromDate;
+
+    // 4. Fetch and Process Data
+    while (cursor.isBefore(toDate) || cursor.isSame(toDate, "day")) {
+      const formattedDate = cursor.format("MMDDYYYY");
+
+      try {
+        // Fetch from External API
+        const response = await axios.post(
+          "https://hyperinkersform.com/api/fetching",
+          { endDate: formattedDate },
+        );
+
+        const items = response.data?.data || [];
+
+        // Filter for this specific artist
+        const artistItems = items.filter(
+          (i: any) =>
+            i.artist?.toLowerCase() === artistName.toLowerCase() &&
+            (i.status?.toLowerCase() === "paid" ||
+              i.status?.toLowerCase() === "done"),
+        );
+
+        let dayPaidMoney = 0;
+        let dayDeposit = 0;
+        let dayTips = 0;
+
+        artistItems.forEach((i: any) => {
+          const paid = parseFloat(i?.paid_money) || 0;
+          const deposit =
+            i?.deposit_has_been_used === false
+              ? 0
+              : parseFloat(i?.deposit) || 0;
+          const tip = parseFloat(i?.tip) || 0;
+          const volume = paid + deposit;
+
+          dayPaidMoney += paid;
+          dayDeposit += deposit;
+          dayTips += tip;
+
+          // Check for Booking Fee (0.5%)
+          if (bookedIds.includes(i.appointment_id)) {
+            bookingFeeDetails.push({
+              date: cursor.format("MMM DD, YYYY"),
+              customer: `${i?.firstName} ${i?.lastName}`,
+              volume: volume,
+              fee: volume * 0.005,
+            });
+          }
+        });
+
+        const dailyComm = (dayPaidMoney + dayDeposit) * commRate;
+
+        dailyLogs.push({
+          date: cursor.format("MMM DD, YYYY"),
+          paidMoney: dayPaidMoney,
+          deposit: dayDeposit,
+          commission: dailyComm,
+          tips: dayTips,
+          subtotal: dailyComm + dayTips,
+        });
+      } catch (err) {
+        console.error(`Error fetching for ${formattedDate}`);
+      }
+
+      // Add a small delay to prevent rate limiting during the loop
+      await delay(200);
+      cursor = cursor.add(1, "day");
+    }
+
+    // 5. Calculate Totals
+    const totalVolume = dailyLogs.reduce(
+      (acc, d) => acc + d.paidMoney + d.deposit,
+      0,
+    );
+    const totalTips = dailyLogs.reduce((acc, d) => acc + d.tips, 0);
+    const totalCommission = totalVolume * commRate;
+    const totalBookingFees = bookingFeeDetails.reduce(
+      (acc, f) => acc + f.fee,
+      0,
+    );
+    const netPay = totalCommission + totalTips - totalBookingFees;
+
+    // 6. Return Data for Client-Side Rendering
+    return res.json({
+      success: true,
+      artist: {
+        id: user.id,
+        name: artistName,
+        email: user.email,
+        commRate: commRate,
+      },
+      period: {
+        start: start_date,
+        end: end_date,
+        formatted: `${fromDate.format("MMM DD")} - ${toDate.format("MMM DD, YYYY")}`,
+      },
+      stats: {
+        totalVolume,
+        totalTips,
+        totalCommission,
+        totalBookingFees,
+        netPay,
+        totalWorkDays: dailyLogs.filter((d) => d.paidMoney > 0 || d.deposit > 0)
+          .length,
+      },
+      dailyLogs,
+      bookingFeeDetails,
+    });
+  } catch (error: any) {
+    console.error("Payment Request Error:", error);
+    return res.status(500).json({ error: error.message });
   }
 };
