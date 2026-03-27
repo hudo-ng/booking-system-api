@@ -2525,6 +2525,167 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
   }
 };
 
+export const generateYenPaystubData = async (req: Request, res: Response) => {
+  try {
+    const { start_date, end_date } = req.body;
+
+    // Yen's Configuration (Defaults based on your logic)
+    const artistName = "Yen";
+    const isHourlyPaid = false; // Set to true if Yen is hourly
+    const hourlyRate = 35.0;
+    const commRate = 0.5; // 50% commission
+    const commPercent = commRate * 100;
+
+    const fromDate = dayjs(start_date).toDate();
+    const toDate = dayjs(end_date).toDate();
+
+    const dailyLogs: any[] = [];
+    let cursor = new Date(fromDate);
+
+    // 1. Data Fetching & Calculation Loop
+    while (cursor <= toDate) {
+      const formatted = dayjs(cursor).format("MMDDYYYY");
+      let dayPiercingTotal = 0,
+        dayServiceTotal = 0,
+        dayJewelry = 0;
+      let daySaline = 0,
+        dayTips = 0,
+        dayHours = 0;
+      let dayCash = 0,
+        dayCard = 0;
+
+      try {
+        const response = await axios.post(
+          "https://hyperinkersform.com/api/fetching",
+          { endDate: formatted },
+        );
+        const items = response.data?.data || [];
+
+        // Filter for Yen + Status + Piercing category
+        const artistItems = items.filter(
+          (i: any) =>
+            i.artist?.toLowerCase() === artistName.toLowerCase() &&
+            ["paid", "done"].includes(i.status?.toLowerCase()) &&
+            (i.color ?? "piercing") === "piercing",
+        );
+
+        if (artistItems.length > 0) {
+          artistItems.forEach((i: any) => {
+            const fullName = `${i?.firstName} ${i?.lastName}`;
+            const price = Number(i?.price) || 0;
+            let recordCash = Number(i?.cash) || 0;
+            const recordCard = Number(i?.card) || 0;
+            const pJewelry = Number(i?.priceJewelry) || 0;
+            const pSaline = Number(i?.priceSaline) || 0;
+
+            // Logic: Asterisk separates "Service" from "Piercing"
+            if (fullName.includes("*")) {
+              dayServiceTotal += price;
+            } else {
+              dayPiercingTotal += price;
+            }
+
+            dayJewelry += pJewelry;
+            daySaline += pSaline;
+            dayTips += Number(i?.tip) || 0;
+
+            // Handle zero-record edge case from your logic
+            if (recordCash + recordCard === 0) {
+              recordCash = pJewelry + pSaline + price;
+            }
+
+            if (i?.paid_by?.includes("card")) {
+              dayCard += recordCard;
+            }
+            dayCash += recordCash;
+          });
+
+          // Hour Calculation based on signedDate timestamps
+          const timestamps = artistItems
+            .map((i: any) => dayjs(i.signedDate).valueOf())
+            .filter((t: number) => !isNaN(t));
+
+          if (timestamps.length > 1) {
+            const diff = dayjs(Math.max(...timestamps)).diff(
+              dayjs(Math.min(...timestamps)),
+              "minute",
+            );
+            dayHours = Number((diff / 60).toFixed(2));
+          } else if (timestamps.length === 1) {
+            dayHours = 0.5;
+          }
+        }
+      } catch (err) {
+        console.error(`Fetch failed for ${formatted}:`, err);
+      }
+
+      // Daily breakdown math
+      const dLabor = isHourlyPaid ? dayHours * hourlyRate : 0;
+      const dPiercingComm = isHourlyPaid ? 0 : dayPiercingTotal * commRate;
+      const dServiceComm = dayServiceTotal * commRate;
+      const dJewelryComm = dayJewelry * commRate;
+      const dSalineComm = daySaline * commRate;
+
+      const dayNet =
+        dLabor +
+        dPiercingComm +
+        dServiceComm +
+        dJewelryComm +
+        dSalineComm +
+        dayTips;
+
+      dailyLogs.push({
+        date: dayjs(cursor).format("MMM DD, YYYY"),
+        hrs: dayHours,
+        piercing: dayPiercingTotal,
+        service: dayServiceTotal,
+        jewelry: dayJewelry,
+        saline: daySaline,
+        tips: dayTips,
+        cash: dayCash,
+        card: dayCard,
+        subtotal: dayNet,
+      });
+
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    // 2. Final Aggregations
+    const totalHours = dailyLogs.reduce((acc, d) => acc + d.hrs, 0);
+    const totalPiercing = dailyLogs.reduce((acc, d) => acc + d.piercing, 0);
+    const totalService = dailyLogs.reduce((acc, d) => acc + d.service, 0);
+    const totalJ = dailyLogs.reduce((acc, d) => acc + d.jewelry, 0);
+    const totalS = dailyLogs.reduce((acc, d) => acc + d.saline, 0);
+    const totalTips = dailyLogs.reduce((acc, d) => acc + d.tips, 0);
+    const totalCash = dailyLogs.reduce((acc, d) => acc + d.cash, 0);
+    const laborPay = isHourlyPaid ? totalHours * hourlyRate : 0;
+    const piercingComm = isHourlyPaid ? 0 : totalPiercing * commRate;
+    const totalCommission =
+      (totalService + totalJ + totalS) * commRate + piercingComm;
+    const netPay = laborPay + totalCommission + totalTips;
+
+    // 3. Structured JSON Response for Expo
+    return res.json({
+      success: true,
+      artist: { name: artistName, hourlyRate, commRate, isHourlyPaid },
+      period: {
+        formatted: `${dayjs(start_date).format("MMM DD")} - ${dayjs(end_date).format("MMM DD, YYYY")}`,
+      },
+      stats: {
+        totalHours: totalHours.toFixed(2),
+        totalCommission,
+        totalTips,
+        netPay,
+        totalWorkDays: dailyLogs.filter((d) => d.subtotal > 0).length,
+        totalCash: totalCash,
+      },
+      dailyLogs: dailyLogs.filter((d) => d.subtotal > 0),
+    });
+  } catch (error: any) {
+    console.error(error);
+    return res.status(500).json({ error: error.message });
+  }
+};
 export const sendAllArtistPaystubs = async (req: Request, res: Response) => {
   try {
     const arrayArtistNeedToHavePaystub = [

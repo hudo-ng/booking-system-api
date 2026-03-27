@@ -18,7 +18,10 @@ import {
   updateMiniPhoto,
 } from "../controllers/management.controller";
 import { enforceDevice } from "../middleware/enforceDevice";
-import { generateZoePaystubData } from "../controllers/auth.controller";
+import {
+  generateYenPaystubData,
+  generateZoePaystubData,
+} from "../controllers/auth.controller";
 
 const router = Router();
 
@@ -38,5 +41,7 @@ router.get("/mini-photo", getAllMiniPhoto);
 router.put("/mini-photo", updateMiniPhoto);
 router.get("/sign-in-customers", getSignInCustomers);
 router.post("/tattoo-artist", requestTattooArtistPaymentByUserId);
+
 router.post("/zoe-artist", generateZoePaystubData);
+router.post("/yen-artist", generateYenPaystubData);
 export default router;
