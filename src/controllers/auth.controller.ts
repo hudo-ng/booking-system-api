@@ -2062,7 +2062,149 @@ export const sendZoePaystub = async (req: Request, res: Response) => {
     return res.status(500).json({ error: error.message });
   }
 };
+export const generateZoePaystubData = async (req: Request, res: Response) => {
+  try {
+    const { start_date, end_date } = req.body;
 
+    // 1. Zoe's Specific Configuration
+    const artistName = "Zoe";
+    const hourlyRate = 12.5;
+    const commRate = 0.1; // 10%
+
+    const fromDate = dayjs(start_date).toDate();
+    const toDate = dayjs(end_date).toDate();
+
+    const dailyLogs: any[] = [];
+    let cursor = new Date(fromDate);
+
+    // 2. Main Processing Loop (Matches your original logic)
+    while (cursor <= toDate) {
+      const formatted = dayjs(cursor).format("MMDDYYYY");
+      let dayServiceTotal = 0,
+        dayJewelry = 0,
+        daySaline = 0,
+        dayTips = 0,
+        dayHours = 0;
+
+      try {
+        const [salesRes, promoRes] = await Promise.all([
+          axios.post("https://hyperinkersform.com/api/fetching", {
+            endDate: formatted,
+          }),
+          axios.post("https://hyperinkersform.com/api/fetching/promotion", {
+            endDate: formatted,
+          }),
+        ]);
+
+        const items = salesRes.data?.data || [];
+        const promoData = promoRes.data?.data || {};
+
+        const artistItems = items.filter(
+          (i: any) =>
+            i.artist?.toLowerCase() === artistName.toLowerCase() &&
+            ["paid", "done"].includes(i.status?.toLowerCase()),
+        );
+
+        if (artistItems.length > 0) {
+          // --- Logic Check: Payment IDs for Clock Out ---
+          const trackingIds = artistItems
+            .map((i: any) => i.tracking_payment_id)
+            .filter(Boolean);
+          const payments = await prisma.trackingPayment.findMany({
+            where: { id: { in: trackingIds } },
+            select: { createdAt: true },
+          });
+
+          const sortedPayments = payments.sort(
+            (a, b) =>
+              dayjs(a.createdAt).valueOf() - dayjs(b.createdAt).valueOf(),
+          );
+
+          // --- Logic Check: Service vs Jewelry vs Saline ---
+          artistItems.forEach((i: any) => {
+            const fullName = `${i?.firstName} ${i?.lastName}`;
+            // Only add to service if name contains "*"
+            if (fullName.includes("*"))
+              dayServiceTotal += Number(i?.price) || 0;
+
+            dayJewelry += Number(i?.priceJewelry) || 0;
+            daySaline += Number(i?.priceSaline) || 0;
+            dayTips += Number(i?.tip) || 0;
+          });
+
+          // --- Logic Check: Clock In / Out ---
+          const clockInStr =
+            promoData["Zoe"]?.fullTimestamp || promoData["Zoe"];
+          const lastPayment = sortedPayments[sortedPayments.length - 1];
+          const clockOutTime = lastPayment?.createdAt;
+
+          if (clockInStr && clockOutTime) {
+            const diffMinutes = dayjs(clockOutTime).diff(
+              dayjs(clockInStr),
+              "minute",
+            );
+            dayHours =
+              diffMinutes > 0 ? Number((diffMinutes / 60).toFixed(2)) : 0.5;
+          }
+        }
+        await delay(300);
+      } catch (err) {
+        console.error(`Fetch failed for ${formatted}:`, err);
+      }
+
+      // Daily Sub-calculations for the UI
+      const dLabor = dayHours * hourlyRate;
+      const dComm = (dayJewelry + daySaline + dayServiceTotal) * commRate;
+
+      dailyLogs.push({
+        date: dayjs(cursor).format("MMM DD, YYYY"),
+        hrs: dayHours,
+        labor: dLabor,
+        jewelry: dayJewelry,
+        saline: daySaline,
+        servicePrice: dayServiceTotal,
+        tips: dayTips,
+        commission: dComm,
+        subtotal: dLabor + dComm + dayTips,
+      });
+
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    // 3. Final Aggregations
+    const totalHours = dailyLogs.reduce((acc, d) => acc + d.hrs, 0);
+    const laborPay = totalHours * hourlyRate;
+    const totalJ = dailyLogs.reduce((acc, d) => acc + d.jewelry, 0);
+    const totalS = dailyLogs.reduce((acc, d) => acc + d.saline, 0);
+    const totalService = dailyLogs.reduce((acc, d) => acc + d.servicePrice, 0);
+    const totalTips = dailyLogs.reduce((acc, d) => acc + d.tips, 0);
+
+    const totalCommission = (totalJ + totalS + totalService) * commRate;
+    const netPay = laborPay + totalCommission + totalTips;
+    const totalWorkDays = dailyLogs.filter((d) => d.subtotal > 0).length;
+
+    // 4. Return structured JSON for Expo
+    return res.json({
+      success: true,
+      artist: { name: artistName, hourlyRate, commRate },
+      period: {
+        formatted: `${dayjs(fromDate).format("MMM DD")} - ${dayjs(toDate).format("MMM DD, YYYY")}`,
+      },
+      stats: {
+        totalHours: totalHours.toFixed(2),
+        laborPay,
+        totalCommission,
+        totalTips,
+        netPay,
+        totalWorkDays,
+      },
+      dailyLogs: dailyLogs.filter((d) => d.subtotal > 0),
+    });
+  } catch (error: any) {
+    console.error(error);
+    return res.status(500).json({ error: error.message });
+  }
+};
 export const sendArtistPaystub = async (req: Request, res: Response) => {
   try {
     const artistName = (req.query.artist_name as string) || "Zoe";
@@ -2382,6 +2524,7 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
     return res.status(500).json({ error: error.message });
   }
 };
+
 export const sendAllArtistPaystubs = async (req: Request, res: Response) => {
   try {
     const arrayArtistNeedToHavePaystub = [
