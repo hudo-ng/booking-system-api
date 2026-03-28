@@ -19,6 +19,7 @@ import {
 } from "../controllers/management.controller";
 import { enforceDevice } from "../middleware/enforceDevice";
 import {
+  generateNicolePaystubData,
   generateYenPaystubData,
   generateZoePaystubData,
 } from "../controllers/auth.controller";
@@ -44,4 +45,5 @@ router.post("/tattoo-artist", requestTattooArtistPaymentByUserId);
 
 router.post("/zoe-artist", generateZoePaystubData);
 router.post("/yen-artist", generateYenPaystubData);
+router.post("/nicole-artist", generateNicolePaystubData);
 export default router;

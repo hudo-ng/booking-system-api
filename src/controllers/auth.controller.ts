@@ -3417,7 +3417,158 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
     return res.status(500).json({ error: error.message });
   }
 };
+export const generateNicolePaystubData = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const { start_date, end_date } = req.body;
+    const artistName = "Nicole";
+    const studioFeeAmount = 65.0;
 
+    const fromDate = dayjs(start_date).toDate();
+    const toDate = dayjs(end_date).toDate();
+
+    const dailyLogs: any[] = [];
+    let cursor = new Date(fromDate);
+
+    while (cursor <= toDate) {
+      const formatted = dayjs(cursor).format("MMDDYYYY");
+
+      // Reset Daily Accumulators
+      let jDirect = 0,
+        jYen = 0,
+        jZoe = 0;
+      let sDirect = 0,
+        sYen = 0,
+        sZoe = 0;
+      let piercing = 0,
+        service = 0,
+        tips = 0,
+        studioFee = 0;
+      let totalPiercingForFee = 0;
+      let dayCash = 0,
+        dayCard = 0;
+
+      try {
+        const response = await axios.post(
+          "https://hyperinkersform.com/api/fetching",
+          {
+            endDate: formatted,
+          },
+        );
+        const items = response.data?.data || [];
+
+        const relevantItems = items.filter(
+          (i: any) =>
+            ["nicole", "yen", "zoe"].includes(i.artist?.toLowerCase()) &&
+            ["paid", "done"].includes(i.status?.toLowerCase()) &&
+            (i.color ?? "piercing") === "piercing",
+        );
+
+        relevantItems.forEach((i: any) => {
+          const artist = i.artist.toLowerCase();
+          const isService = `${i.firstName}${i.lastName}`.includes("*");
+          const p = parseFloat(i.price) || 0;
+          const pJ = parseFloat(i.priceJewelry) || 0;
+          const pS = parseFloat(i.priceSaline) || 0;
+          const pT = parseFloat(i.tip) || 0;
+
+          if (p > 0) totalPiercingForFee += p;
+
+          if (artist === "nicole") {
+            if (isService)
+              service += p * 0.6; // 60% Service
+            else piercing += p * 0.6; // 60% Piercing
+            jDirect += pJ * 0.6; // 60% Jewelry
+            sDirect += pS * 1.0; // 100% Saline
+            tips += pT; // 100% Tips
+          } else if (artist === "yen") {
+            jYen += pJ * 0.1; // 10% Yen's Jewelry
+            sYen += pS * 0.5; // 50% Yen's Saline
+          } else if (artist === "zoe") {
+            jZoe += pJ * 0.5; // 50% Zoe's Jewelry
+            sZoe += pS * 0.9; // 90% Zoe's Saline
+          }
+
+          // Cash/Card Tracking
+          let rCash = parseFloat(i.cash) || 0;
+          let rCard = parseFloat(i.card) || 0;
+          if (rCash + rCard === 0) rCash = p + pJ + pS + pT;
+
+          if (i.paid_by?.toLowerCase().includes("card")) dayCard += rCard;
+          dayCash += rCash;
+        });
+
+        // Apply Studio Fee only if there was piercing activity
+        if (totalPiercingForFee > 0) studioFee = studioFeeAmount;
+      } catch (err) {
+        console.error(`Fetch failed for ${formatted}`);
+      }
+
+      const daySubtotal =
+        jDirect +
+        jYen +
+        jZoe +
+        sDirect +
+        sYen +
+        sZoe +
+        piercing +
+        service +
+        tips -
+        studioFee;
+
+      dailyLogs.push({
+        date: dayjs(cursor).format("MMM DD, YYYY"),
+        jDirect,
+        jYen,
+        jZoe,
+        sDirect,
+        sYen,
+        sZoe,
+        piercing,
+        service,
+        tips,
+        studioFee,
+        cash: dayCash,
+        subtotal: daySubtotal,
+        // Helper properties for the aggregations below
+        direct: jDirect + sDirect + piercing + service,
+        passive: jYen + jZoe + sYen + sZoe,
+      });
+
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    const stats = {
+      totalDirect: dailyLogs.reduce((acc, d) => acc + d.direct, 0),
+      totalPassive: dailyLogs.reduce((acc, d) => acc + d.passive, 0),
+      totalTips: dailyLogs.reduce((acc, d) => acc + d.tips, 0),
+      totalFees: dailyLogs.reduce((acc, d) => acc + d.studioFee, 0),
+      totalCash: dailyLogs.reduce((acc, d) => acc + d.cash, 0),
+      netPay: 0, // calculated below
+      totalWorkDays: dailyLogs.filter((d) => d.direct > 0).length,
+      totalOpenDays: dailyLogs.filter((d) => d.studioFee > 0).length, // Useful for the studio owner
+    };
+
+    stats.netPay =
+      stats.totalDirect +
+      stats.totalPassive +
+      stats.totalTips -
+      stats.totalFees;
+    return res.json({
+      success: true,
+      artist: { name: artistName },
+      period: {
+        formatted: `${dayjs(start_date).format("MMM DD")} - ${dayjs(end_date).format("MMM DD, YYYY")}`,
+      },
+      stats,
+      dailyLogs: dailyLogs.filter((d) => d.subtotal !== 0 || d.cash > 0),
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
 export const fixMissingTattooSpending = async (req: Request, res: Response) => {
   try {
     // 1. Find all Tattoo customers with 0 or null spending_amount
