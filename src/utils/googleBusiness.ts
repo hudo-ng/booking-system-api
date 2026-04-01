@@ -17,7 +17,7 @@ interface GoogleReview {
   createTime: string;
 }
 
-const oauth2Client = new google.auth.OAuth2(
+export const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
   process.env.GOOGLE_REDIRECT_URI,
@@ -35,22 +35,46 @@ export const parseRating = (rating: GoogleReview["starRating"]): number => {
 };
 
 export const getFreshAccessToken = async (userId: string): Promise<string> => {
+  const user = userId
+    ? await prisma.user.findUnique({ where: { id: userId } })
+    : await prisma.user.findFirst({ where: { isOwner: true } });
+
+  if (!user) throw new Error("No valid owner found to sync reviews.");
+
   const creds = await prisma.googleCredential.findUniqueOrThrow({
     where: { userId },
   });
+  if (!creds || !creds.refreshToken) {
+    throw new Error(
+      `User ${user.email} has no Refresh Token. Please log in again.`,
+    );
+  }
 
   oauth2Client.setCredentials({ refresh_token: creds.refreshToken });
-  const { credentials } = await oauth2Client.refreshAccessToken();
 
-  await prisma.googleCredential.update({
-    where: { userId },
-    data: {
-      accessToken: credentials.access_token!,
-      expiryDate: credentials.expiry_date!,
-    },
-  });
+  try {
+    const { credentials } = await oauth2Client.refreshAccessToken();
 
-  return credentials.access_token!;
+    // 4. Always save the new access token back to the REAL email's record
+    await prisma.googleCredential.update({
+      where: { userId: user.id },
+      data: {
+        accessToken: credentials.access_token!,
+        expiryDate: credentials.expiry_date!,
+        ...(credentials.refresh_token && {
+          refreshToken: credentials.refresh_token,
+        }),
+      },
+    });
+    return credentials.access_token!;
+  } catch (error: any) {
+    if (error.response?.data?.error === "invalid_grant") {
+      console.error(
+        `!!! CRITICAL: Real email ${user.email} needs to RE-LOGIN via Google !!!`,
+      );
+    }
+    throw error;
+  }
 };
 
 export const fetchReviews = async (
@@ -74,28 +98,31 @@ export const fetchReviews = async (
   return response.data.reviews || [];
 };
 
-export const fetchAllReviews = async (accessToken: string, locationId: string): Promise<GoogleReview[]> => {
+export const fetchAllReviews = async (
+  accessToken: string,
+  locationId: string,
+): Promise<GoogleReview[]> => {
   let allReviews: GoogleReview[] = [];
   let nextPageToken: string | undefined = undefined;
 
   do {
-    const response: { data: GoogleReviewResponse } = await axios.get<GoogleReviewResponse>(
-      `https://mybusiness.googleapis.com/v4/${locationId}/reviews`,
-      {
-        headers: { Authorization: `Bearer ${accessToken}` },
-        params: { 
-          pageSize: 50, 
-          pageToken: nextPageToken // Pass the token from the last request
+    const response: { data: GoogleReviewResponse } =
+      await axios.get<GoogleReviewResponse>(
+        `https://mybusiness.googleapis.com/v4/${locationId}/reviews`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          params: {
+            pageSize: 50,
+            pageToken: nextPageToken, // Pass the token from the last request
+          },
         },
-      }
-    );
+      );
 
     if (response.data.reviews) {
       allReviews.push(...response.data.reviews);
     }
-    
-    nextPageToken = response.data.nextPageToken;
 
+    nextPageToken = response.data.nextPageToken;
   } while (nextPageToken);
 
   return allReviews;
