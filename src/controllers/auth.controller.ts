@@ -524,7 +524,10 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
             deposit_has_been_used: deposit_has_been_used,
           },
         );
-        if (extra_data?.item_service === "tattoo") {
+        if (
+          item_service === "tattoo" ||
+          extra_data?.item_service === "tattoo"
+        ) {
           const newPaymentAmount = (Cash ?? 0) + (Card ?? 0);
           try {
             await prisma.signInCustomer.update({
@@ -918,7 +921,10 @@ export const createAdminPaymentRequest = async (
             deposit_has_been_used: deposit_has_been_used,
           },
         );
-        if (extra_data?.item_service === "tattoo") {
+        if (
+          item_service === "tattoo" ||
+          extra_data?.item_service === "tattoo"
+        ) {
           const newPaymentAmount = (Cash ?? 0) + (Card ?? 0);
           try {
             await prisma.signInCustomer.update({
