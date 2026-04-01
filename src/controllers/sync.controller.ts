@@ -17,7 +17,7 @@ export const syncAllArtistReviews = async (
     const keys = await prisma.googleReviewKey.findMany();
 
     for (const key of keys) {
-      const googleReviews = await fetchAllReviews(token, key.locationId);
+      const googleReviews = await fetchReviews(token, key.locationId);
 
       for (const gr of googleReviews) {
         const existingReview = await prisma.review.findUnique({
