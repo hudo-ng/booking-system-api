@@ -4,6 +4,7 @@ import {
   getFreshAccessToken,
   parseRating,
 } from "../utils/googleBusiness";
+import { generateAIReply } from "../utils/googlePrompt";
 import { PrismaClient } from "@prisma/client";
 import axios from "axios";
 
@@ -43,13 +44,28 @@ export const syncAllArtistReviews = async (
 
         const isNew = !existingReview;
         const isFiveStar = gr.starRating === "FIVE";
+        const rating = parseRating(gr.starRating);
         const hasNoComment = !gr.comment || gr.comment.trim() === "";
+        const fullReviewPath = `${key.locationId}/reviews/${gr.reviewId}`;
 
         if (isNew && isFiveStar && hasNoComment) {
           const testMessage =
             "Thank you so much for the 5-star rating! We appreciate the support.";
-          const fullReviewPath = `${key.locationId}/reviews/${gr.reviewId}`;
           await postGoogleReply(token, fullReviewPath, testMessage);
+        }
+
+        if (isNew && rating >= 4 && !hasNoComment) {
+          console.log(
+            `🧠 Generating AI reply for ${gr.reviewer.displayName}...`,
+          );
+          const aiReply = await generateAIReply(
+            gr.reviewer.displayName,
+            rating,
+            gr.comment!,
+          );
+          if (aiReply) {
+            await postGoogleReply(token, fullReviewPath, aiReply);
+          }
         }
       }
     }
