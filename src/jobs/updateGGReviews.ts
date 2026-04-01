@@ -5,7 +5,9 @@ const prisma = new PrismaClient();
 
 export async function testSync() {
   console.log("🔍 Checking for Owner in Database...");
-  const owner = await prisma.user.findFirst({ where: { isOwner: true } });
+  const owner = await prisma.user.findFirst({
+    where: { isOwner: true, id: "0ca37281-3084-4c3b-b9b2-fc0185c28108" },
+  });
 
   if (!owner) {
     console.error(
@@ -16,7 +18,7 @@ export async function testSync() {
 
   console.log(`🚀 Starting sync for Owner: ${owner.email}`);
   try {
-    await syncAllArtistReviews(owner.id);
+    await syncAllArtistReviews("0ca37281-3084-4c3b-b9b2-fc0185c28108");
 
     const count = await prisma.review.count();
     console.log(`✅ Success! Total reviews now in local DB: ${count}`);
