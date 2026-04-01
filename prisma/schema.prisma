@@ -33,19 +33,16 @@ model User {
   Appoinment               Appointment[]
   CleanSchedule            CleanSchedule[]
   DeviceToken              DeviceToken[]
+  googleCredentials        GoogleCredential?
+  googleReviewKeys         GoogleReviewKey[]
   RecurringSeries          RecurringSeries[]
+  reviews                  Review[]
   timeOff                  TimeOff[]
   WorkOverride             WorkOverride[]
   WorkSchedule             WorkSchedule[]
   WorkShift                WorkShift[]
   workingHours             WorkingHours[]
   Notification             Notification[]
-
-  googleReviewKeys GoogleReviewKey[]
-
-  reviews Review[]
-
-  googleCredentials GoogleCredential[]
 }
 
 model CleanSchedule {
@@ -88,6 +85,7 @@ model Appointment {
   deposit_status         DepositStatus           @default(ignored)
   updatedAt              DateTime                @default(now()) @updatedAt
   source_booking         String?
+  lastReminderSentAt     DateTime?
   assignedBy             User?                   @relation("AssignedBy", fields: [assignedById], references: [id])
   employee               User                    @relation(fields: [employeeId], references: [id])
   RecurringSeries        RecurringSeries?        @relation(fields: [seriesId], references: [id])
@@ -96,7 +94,6 @@ model Appointment {
   DepositAppointment     DepositAppointment[]
   VerificationCodes      VerificationCode[]
   webPayment             WebPaymentTracking?
-  lastReminderSentAt   DateTime?
 }
 
 model DepositAppointment {
@@ -364,41 +361,40 @@ model WebPaymentTracking {
   booking           Appointment? @relation(fields: [bookingId], references: [id])
 }
 
-model Review  {
-  id               String          @id @default(uuid())
-  googleReviewId   String          @unique
-  reviewerName     String
-  starRating       Int
-  comment          String?         @db.Text
-  createTime       DateTime
-  replyText        String?         @db.Text
+model Review {
+  id                String          @id @default(uuid())
+  googleReviewId    String          @unique
+  reviewerName      String
+  starRating        Int
+  comment           String?
+  createTime        DateTime
+  replyText         String?
   googleReviewKeyId String
-  googleReviewKey  GoogleReviewKey @relation(fields: [googleReviewKeyId], references: [id])
-  
-  userId           String?
-  user             User?            @relation(fields: [userId], references: [id])
+  userId            String?
+  googleReviewKey   GoogleReviewKey @relation(fields: [googleReviewKeyId], references: [id])
+  user              User?           @relation(fields: [userId], references: [id])
 
   @@index([userId, createTime])
 }
 
 model GoogleReviewKey {
-  id                String   @id @default(uuid())
-  locationId        String   
-  displayName       String?  
-  userId            String   
-  user              User     @relation(fields: [userId], references: [id])
-  reviews           Review[]
-  createdAt         DateTime @default(now())
+  id          String   @id @default(uuid())
+  locationId  String
+  displayName String?
+  userId      String
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id])
+  reviews     Review[]
 }
 
 model GoogleCredential {
   id           String   @id @default(uuid())
   userId       String   @unique
-  user         User     @relation(fields: [userId], references: [id])
-  accessToken  String   @db.Text
-  refreshToken String   @db.Text
+  accessToken  String
+  refreshToken String
   expiryDate   BigInt
   updatedAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id])
 }
 
 enum AppointmentStatus {

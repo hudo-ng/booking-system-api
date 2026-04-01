@@ -5,6 +5,7 @@ import {
   parseRating,
 } from "../utils/googleBusiness";
 import { PrismaClient } from "@prisma/client";
+import axios from "axios";
 
 const prisma = new PrismaClient();
 
@@ -13,12 +14,14 @@ export const syncAllArtistReviews = async (ownerId: string) => {
     const token = await getFreshAccessToken(ownerId);
     const keys = await prisma.googleReviewKey.findMany();
 
-    console.log(keys);
-
     for (const key of keys) {
       const googleReviews = await fetchAllReviews(token, key.locationId);
 
       for (const gr of googleReviews) {
+        const existingReview = await prisma.review.findUnique({
+          where: { googleReviewId: gr.reviewId },
+        });
+
         await prisma.review.upsert({
           where: { googleReviewId: gr.reviewId },
           update: {
@@ -35,6 +38,17 @@ export const syncAllArtistReviews = async (ownerId: string) => {
             googleReviewKeyId: key.id,
           },
         });
+
+        const isNew = !existingReview;
+        const isFiveStar = gr.starRating === "FIVE";
+        const hasNoComment = !gr.comment || gr.comment.trim() === "";
+
+        if (isNew && isFiveStar && hasNoComment) {
+          const testMessage =
+            "Thank you so much for the 5-star rating! We appreciate the support.";
+          const fullReviewPath = `${key.locationId}/reviews/${gr.reviewId}`;
+          await postGoogleReply(token, fullReviewPath, testMessage);
+        }
       }
     }
     console.log(`[${new Date().toISOString()}] Sync completed.`);
@@ -43,27 +57,44 @@ export const syncAllArtistReviews = async (ownerId: string) => {
   }
 };
 
+const postGoogleReply = async (
+  token: string,
+  reviewName: string,
+  message: string,
+) => {
+  try {
+    await axios.put(
+      `https://mybusiness.googleapis.com/v4/${reviewName}/reply`,
+      { comment: message },
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    console.log(`Successfully replied to: ${reviewName}`);
+  } catch (error) {
+    const err = error as any;
+    console.error("Google Reply API Error:", err.response?.data || err.message);
+  }
+};
 export const syncAllArtistReviews1 = async (ownerId: string) => {
   try {
     const token = await getFreshAccessToken(ownerId);
     const keys = await prisma.googleReviewKey.findMany();
-    const locationIds = [...new Set(keys.map(k => k.locationId))];
+    const locationIds = [...new Set(keys.map((k) => k.locationId))];
 
     for (const locId of locationIds) {
       const googleReviews = await fetchAllReviews(token, locId);
 
       for (const gr of googleReviews) {
         const comment = (gr.comment || "").toLowerCase();
-        
+
         let assignedUserId: string | null = null;
         let matchedKeyId: string | null = null;
 
         for (const key of keys) {
-          const regex = new RegExp(`\\b${key.displayName}\\b`, 'i');
+          const regex = new RegExp(`\\b${key.displayName}\\b`, "i");
           if (regex.test(comment)) {
             assignedUserId = key.userId;
             matchedKeyId = key.id;
-            break; 
+            break;
           }
         }
 
@@ -81,7 +112,7 @@ export const syncAllArtistReviews1 = async (ownerId: string) => {
             comment: gr.comment || null,
             createTime: new Date(gr.createTime),
             userId: assignedUserId,
-            googleReviewKeyId: matchedKeyId ?? "", 
+            googleReviewKeyId: matchedKeyId ?? "",
           },
         });
       }

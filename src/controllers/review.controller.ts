@@ -101,9 +101,9 @@ export const syncGoogleReviews = async (req: Request, res: Response) => {
     if (!owner) return res.status(404).json({ error: "Owner not found" });
     await syncAllArtistReviews(owner.id);
 
-    res.json({ message: "Sync successful" });
+    return res.json({ message: "Sync successful" });
   } catch (error) {
-    res.status(500).json({ error: "Sync failed" });
+    return res.status(500).json({ error: "Sync failed" });
   }
 };
 
