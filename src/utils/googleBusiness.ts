@@ -54,8 +54,6 @@ export const getFreshAccessToken = async (userId: string): Promise<string> => {
 
   try {
     const { credentials } = await oauth2Client.refreshAccessToken();
-
-    // 4. Always save the new access token back to the REAL email's record
     await prisma.googleCredential.update({
       where: { userId: user.id },
       data: {
