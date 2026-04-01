@@ -27,7 +27,7 @@ router.get("/auth/google/connect", (req, res) => {
   res.redirect(url);
 });
 
-router.get("/api/google/callback", async (req, res) => {
+router.get("/auth/google/callback", async (req, res) => {
   const { code } = req.query;
   const { tokens } = await oauth2Client.getToken(code as string);
 
