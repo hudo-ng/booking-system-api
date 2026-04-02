@@ -17,7 +17,7 @@ async function testSync() {
   console.log(`🚀 Starting sync for Owner: ${owner.email}`);
   try {
     // This triggers the full logic: Refresh Token -> Google API -> Prisma Save
-    await syncAllArtistReviews(owner.id);
+    await syncAllArtistReviews("0ca37281-3084-4c3b-b9b2-fc0185c28108");
 
     const count = await prisma.review.count();
     console.log(`✅ Success! Total reviews now in local DB: ${count}`);

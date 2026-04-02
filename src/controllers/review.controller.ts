@@ -94,17 +94,17 @@ export const deleteGoogleReviewKey = async (req: Request, res: Response) => {
 };
 
 
-export const syncGoogleReviews = async (req: Request, res: Response) => {
-  try {
-    const owner = await prisma.user.findFirst({ where: { isOwner: true } });
+// export const syncGoogleReviews = async (req: Request, res: Response) => {
+//   try {
+//     const owner = await prisma.user.findFirst({ where: { isOwner: true } });
     
-    if (!owner) return res.status(404).json({ error: "Owner not found" });
-    await syncAllArtistReviews(owner.id);
+//     if (!owner) return res.status(404).json({ error: "Owner not found" });
+//     await syncAllArtistReviews(owner.id);
 
-    return res.json({ message: "Sync successful" });
-  } catch (error) {
-    return res.status(500).json({ error: "Sync failed" });
-  }
-};
+//     return res.json({ message: "Sync successful" });
+//   } catch (error) {
+//     return res.status(500).json({ error: "Sync failed" });
+//   }
+// };
 
 
