@@ -338,8 +338,10 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
         const transactionIndex =
           Number(lastCardPaymentToday?.transactionNumber || 0) + 1;
 
-        for (let attempt = 1; attempt <= 10; attempt++) {
-          console.log(`StatusList attempt ${attempt}/10`);
+        for (let attempt = 1; attempt <= 20; attempt++) {
+          console.log(
+            `StatusList attempt for transactionIndex ${transactionIndex} at attemp number ${attempt}/10`,
+          );
 
           const statusPayload = {
             PaymentType: "Credit",
@@ -734,8 +736,10 @@ export const createAdminPaymentRequest = async (
         const transactionIndex =
           Number(lastCardPaymentToday?.transactionNumber || 0) + 1;
 
-        for (let attempt = 1; attempt <= 10; attempt++) {
-          console.log(`StatusList attempt ${attempt}/10`);
+        for (let attempt = 1; attempt <= 20; attempt++) {
+          console.log(
+            `StatusList attempt for transactionIndex ${transactionIndex} at attemp number ${attempt}/10`,
+          );
 
           const statusPayload = {
             PaymentType: "Credit",
