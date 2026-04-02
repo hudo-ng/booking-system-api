@@ -10,7 +10,7 @@ import axios from "axios";
 
 const prisma = new PrismaClient();
 
-export const syncAllArtistReviews = async (ownerId: string) => {
+export const syncAllArtistReviews = async (ownerId: "0ca37281-3084-4c3b-b9b2-fc0185c28108") => {
   try {
     const token = await getFreshAccessToken(ownerId);
     const keys = await prisma.googleReviewKey.findMany();
