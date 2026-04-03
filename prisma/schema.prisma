@@ -239,6 +239,17 @@ model WorkShift {
   user      User      @relation(fields: [userId], references: [id])
 }
 
+model WorkShiftRequest {
+  id             String   @id @default(uuid())
+  userId         String
+  shiftId        String  
+  requestedDate  DateTime 
+  suggestedOut   DateTime 
+  reason         String
+  status         String   @default("pending") // pending, approved, rejected
+  createdAt      DateTime @default(now())
+}
+
 model WorkOverride {
   id         String   @id @default(uuid())
   userId     String

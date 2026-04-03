@@ -5,6 +5,7 @@ import { getDistanceFromLatLonInKm } from "../utils/distance";
 import axios, { all } from "axios";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
+import { sendPushAsync } from "../services/push";
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
@@ -66,13 +67,10 @@ export const getWorkShiftsByMonth = async (req: Request, res: Response) => {
 
 // ✅ Clock In
 export const clockIn = async (req: Request, res: Response) => {
-  const { userId } = (req as any).user as { userId?: string };
+  const { userId } = (req as any).user;
+
+  if (!userId) return res.status(401).json({ message: "Unauthorized" });
   const { latitude, longitude } = req.body;
-
-  if (!userId) {
-    return res.status(401).json({ message: "Unauthorized: userId missing" });
-  }
-
   if (latitude && longitude) {
     // ✅ Check distance from allowed locations
     const distanceA = getDistanceFromLatLonInKm(
@@ -94,22 +92,22 @@ export const clockIn = async (req: Request, res: Response) => {
       });
     }
   }
-  // ✅ Check active shift
-  const activeShift = await prisma.workShift.findFirst({
+  // 1. Check for ANY open shift (clockOut is null)
+  const openShift = await prisma.workShift.findFirst({
     where: { userId, clockOut: null },
     orderBy: { clockIn: "desc" },
   });
 
-  if (activeShift) {
-    const lastClockIn = dayjs(activeShift.clockIn).tz("America/Chicago");
-    const nowChicago = dayjs().tz("America/Chicago");
-
-    if (lastClockIn.isSame(nowChicago, "day")) {
-      return res.status(400).json({ message: "Already clocked in today" });
-    }
+  if (openShift) {
+    const missedDate = dayjs(openShift.clockIn).format("MMM DD, YYYY");
+    return res.status(400).json({
+      message: `Cannot clock in. You haven't clocked out of your old shift. Please go back to ${missedDate} to submit a correction request.`,
+      openShiftId: openShift.id,
+      missedDate,
+    });
   }
 
-  // ✅ Get today's Chicago date
+  // 2. Schedule Validation (Your existing logic)
   const nowChicago = dayjs().tz("America/Chicago");
   const dayOfWeek = nowChicago.day();
 
@@ -123,56 +121,193 @@ export const clockIn = async (req: Request, res: Response) => {
       .json({ message: "No work schedule found for today" });
   }
 
-  // ✅ Convert schedule times (UTC in DB) → Chicago time
-  let startTime = dayjs(schedule.startTime).tz("America/Chicago");
-  let endTime = dayjs(schedule.endTime).tz("America/Chicago");
-
-  // ✅ Apply today's date to both times
-  startTime = startTime
-    .year(nowChicago.year())
-    .month(nowChicago.month())
-    .date(nowChicago.date());
-
-  endTime = endTime
-    .year(nowChicago.year())
-    .month(nowChicago.month())
-    .date(nowChicago.date());
-
-  // ✅ Off-day case (if start === end)
-  if (startTime.valueOf() === endTime.valueOf()) {
-    return res.status(403).json({
-      message: "Clock-in not allowed — no scheduled shift for today.",
-    });
-  }
-
-  // ✅ Handle overnight shifts
-  if (endTime.isBefore(startTime)) {
-    endTime = endTime.add(1, "day");
-  }
-
-  // ✅ Compare now to schedule window
-  // if (nowChicago.isBefore(startTime) || nowChicago.isAfter(endTime)) {
-  //   return res.status(403).json({
-  //     message: `You can only clock in between ${startTime.format(
-  //       "h:mm A"
-  //     )} and ${endTime.format("h:mm A")} Chicago time.`,
-  //   });
-  // }
-
-  // ✅ Clock in
   const shift = await prisma.workShift.create({
     data: {
       userId,
-      clockIn: nowChicago.toDate(), // ✅ store Chicago-adjusted time
+      clockIn: nowChicago.toDate(),
     },
   });
 
-  return res.json({
-    message: "Clocked in successfully",
-    shift,
-  });
+  return res.json({ message: "Clocked in successfully", shift });
 };
 
+export const createShiftRequest = async (req: Request, res: Response) => {
+  const { userId } = (req as any).user;
+  const { shiftId, requestedDate, suggestedOut, reason } = req.body;
+
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const newRequest = await prisma.workShiftRequest.create({
+      data: {
+        userId,
+        shiftId,
+        requestedDate: dayjs(requestedDate).toDate(),
+        suggestedOut: dayjs(suggestedOut).toDate(),
+        reason,
+      },
+    });
+
+    // ✅ Notify Owners & Admins
+    (async () => {
+      try {
+        const owners = await prisma.user.findMany({
+          where: { OR: [{ isOwner: true }, { isAdmin: true }] },
+          select: { id: true },
+        });
+
+        const tokens = (
+          await prisma.deviceToken.findMany({
+            where: { userId: { in: owners.map((o) => o.id) }, enabled: true },
+            select: { token: true },
+          })
+        ).map((d) => d.token);
+
+        if (tokens.length) {
+          await sendPushAsync(tokens, {
+            title: "Shift Correction Request",
+            body: `${user?.name || "An artist"} submitted a clock-out correction for ${dayjs(requestedDate).format("MMM D")}.`,
+            data: { requestId: newRequest.id, type: "SHIFT_REQUEST" },
+          });
+        }
+      } catch (err) {
+        console.error("Push error:", err);
+      }
+    })();
+
+    return res.json({
+      success: true,
+      message: "Request submitted to management.",
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+// --- 2. GET ALL REQUESTS (Owner Only) ---
+export const getAllShiftRequestsByOwner = async (
+  req: Request,
+  res: Response,
+) => {
+  // 1. Get userId from request (standard across your controllers)
+  const { userId } = (req as any).user as { userId?: string };
+
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized: No userId found" });
+  }
+
+  try {
+    // 2. Check if the requester is an Owner
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { isOwner: true }, // Optimization: only select what we need
+    });
+
+    if (!currentUser?.isOwner) {
+      return res.status(403).json({ error: "Access denied. Owners only." });
+    }
+
+    // 3. Fetch all shift requests
+    const requests = await prisma.workShiftRequest.findMany({
+      orderBy: { createdAt: "desc" },
+    });
+
+    // 4. Manual Join: Fetch names for the unique userIds in the requests
+    const uniqueUserIds = [...new Set(requests.map((r) => r.userId))];
+
+    const users = await prisma.user.findMany({
+      where: { id: { in: uniqueUserIds } },
+      select: { id: true, name: true },
+    });
+
+    // Map names back to the requests
+    const enrichedRequests = requests.map((req) => {
+      const user = users.find((u) => u.id === req.userId);
+      return {
+        ...req,
+        userName: user?.name || "Unknown Artist",
+      };
+    });
+
+    return res.json({
+      success: true,
+      data: enrichedRequests,
+    });
+  } catch (error: any) {
+    console.error("Error in getAllShiftRequestsByOwner:", error);
+    return res.status(500).json({ error: error.message });
+  }
+};
+
+// --- 3. REVIEW REQUEST (Accept/Decline) ---
+export const reviewShiftRequest = async (req: Request, res: Response) => {
+  const { userId } = (req as any).user;
+  const { requestId, status } = req.body; // status: "approved" or "rejected"
+
+  try {
+    // 1. Owner Verification
+    const currentUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!currentUser?.isOwner) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+
+    // 2. Find the Request
+    const request = await prisma.workShiftRequest.findUnique({
+      where: { id: requestId },
+    });
+    if (!request) return res.status(404).json({ error: "Request not found" });
+
+    // 3. Database Updates
+    if (status === "approved" && request.shiftId) {
+      await prisma.$transaction([
+        prisma.workShift.update({
+          where: { id: request.shiftId },
+          data: { clockOut: request.suggestedOut },
+        }),
+        prisma.workShiftRequest.delete({ where: { id: requestId } }),
+      ]);
+    } else {
+      await prisma.workShiftRequest.delete({ where: { id: requestId } });
+    }
+
+    // 4. Notify the Artist (Fire and Forget)
+    (async () => {
+      try {
+        const tokens = (
+          await prisma.deviceToken.findMany({
+            where: { userId: request.userId, enabled: true },
+            select: { token: true },
+          })
+        ).map((d) => d.token);
+
+        if (tokens.length) {
+          const title =
+            status === "approved"
+              ? "Request Approved ✅"
+              : "Request Declined ❌";
+          const body =
+            status === "approved"
+              ? "Your clock-out correction was accepted and your hours are updated."
+              : "Your clock-out correction request was declined. Please see a manager.";
+
+          await sendPushAsync(tokens, {
+            title,
+            body,
+            data: { type: "SHIFT_UPDATE", status },
+          });
+        }
+      } catch (pushErr) {
+        console.error("Push notification error for artist:", pushErr);
+      }
+    })();
+
+    return res.json({
+      success: true,
+      message: `Request ${status} successfully.`,
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
 export const clockOut = async (req: Request, res: Response) => {
   const { userId } = (req as any).user as { userId?: string };
   console.log("clockOut payload with userId:", userId, "and body:", req.body);

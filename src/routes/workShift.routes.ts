@@ -2,8 +2,10 @@ import { Router } from "express";
 import {
   clockIn,
   clockOut,
+  createShiftRequest,
   editClockInAndClockOutTimeByShiftId,
   extendShift,
+  getAllShiftRequestsByOwner,
   getPaymentReport,
   getPaystub,
   getPiercingReport,
@@ -12,6 +14,7 @@ import {
   getWorkShifts,
   getWorkShiftsByMonth,
   getWorkShiftsFull,
+  reviewShiftRequest,
   setWorkScheduleByUserId,
 } from "../controllers/workShift.controller";
 import { authenticate, authorize } from "../middleware/auth";
@@ -24,6 +27,9 @@ router.get("/clock-history", getWorkShiftsByMonth);
 router.get("/full/clock-history", getWorkShiftsFull);
 router.post("/clock-in", clockIn);
 router.post("/clock-out", clockOut);
+router.post("/clock-in/request", createShiftRequest);
+router.get("/owner/review-request", getAllShiftRequestsByOwner);
+router.post("/owner/review-request", reviewShiftRequest);
 router.post("/extend-shift", extendShift);
 router.put("/edit-clockinout", editClockInAndClockOutTimeByShiftId);
 router.get("/", getWorkShifts);
