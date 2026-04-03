@@ -10,6 +10,7 @@ interface GoogleReviewResponse {
 }
 
 interface GoogleReview {
+  reviewReply: any;
   reviewId: string;
   reviewer: { displayName: string };
   starRating: "ONE" | "TWO" | "THREE" | "FOUR" | "FIVE";
