@@ -628,35 +628,38 @@ export const updateMiniPhoto = async (req: Request, res: Response) => {
 export const getSignInCustomers = async (req: Request, res: Response) => {
   try {
     const { userId } = (req as any).user as { userId?: string };
+    // Get dates from query params
+    const { start_date, end_date } = req.query;
 
     if (!userId) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    // 1. Get current user's ownership status
     const currentUser = await prisma.user.findUnique({
       where: { id: userId },
       select: { isOwner: true },
     });
 
-    if (!currentUser) {
-      return res.status(404).json({ error: "User not found" });
+    if (!currentUser || !currentUser.isOwner) {
+      return res.json({ success: true, data: [] });
     }
 
-    // 2. Authorization Logic
-    let customers: any[] = [];
+    // Build the filter object
+    let whereClause: any = {};
 
-    if (currentUser.isOwner) {
-      // Owners get all data, sorted by newest first
-      customers = await prisma.signInCustomer.findMany({
-        orderBy: {
-          createdAt: "desc",
-        },
-      });
-    } else {
-      // Non-owners get an empty array as requested
-      customers = [];
+    if (start_date && end_date) {
+      whereClause.createdAt = {
+        gte: new Date(start_date as string),
+        lte: new Date(end_date as string),
+      };
     }
+
+    const customers = await prisma.signInCustomer.findMany({
+      where: whereClause,
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
 
     return res.json({
       success: true,

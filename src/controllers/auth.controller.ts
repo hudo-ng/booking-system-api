@@ -540,8 +540,6 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
                 spending_amount: {
                   increment: newPaymentAmount,
                 },
-                spending_artist: extra_data?.artist_name ?? "",
-                spending_services: extra_data?.colour ?? "",
               },
             });
           } catch (error) {
@@ -939,8 +937,6 @@ export const createAdminPaymentRequest = async (
                 spending_amount: {
                   increment: newPaymentAmount,
                 },
-                spending_artist: extra_data?.artist_name ?? "",
-                spending_services: extra_data?.colour ?? "",
               },
             });
           } catch (error) {
