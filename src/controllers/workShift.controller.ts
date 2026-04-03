@@ -68,11 +68,12 @@ export const getWorkShiftsByMonth = async (req: Request, res: Response) => {
 // ✅ Clock In
 export const clockIn = async (req: Request, res: Response) => {
   const { userId } = (req as any).user;
-
   if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
   const { latitude, longitude } = req.body;
+
+  // ✅ Location Check (Existing Logic)
   if (latitude && longitude) {
-    // ✅ Check distance from allowed locations
     const distanceA = getDistanceFromLatLonInKm(
       latitude,
       longitude,
@@ -92,22 +93,35 @@ export const clockIn = async (req: Request, res: Response) => {
       });
     }
   }
-  // 1. Check for ANY open shift (clockOut is null)
+
+  // 1. Find an open shift
   const openShift = await prisma.workShift.findFirst({
     where: { userId, clockOut: null },
     orderBy: { clockIn: "desc" },
   });
 
   if (openShift) {
-    const missedDate = dayjs(openShift.clockIn).format("MMM DD, YYYY");
-    return res.status(400).json({
-      message: `Cannot clock in. You haven't clocked out of your old shift. Please go back to ${missedDate} to submit a correction request.`,
-      openShiftId: openShift.id,
-      missedDate,
+    const pendingRequest = await prisma.workShiftRequest.findFirst({
+      where: { shiftId: openShift.id },
     });
+
+    // If NO request exists, they are stuck and must submit one
+    if (!pendingRequest) {
+      const missedDate = dayjs(openShift.clockIn).format("MMM DD, YYYY");
+      return res.status(400).json({
+        message: `Cannot clock in. You haven't clocked out of your shift on ${missedDate}. Please submit a correction request first.`,
+        openShiftId: openShift.id,
+        missedDate,
+      });
+    }
+
+    // If a request DOES exist, we ignore the open shift and let them proceed to step 2
+    console.log(
+      `User ${userId} has a pending request for shift ${openShift.id}. Allowing new clock-in.`,
+    );
   }
 
-  // 2. Schedule Validation (Your existing logic)
+  // 2. Schedule Validation
   const nowChicago = dayjs().tz("America/Chicago");
   const dayOfWeek = nowChicago.day();
 
@@ -121,6 +135,7 @@ export const clockIn = async (req: Request, res: Response) => {
       .json({ message: "No work schedule found for today" });
   }
 
+  // 3. Create New Shift
   const shift = await prisma.workShift.create({
     data: {
       userId,
