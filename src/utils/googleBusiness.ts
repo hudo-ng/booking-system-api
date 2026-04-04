@@ -89,11 +89,6 @@ export const fetchReviews = async (
     params: { pageSize: 50 },
   });
 
-  console.log(
-    "📦 Raw Google Response:",
-    JSON.stringify(response.data, null, 2),
-  );
-
   return response.data.reviews || [];
 };
 
