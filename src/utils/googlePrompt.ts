@@ -1,9 +1,16 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const model = genAI.getGenerativeModel(
+  { model: "gemini-1.5-flash" },
+  { apiVersion: "v1" },
+);
 
-export const generateAIReply = async (reviewerName: string, starRating: number, comment: string) => {
+export const generateAIReply = async (
+  reviewerName: string,
+  starRating: number,
+  comment: string,
+) => {
   const prompt = `
     You are the manager of a professional tattoo and piercing studio. 
     Write a short, human-sounding response to a Google review.
