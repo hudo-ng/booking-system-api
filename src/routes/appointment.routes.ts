@@ -22,6 +22,7 @@ import {
   updateDepositAppointment,
   duplicateAppointment,
   updateDepositStatusInAppointment,
+  updateAppointmentOptional,
 } from "../controllers/appointment.controller";
 import { enforceDevice } from "../middleware/enforceDevice";
 
@@ -30,6 +31,7 @@ const router = Router();
 router.use(authenticate, enforceDevice, authorize(["admin", "employee"]));
 
 router.get("/all", getAllAppointments);
+router.put("/optional", updateAppointmentOptional);
 router.get("/count/pending", getCountAppointmentPending);
 router.get("/all/by-date", getAllAppointmentsBySelectedDate);
 router.get("/", getAppointments);
@@ -52,7 +54,7 @@ router.post("/deposit-appointments", createDepositAppointment);
 router.put("/deposit-appointments", updateDepositAppointment);
 router.put(
   "/deposit-appointments/appointment",
-  updateDepositStatusInAppointment
+  updateDepositStatusInAppointment,
 );
 
 export default router;

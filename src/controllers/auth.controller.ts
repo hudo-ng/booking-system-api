@@ -1021,7 +1021,7 @@ export const verifyAdminPaymentRequest = async (
     // Establish the Dejavoo Transaction Index range
     const startSearchIndex =
       Number(lastPaymentBeforeCrash?.transactionNumber || 0) + 1;
-    const endSearchIndex = startSearchIndex + 5; // Look ahead 5 spots for the missing record
+    const endSearchIndex = startSearchIndex + 5;
 
     // 2. Select credentials based on terminal choice
     const isTerminal1 = targetTerminal === "terminal_1";

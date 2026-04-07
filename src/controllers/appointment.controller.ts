@@ -1109,7 +1109,65 @@ export const updateCompletedPhotoUrlAppointmentById = async (
     res.status(500).json({ message: "Failed to update appointment photo." });
   }
 };
+export const updateAppointmentOptional = async (
+  req: Request,
+  res: Response,
+) => {
+  const { id, ...updateData } = req.body;
 
+  if (!id) {
+    return res.status(400).json({ message: "Appointment ID is required." });
+  }
+
+  // Define a list of allowed keys to prevent accidental database corruption
+  // You can add more keys to this array as your requirements grow
+  const allowedKeys = [
+    "is_refunded",
+    "status",
+    "completed_photo_url",
+    "deposit_has_been_used",
+    "payment_status",
+    "detail",
+    "quote_amount",
+  ];
+
+  try {
+    // 1. Filter the incoming body to only include allowed keys
+    const dataToUpdate: any = {};
+
+    Object.keys(updateData).forEach((key) => {
+      if (allowedKeys.includes(key)) {
+        dataToUpdate[key] = updateData[key];
+      }
+    });
+
+    if (Object.keys(dataToUpdate).length === 0) {
+      return res
+        .status(400)
+        .json({ message: "No valid fields provided for update." });
+    }
+
+    // 2. Check if appointment exists
+    const appointment = await prisma.appointment.findUnique({ where: { id } });
+    if (!appointment) {
+      return res.status(404).json({ message: "Appointment not found." });
+    }
+
+    // 3. Perform the update
+    const updated = await prisma.appointment.update({
+      where: { id },
+      data: dataToUpdate,
+    });
+
+    res.json({
+      message: "Appointment updated successfully.",
+      appointment: updated,
+    });
+  } catch (err) {
+    console.error("Error updating appointment optional fields:", err);
+    res.status(500).json({ message: "Failed to update appointment." });
+  }
+};
 export const getAppointmentHistory = async (req: Request, res: Response) => {
   const { id: appointmentId } = req.params;
   try {
