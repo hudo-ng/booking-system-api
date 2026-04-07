@@ -82,8 +82,6 @@ export const fetchReviews = async (
 ): Promise<GoogleReview[]> => {
   const url = `https://mybusiness.googleapis.com/v4/${locationResourceName}/reviews`;
 
-  console.log(`📡 Fetching from: ${url}`);
-
   const response = await axios.get<GoogleReviewResponse>(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
     params: { pageSize: 50 },
@@ -107,7 +105,7 @@ export const fetchAllReviews = async (
           headers: { Authorization: `Bearer ${accessToken}` },
           params: {
             pageSize: 50,
-            pageToken: nextPageToken, // Pass the token from the last request
+            pageToken: nextPageToken,
           },
         },
       );

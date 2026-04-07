@@ -3,7 +3,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 const model = genAI.getGenerativeModel(
   { model: "gemini-1.5-flash" },
-  { apiVersion: "v1" },
+  { apiVersion: "v1beta" },
 );
 
 export const generateAIReply = async (
@@ -32,6 +32,9 @@ export const generateAIReply = async (
     - Avoid corporate jargon.
     
     Response:`;
+
+  const availableModels = await genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  console.log("📋 Available Models:", JSON.stringify(availableModels, null, 2));
 
   try {
     const result = await model.generateContent(prompt);
