@@ -10,28 +10,30 @@ import axios from "axios";
 
 const prisma = new PrismaClient();
 
-export const syncAllArtistReviews = async (ownerId: "0ca37281-3084-4c3b-b9b2-fc0185c28108") => {
+export const syncAllArtistReviews = async (
+  ownerId: "0ca37281-3084-4c3b-b9b2-fc0185c28108",
+) => {
   try {
     const token = await getFreshAccessToken(ownerId);
     const keys = await prisma.googleReviewKey.findMany();
 
     for (const key of keys) {
-      // Use fetchReviews (for latest) or fetchAllReviews (for history)
       const googleReviews = await fetchReviews(token, key.locationId);
 
       for (const gr of googleReviews) {
-        // 1. Check our Database first
+        const reviewDate = new Date(gr.createTime);
+        const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
+        const isRecent = reviewDate > fortyEightHoursAgo;
+
         const existingReview = await prisma.review.findUnique({
           where: { googleReviewId: gr.reviewId },
         });
 
-        // 2. Perform the Upsert to keep our DB in sync with Google
         const savedReview = await prisma.review.upsert({
           where: { googleReviewId: gr.reviewId },
           update: {
             comment: gr.comment,
             starRating: parseRating(gr.starRating),
-            // Update replyText if it exists on Google but not in our DB
             replyText: gr.reviewReply?.comment || existingReview?.replyText,
           },
           create: {
@@ -39,51 +41,61 @@ export const syncAllArtistReviews = async (ownerId: "0ca37281-3084-4c3b-b9b2-fc0
             reviewerName: gr.reviewer.displayName,
             starRating: parseRating(gr.starRating),
             comment: gr.comment,
-            createTime: new Date(gr.createTime),
+            createTime: reviewDate,
             userId: key.userId,
             googleReviewKeyId: key.id,
             replyText: gr.reviewReply?.comment || null,
           },
         });
 
-        // 3. DECISION LOGIC: Should we reply right now?
-        // We only reply if:
-        // - There is NO reply on Google yet
-        // - There is NO replyText in our DB
-        const needsReply = !gr.reviewReply?.comment && !savedReview.replyText;
-        
+        const needsReply =
+          isRecent && !gr.reviewReply?.comment && !savedReview.replyText;
+
         if (needsReply) {
           const rating = parseRating(gr.starRating);
           const hasComment = gr.comment && gr.comment.trim() !== "";
           const fullReviewPath = `${key.locationId}/reviews/${gr.reviewId}`;
 
-          // CASE A: 5 Stars, No Comment (Template)
           if (rating === 5 && !hasComment) {
-            const msg = "Thank you so much for the 5-star rating! We appreciate the support.";
+            const msg =
+              "Thank you so much for the 5-star rating! We appreciate the support.";
             await postGoogleReply(token, fullReviewPath, msg);
-            
-            // Save the reply to DB so we don't try again
             await prisma.review.update({
               where: { id: savedReview.id },
-              data: { replyText: msg }
+              data: { replyText: msg },
             });
           }
 
-          // CASE B: 4-5 Stars + Comment (AI)
           else if (rating >= 4 && hasComment) {
-            console.log(`🧠 Generating AI reply for ${gr.reviewer.displayName}...`);
-            const aiReply = await generateAIReply(gr.reviewer.displayName, rating, gr.comment!);
-            
+            console.log(
+              `🧠 Generating AI reply for ${gr.reviewer.displayName}...`,
+            );
+            const aiReply = await generateAIReply(
+              gr.reviewer.displayName,
+              rating,
+              gr.comment!,
+            );
+
             if (aiReply) {
               await postGoogleReply(token, fullReviewPath, aiReply);
-              
-              // Save the AI reply to DB
               await prisma.review.update({
                 where: { id: savedReview.id },
-                data: { replyText: aiReply }
+                data: { replyText: aiReply },
               });
             }
           }
+
+          // CASE : 1-2 Stars (Save AI Draft Only)
+          // else if (rating <= 2) {
+          //   console.log(`⚠️ Saving AI draft for 1-2 star review from ${gr.reviewer.displayName}`);
+          //   const aiDraft = await generateAIReply(gr.reviewer.displayName, rating, gr.comment || "");
+          //   if (aiDraft) {
+          //     await prisma.review.update({
+          //       where: { id: savedReview.id },
+          //       data: { replyDraft: aiDraft } // Ensure this field is in your Prisma schema
+          //     });
+          //   }
+          // }
         }
       }
     }
