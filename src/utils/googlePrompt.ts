@@ -21,17 +21,26 @@ export const generateAIReply = async (
     - 1-3 Stars: Professional, calm, and apologetic. Ask them to contact the shop privately.
 
     RULES: Max 2 sentences. No emojis. Mention specific details if provided.
-    Response:`;
+  `;
 
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+    const result = await ai.models.generateContent({
+      model: "gemini-2.5-flash", 
       contents: [{ role: "user", parts: [{ text: prompt }] }],
     });
 
-    return response.text?.trim() || null;
+    return result.text?.trim() ?? null;
   } catch (error: any) {
     console.error("Gemini AI Error:", error.message);
+
+    if (error.status === 404) {
+      console.log("Attempting fallback to Gemini 3 Flash...");
+      const fallback = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+      });
+      return fallback.text?.trim() ?? null;
+    }
     return null;
   }
 };
