@@ -21,6 +21,7 @@ import {
   scriptInsertData,
   getServiceDemographics,
   sendZoePaystub,
+  verifyAdminPaymentRequest,
 } from "../controllers/auth.controller";
 import { getAllMiniPhoto } from "../controllers/management.controller";
 
@@ -32,6 +33,7 @@ router.post("/login/id-token", logInByIdToken);
 router.get("/mini-photo", getAllMiniPhoto);
 router.post("/create-payment-request", createPaymentRequest);
 router.post("/create-payment-request/admin", createAdminPaymentRequest);
+router.post("/verify-payment-request/admin", verifyAdminPaymentRequest);
 router.get("/payment/:id", getTrackingPaymentById);
 // Create and send verification code
 router.post("/verification/create", createVerification);

@@ -981,6 +981,193 @@ export const createAdminPaymentRequest = async (
   }
 };
 
+export const verifyAdminPaymentRequest = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const {
+      amount,
+      last4,
+      requested_at,
+      artist,
+      item_service,
+      extra_data,
+      device_number, // "terminal_1" or "terminal_2"
+    } = req.body;
+
+    if (!amount || !requested_at) {
+      return res.status(400).json({
+        success: false,
+        error: "Amount and requested_at are required.",
+      });
+    }
+
+    const targetTerminal = device_number || "terminal_2";
+
+    // 1. Find the last successful payment ON THIS SPECIFIC TERMINAL
+    // before the crash time to establish a search anchor.
+    const lastPaymentBeforeCrash = await prisma.trackingPayment.findFirst({
+      where: {
+        createdAt: {
+          lt: new Date(requested_at),
+        },
+        statusCode: "0000",
+        device_number: targetTerminal,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    // Establish the Dejavoo Transaction Index range
+    const startSearchIndex =
+      Number(lastPaymentBeforeCrash?.transactionNumber || 0) + 1;
+    const endSearchIndex = startSearchIndex + 5; // Look ahead 5 spots for the missing record
+
+    // 2. Select credentials based on terminal choice
+    const isTerminal1 = targetTerminal === "terminal_1";
+
+    const Tpn = isTerminal1
+      ? process.env.DEJAVOO_TPN
+      : process.env.DEJAVOO_TPN_SECOND;
+    const Authkey = isTerminal1
+      ? process.env.DEJAVOO_AUTH_KEY
+      : process.env.DEJAVOO_AUTH_KEY_SECOND;
+    const RegisterId = isTerminal1
+      ? process.env.DEJAVOO_REGISTER_ID
+      : process.env.DEJAVOO_REGISTER_ID_SECOND;
+
+    if (!Tpn || !Authkey || !RegisterId) {
+      return res.status(500).json({
+        success: false,
+        error: `Configuration missing for ${targetTerminal}`,
+      });
+    }
+
+    // 3. Fetch StatusList from Dejavoo
+    const statusRes = await axios.post(
+      "https://spinpos.net/v2/Payment/StatusList",
+      {
+        PaymentType: "Credit",
+        Tpn,
+        Authkey,
+        RegisterId,
+        MerchantNumber: null,
+        SPInProxyTimeout: null,
+        TransactionFromIndex: startSearchIndex,
+        TransactionToIndex: endSearchIndex,
+        CustomFields: {},
+      },
+      { timeout: 30000 },
+    );
+
+    const transactions = statusRes.data?.Transactions || [];
+
+    // 4. Match Logic: Amount + Approved + (Optional) Last4
+    const match = transactions.find((t: any) => {
+      const amountMatches = Number(t?.Amounts?.Amount) === Number(amount);
+      const isApproved = t?.GeneralResponse?.StatusCode === "0000";
+      const last4Matches = last4 ? t?.CardData?.Last4 === last4 : true;
+
+      return amountMatches && isApproved && last4Matches;
+    });
+
+    if (!match) {
+      return res.status(404).json({
+        success: false,
+        error: `Transaction not found on ${targetTerminal} (Range: ${startSearchIndex}-${endSearchIndex}).`,
+      });
+    }
+
+    // 5. Final safety check: Ensure we haven't already synced this PNReferenceId
+    const alreadyExists = await prisma.trackingPayment.findFirst({
+      where: { pnReferenceId: match.PNReferenceId },
+    });
+
+    if (alreadyExists) {
+      return res.json({
+        success: true,
+        message: "Payment was already synced previously.",
+        record: alreadyExists,
+      });
+    }
+
+    // 6. Sync to Prisma
+    const syncedRecord = await prisma.trackingPayment.create({
+      data: {
+        referenceId: match.ReferenceId,
+        paymentType: "Credit",
+        transactionType: match.TransactionType ?? "Sale",
+        invoiceNumber: match.InvoiceNumber,
+        batchNumber: match.BatchNumber,
+        transactionNumber: match.TransactionNumber,
+        authCode: match.AuthCode,
+        voided: match.Voided ?? false,
+        pnReferenceId: match.PNReferenceId,
+        totalAmount: match.Amounts?.TotalAmount,
+        amount: match.Amounts?.Amount,
+        tipAmount: match.Amounts?.TipAmount,
+        feeAmount: match.Amounts?.FeeAmount,
+        taxAmount: match.Amounts?.TaxAmount,
+        cardType: match.CardData?.CardType,
+        last4: match.CardData?.Last4,
+        name: match.CardData?.Name,
+        statusCode: match.GeneralResponse?.StatusCode,
+        message: match.GeneralResponse?.Message,
+        detailedMessage: match.GeneralResponse?.DetailedMessage,
+        artist: artist || "Recovery Sync",
+        payment_method: "Card",
+        item_service: item_service || "piercing",
+        device_number: targetTerminal,
+        document_id: extra_data?.documentId ?? "",
+        customer_name: extra_data?.customer_name ?? "",
+        createdAt: new Date(requested_at),
+      },
+    });
+
+    // 7. Update the external Form/Booking system
+    // 7. External Patch (Update the Tattoo/Piercing Form)
+    if (extra_data?.id && item_service) {
+      try {
+        await axios.patch(
+          `https://hyperinkersform.com/api/${item_service}/payment`,
+          {
+            // Use the synced record ID for the tracking and card reference
+            tracking_payment_id: syncedRecord.id,
+            cash_id: "", // Since this is a terminal recovery, cash is usually 0
+            card_id: syncedRecord.id,
+            status: "paid",
+            paid_by: "card",
+            cash: 0,
+            card: Number(amount),
+            id: extra_data.id,
+            tip: Number(match.Amounts?.TipAmount ?? 0),
+            documentId: extra_data.documentId,
+            collectionId: extra_data.collectionId,
+            paid_money: Number(amount),
+            // Default to false for recovery unless passed in extra_data
+            deposit_has_been_used: extra_data?.deposit_has_been_used ?? false,
+          },
+        );
+      } catch (patchErr: any) {
+        console.error(
+          "External Patch Failed:",
+          patchErr.response?.data || patchErr.message,
+        );
+        // We don't throw here so the user still sees the successful DB sync
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `Recovered transaction from ${targetTerminal} at Index ${match.TransactionNumber}`,
+      record: syncedRecord,
+    });
+  } catch (error: any) {
+    console.error("Fuzzy Recovery Error:", error.message);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 const BASE_URL = "https://spinpos.net/v2";
 
 export const getDailyReport = async (req: Request, res: Response) => {
