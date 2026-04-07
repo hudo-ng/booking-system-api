@@ -2,7 +2,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 const model = genAI.getGenerativeModel(
-  { model: "gemini-1.5-flash" },
+  { model: "gemini-1.5-flash-latest" },
   { apiVersion: "v1beta" },
 );
 
@@ -33,14 +33,24 @@ export const generateAIReply = async (
     
     Response:`;
 
-  const availableModels = await genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const availableModels = await genAI.getGenerativeModel({
+    model: "gemini-1.5-flash",
+  });
   console.log("📋 Available Models:", JSON.stringify(availableModels, null, 2));
 
   try {
     const result = await model.generateContent(prompt);
     return result.response.text().trim();
-  } catch (error) {
-    console.error("Gemini Error:", error);
+  } catch (error: any) {
+    console.error("Gemini Error:", error.message);
+    if (error.status === 404) {
+      console.log("Attempting fallback to Gemini 2.0...");
+      const fallbackModel = genAI.getGenerativeModel({
+        model: "gemini-2.0-flash-exp",
+      });
+      const fallbackResult = await fallbackModel.generateContent(prompt);
+      return fallbackResult.response.text().trim();
+    }
     return null;
   }
 };
