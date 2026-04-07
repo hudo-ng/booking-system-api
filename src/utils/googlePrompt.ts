@@ -33,6 +33,9 @@ export const generateAIReply = async (
     
     Response:`;
 
+  const availableModels = await genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  console.log("📋 Available Models:", JSON.stringify(availableModels, null, 2));
+
   try {
     const result = await model.generateContent(prompt);
     return result.response.text().trim();
