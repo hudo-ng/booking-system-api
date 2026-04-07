@@ -22,8 +22,8 @@ export const syncAllArtistReviews = async (
 
       for (const gr of googleReviews) {
         const reviewDate = new Date(gr.createTime);
-        const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
-        const isRecent = reviewDate > fortyEightHoursAgo;
+        const seventyTwoHoursAgo = new Date(Date.now() - 72 * 60 * 60 * 1000);
+        const isRecent = reviewDate > seventyTwoHoursAgo;
 
         const existingReview = await prisma.review.findUnique({
           where: { googleReviewId: gr.reviewId },
