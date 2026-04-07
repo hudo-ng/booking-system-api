@@ -1,15 +1,11 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genAI.getGenerativeModel(
-  { model: "gemini-2.0-flash" },
-  { apiVersion: "v1" },
-);
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export const generateAIReply = async (
   reviewerName: string,
   starRating: number,
-  comment: string,
+  comment: string
 ) => {
   const prompt = `
     You are the manager of a professional tattoo and piercing studio. 
@@ -19,38 +15,23 @@ export const generateAIReply = async (
     Rating: ${starRating}/5
     Review: "${comment}"
     
-    TONE GUIDELINES BASED ON RATING:
-    - 5 Stars: Be enthusiastic, grateful, and friendly.
-    - 4 Stars: Be warm and appreciative.
-    - 3 Stars: Be professional. Thank them for the feedback and ask how you could have made it a 5-star experience.
-    - 1-2 Stars: Be deeply professional, calm, and apologetic. Do not be defensive. Ask them to contact the shop via email/phone to resolve the issue privately.
+    TONE GUIDELINES:
+    - 5 Stars: Enthusiastic and friendly.
+    - 4 Stars: Warm and appreciative.
+    - 1-3 Stars: Professional, calm, and apologetic. Ask them to contact the shop privately.
 
-    GENERAL RULES:
-    - Max 2 sentences.
-    - No emojis. 
-    - Mention specific details from their comment (e.g., if they mentioned a tattoo or a specific artist).
-    - Avoid corporate jargon.
-    
+    RULES: Max 2 sentences. No emojis. Mention specific details if provided.
     Response:`;
 
-  const availableModels = await genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
-  });
-  console.log("📋 Available Models:", JSON.stringify(availableModels, null, 2));
-
   try {
-    const result = await model.generateContent(prompt);
-    return result.response.text().trim();
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+    });
+
+    return response.text?.trim() || null;
   } catch (error: any) {
-    console.error("Gemini Error:", error.message);
-    if (error.status === 404) {
-      console.log("Attempting fallback to Gemini 2.0...");
-      const fallbackModel = genAI.getGenerativeModel({
-        model: "gemini-2.0-flash-exp",
-      });
-      const fallbackResult = await fallbackModel.generateContent(prompt);
-      return fallbackResult.response.text().trim();
-    }
+    console.error("Gemini AI Error:", error.message);
     return null;
   }
 };
