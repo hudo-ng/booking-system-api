@@ -76,7 +76,6 @@ model Appointment {
   quote_amount           Float?
   completed_photo_url    String?
   isException            Boolean                 @default(false)
-  is_refunded            Boolean                 @default(false)
   occurrenceIndex        Int?
   seriesId               String?
   assignedById           String?
@@ -87,6 +86,7 @@ model Appointment {
   updatedAt              DateTime                @default(now()) @updatedAt
   source_booking         String?
   lastReminderSentAt     DateTime?
+  is_refunded            Boolean                 @default(false)
   assignedBy             User?                   @relation("AssignedBy", fields: [assignedById], references: [id])
   employee               User                    @relation(fields: [employeeId], references: [id])
   RecurringSeries        RecurringSeries?        @relation(fields: [seriesId], references: [id])
@@ -241,14 +241,14 @@ model WorkShift {
 }
 
 model WorkShiftRequest {
-  id             String   @id @default(uuid())
-  userId         String
-  shiftId        String  
-  requestedDate  DateTime 
-  suggestedOut   DateTime 
-  reason         String
-  status         String   @default("pending") // pending, approved, rejected
-  createdAt      DateTime @default(now())
+  id            String   @id @default(uuid())
+  userId        String
+  shiftId       String
+  requestedDate DateTime
+  suggestedOut  DateTime
+  reason        String
+  status        String   @default("pending")
+  createdAt     DateTime @default(now())
 }
 
 model WorkOverride {
@@ -381,6 +381,7 @@ model Review {
   comment           String?
   createTime        DateTime
   replyText         String?
+  replyDraft        String?
   googleReviewKeyId String
   userId            String?
   googleReviewKey   GoogleReviewKey @relation(fields: [googleReviewKeyId], references: [id])

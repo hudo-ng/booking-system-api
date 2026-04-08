@@ -64,9 +64,7 @@ export const syncAllArtistReviews = async (
               where: { id: savedReview.id },
               data: { replyText: msg },
             });
-          }
-
-          else if (rating >= 4 && hasComment) {
+          } else if (rating >= 4 && hasComment) {
             console.log(
               `🧠 Generating AI reply for ${gr.reviewer.displayName}...`,
             );
@@ -83,19 +81,22 @@ export const syncAllArtistReviews = async (
                 data: { replyText: aiReply },
               });
             }
+          } else if (rating <= 3) {
+            console.log(
+              `⚠️ Saving AI draft for 1-2 star review from ${gr.reviewer.displayName}`,
+            );
+            const aiDraft = await generateAIReply(
+              gr.reviewer.displayName,
+              rating,
+              gr.comment || "",
+            );
+            if (aiDraft) {
+              await prisma.review.update({
+                where: { id: savedReview.id },
+                data: { replyDraft: aiDraft },
+              });
+            }
           }
-
-          // CASE : 1-2 Stars (Save AI Draft Only)
-          // else if (rating <= 2) {
-          //   console.log(`⚠️ Saving AI draft for 1-2 star review from ${gr.reviewer.displayName}`);
-          //   const aiDraft = await generateAIReply(gr.reviewer.displayName, rating, gr.comment || "");
-          //   if (aiDraft) {
-          //     await prisma.review.update({
-          //       where: { id: savedReview.id },
-          //       data: { replyDraft: aiDraft } // Ensure this field is in your Prisma schema
-          //     });
-          //   }
-          // }
         }
       }
     }
