@@ -786,6 +786,65 @@ export const getCountAppointmentPending = async (
   res.json(count);
 };
 
+export const getMonthlyDaysOff = async (req: Request, res: Response) => {
+  const { year, month } = req.query as { year?: string; month?: string };
+
+  if (!year || !month) {
+    return res.status(400).json({ message: "Year and Month are required." });
+  }
+
+  // LOGIC FIX: Handle if month is passed as "2026-04" instead of "04"
+  const formattedMonth = month.includes("-") ? month.split("-")[1] : month;
+  const dateString = `${year}-${formattedMonth}-01`;
+
+  const startOfMonth = dayjs(dateString);
+
+  if (!startOfMonth.isValid()) {
+    return res.status(400).json({
+      message: "Invalid date construction",
+      attempted: dateString,
+    });
+  }
+
+  try {
+    const offConfigs = await prisma.workingHours.findMany({
+      where: { type: "off" },
+      include: {
+        employee: { select: { id: true, name: true, colour: true } },
+      },
+    });
+
+    const daysInMonth = startOfMonth.daysInMonth();
+    const specificDaysOff: any[] = [];
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const currentFullDate = startOfMonth.date(day);
+      const currentWeekday = currentFullDate.day();
+
+      const employeesOffThisWeekday = offConfigs.filter(
+        (config) => config.weekday === currentWeekday,
+      );
+
+      employeesOffThisWeekday.forEach((config) => {
+        specificDaysOff.push({
+          date: currentFullDate.format("YYYY-MM-DD"),
+          weekday: currentWeekday,
+          employee: config.employee,
+          workingHoursId: config.id,
+        });
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: specificDaysOff,
+    });
+  } catch (error: any) {
+    console.error("Error calculating monthly days off:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
 export const deleteAppointment = async (req: Request, res: Response) => {
   const { userId } = (req as any).user as { userId?: string };
   const { appointmentId, issendSMS } = req.query as {

@@ -1767,232 +1767,262 @@ export const sendWeeklyReceptionPaystub = async (
   res: Response,
 ) => {
   try {
-    const { userId } = req.query;
-    if (!userId) return res.status(400).json({ message: "userId is required" });
+    const dataArtist = [
+      { userId: "6a0c3e58-d4e4-4f32-8585-9fbb81b08417", isFree15Hour: false },
+      { userId: "bab24c5b-ec93-4386-bdfb-7b0e1f25eb7f", isFree15Hour: true },
+    ];
 
-    const now = new Date();
-    const today = dayjs();
-    const fromDate = today.startOf("week").subtract(1, "week").add(1, "day");
-    const toDate = fromDate.add(6, "day");
-    const format = (d: dayjs.Dayjs) => d.format("YYYY-MM-DD");
-    const formatDate = (date: Date) => dayjs(date).format("MMM DD, YYYY");
+    const results = [];
 
-    // 1. Fetch Reception Data (Hours/Wage)
-    const week = await getReceptionWeekData(
-      String(userId),
-      format(fromDate),
-      format(toDate),
-    );
-    if (!week?.user) return res.status(404).json({ message: "User not found" });
+    for (const artist of dataArtist) {
+      const { userId, isFree15Hour } = artist;
 
-    // 2. Fetch Appointments booked by this user (The IDs we need to track)
-    const bookedAppointments = await prisma.appointment.findMany({
-      where: { assignedById: String(userId) },
-      select: { id: true },
-    });
-    const bookedIds = bookedAppointments.map((a) => a.id);
+      const now = new Date();
+      const today = dayjs();
+      const fromDate = today.startOf("week").subtract(1, "week").add(1, "day");
+      const toDate = fromDate.add(6, "day");
+      const format = (d: dayjs.Dayjs) => d.format("YYYY-MM-DD");
+      const formatDate = (date: Date) => dayjs(date).format("MMM DD, YYYY");
 
-    // 3. Fetch External API Data for the period (Caching as before)
-    const apiDataCache = new Map<string, any[]>();
-    let fetchCursor = new Date(fromDate.toDate());
-    while (fetchCursor <= toDate.toDate()) {
-      const formatted = dayjs(fetchCursor).format("MMDDYYYY");
-      try {
-        const response = await axios.post(
-          "https://hyperinkersform.com/api/fetching",
-          { endDate: formatted },
-        );
-        apiDataCache.set(formatted, response.data?.data || []);
-      } catch (err) {
-        apiDataCache.set(formatted, []);
-      }
-      fetchCursor.setDate(fetchCursor.getDate() + 1);
-    }
-
-    // 4. Calculate Commissions from the Cache
-    let totalBookingVolume = 0;
-    let qualifiedBookingCount = 0;
-    const bookingCommRate = 0.01; // 1%
-
-    apiDataCache.forEach((items) => {
-      const paidBookings = items.filter(
-        (i) =>
-          bookedIds.includes(i.appointment_id) &&
-          (i.status?.toLowerCase() === "paid" ||
-            i.status?.toLowerCase() === "done"),
+      // 1. Fetch Reception Data
+      const week = await getReceptionWeekData(
+        String(userId),
+        format(fromDate),
+        format(toDate),
       );
-      qualifiedBookingCount += paidBookings.length;
-      paidBookings.forEach((i) => {
-        const paid = parseFloat(i?.paid_money) || 0;
-        const deposit =
-          i?.deposit_has_been_used !== false ? parseFloat(i?.deposit) || 0 : 0;
-        totalBookingVolume += paid + deposit;
+      if (!week?.user) continue; // Skip if user not found
+
+      // 2. Fetch Appointments booked (for commission)
+      const bookedAppointments = await prisma.appointment.findMany({
+        where: { assignedById: String(userId) },
+        select: { id: true },
       });
-    });
+      const bookedIds = bookedAppointments.map((a) => a.id);
 
-    const bookingCommission = totalBookingVolume * bookingCommRate;
+      // 3. Fetch External API Data (Cache)
+      const apiDataCache = new Map<string, any[]>();
+      let fetchCursor = new Date(fromDate.toDate());
+      while (fetchCursor <= toDate.toDate()) {
+        const formatted = dayjs(fetchCursor).format("MMDDYYYY");
+        try {
+          const response = await axios.post(
+            "https://hyperinkersform.com/api/fetching",
+            { endDate: formatted },
+          );
+          apiDataCache.set(formatted, response.data?.data || []);
+        } catch (err) {
+          apiDataCache.set(formatted, []);
+        }
+        fetchCursor.setDate(fetchCursor.getDate() + 1);
+      }
 
-    // 5. Calculate Hourly Pay
-    const hrs = week.totalHours || 0;
-    const rate = week.user.wage || 0;
-    const bonusHourrate = 14;
-    const totalWorkDays = week.totalWorkDays || 0;
-    const expectedHours = totalWorkDays * 8;
-    const reg = Math.min(hrs, expectedHours);
-    const ot = Math.max(0, hrs - expectedHours);
+      // 4. Calculate Commissions
+      let totalBookingVolume = 0;
+      let qualifiedBookingCount = 0;
+      const bookingCommRate = 0.01;
 
-    const gross = reg * rate + ot * bonusHourrate + bookingCommission;
+      apiDataCache.forEach((items) => {
+        const paidBookings = items.filter(
+          (i) =>
+            bookedIds.includes(i.appointment_id) &&
+            (i.status?.toLowerCase() === "paid" ||
+              i.status?.toLowerCase() === "done"),
+        );
+        qualifiedBookingCount += paidBookings.length;
+        paidBookings.forEach((i) => {
+          const paid = parseFloat(i?.paid_money) || 0;
+          const deposit =
+            i?.deposit_has_been_used !== false
+              ? parseFloat(i?.deposit) || 0
+              : 0;
+          totalBookingVolume += paid + deposit;
+        });
+      });
 
-    // 6. HTML Content (Maintained your style, added Booking Commission row)
-    const htmlContent = `
-    <html>
-      <head>
-        <style>
-          body { font-family: 'Helvetica', Arial, sans-serif; color: #333; margin: 0; padding: 40px; background: #fff; }
-          .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
-          .company-info h1 { margin: 0; font-size: 22px; color: #000; text-transform: uppercase; }
-          .company-info p { margin: 4px 0; font-size: 12px; color: #555; }
-          .stub-title { text-align: right; }
-          .stub-title h1 { margin: 0; font-size: 26px; color: #888; font-weight: bold; }
-          .summary-header { display: flex; justify-content: flex-end; gap: 30px; margin-top: 15px; }
-          .summary-box { text-align: center; }
-          .summary-box small { display: block; font-weight: bold; color: #999; font-size: 10px; margin-bottom: 2px; }
-          .summary-box span { font-size: 20px; font-weight: bold; }
-          .grey-bar { background: #888; color: white; padding: 10px 15px; font-size: 10px; font-weight: bold; text-transform: uppercase; display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; margin-top: 20px; }
-          .info-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; padding: 15px; border-bottom: 1px solid #ccc; font-size: 12px; margin-bottom: 30px; }
-          table { width: 100%; border-collapse: collapse; border: 1px solid #ccc; }
-          th { background: #f2f2f2; color: #666; font-size: 10px; padding: 12px 10px; text-align: left; text-transform: uppercase; border-bottom: 1px solid #ccc; }
-          td { padding: 15px 10px; font-size: 13px; border-bottom: 1px solid #eee; }
-          .ot-text { color: #2563eb; font-weight: 600; }
-          .comm-text { color: #c5c5c5; font-weight: 600; }
-          .footer-totals { display: flex; justify-content: flex-end; padding: 20px; background: #f9f9f9; border: 1px solid #ccc; border-top: none; }
-          .total-item { margin-left: 50px; text-align: center; }
-          .total-item small { display: block; font-weight: bold; color: #888; font-size: 10px; margin-bottom: 4px; }
-          .total-item span { font-size: 18px; font-weight: bold; }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div class="company-info">
-            <h1>HYPER INKER STUDIO</h1>
-            <p>8045 Callaghan Rd, San Antonio, TX 78230</p>
-            <p><strong>Pay Date:</strong> ${formatDate(now)}</p>
-          </div>
-          <div class="stub-title">
-            <h1>RECEPTION PAY STATEMENT</h1>
-            <div class="summary-header">
-              <div class="summary-box"><small>PERIOD</small><span>7 Days</span></div>
-              <div class="summary-box"><small>GROSS PAY</small><span>$${gross.toFixed(2)}</span></div>
+      const bookingCommission = totalBookingVolume * bookingCommRate;
+
+      // 5. Calculate Hourly Pay with Apprentice logic
+      const rawHrs = week.totalHours || 0;
+      const rate = week.user.wage || 0;
+      const bonusHourrate = 14;
+      const totalWorkDays = week.totalWorkDays || 0;
+      const expectedHours = totalWorkDays * 8;
+
+      // Handle Free 15 Hours logic
+      let apprenticeHours = 0;
+      let payableHours = rawHrs;
+
+      if (isFree15Hour) {
+        apprenticeHours = Math.min(rawHrs, 15);
+        payableHours = Math.max(0, rawHrs - 15);
+      }
+
+      const reg = Math.min(payableHours, expectedHours);
+      const ot = Math.max(0, payableHours - expectedHours);
+      const gross = reg * rate + ot * bonusHourrate + bookingCommission;
+
+      // 6. HTML Content
+      const htmlContent = `
+      <html>
+        <head>
+          <style>
+            body { font-family: 'Helvetica', Arial, sans-serif; color: #333; margin: 0; padding: 40px; background: #fff; }
+            .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
+            .company-info h1 { margin: 0; font-size: 22px; color: #000; text-transform: uppercase; }
+            .company-info p { margin: 4px 0; font-size: 12px; color: #555; }
+            .stub-title { text-align: right; }
+            .stub-title h1 { margin: 0; font-size: 26px; color: #888; font-weight: bold; }
+            .summary-header { display: flex; justify-content: flex-end; gap: 30px; margin-top: 15px; }
+            .summary-box { text-align: center; }
+            .summary-box small { display: block; font-weight: bold; color: #999; font-size: 10px; margin-bottom: 2px; }
+            .summary-box span { font-size: 20px; font-weight: bold; }
+            .grey-bar { background: #888; color: white; padding: 10px 15px; font-size: 10px; font-weight: bold; text-transform: uppercase; display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; margin-top: 20px; }
+            .info-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; padding: 15px; border-bottom: 1px solid #ccc; font-size: 12px; margin-bottom: 30px; }
+            table { width: 100%; border-collapse: collapse; border: 1px solid #ccc; }
+            th { background: #f2f2f2; color: #666; font-size: 10px; padding: 12px 10px; text-align: left; text-transform: uppercase; border-bottom: 1px solid #ccc; }
+            td { padding: 15px 10px; font-size: 13px; border-bottom: 1px solid #eee; }
+            .apprentice-text { color: #8b5cf6; font-weight: 600; font-style: italic; }
+            .footer-totals { display: flex; justify-content: flex-end; padding: 20px; background: #f9f9f9; border: 1px solid #ccc; border-top: none; }
+            .total-item { margin-left: 50px; text-align: center; }
+            .total-item small { display: block; font-weight: bold; color: #888; font-size: 10px; margin-bottom: 4px; }
+            .total-item span { font-size: 18px; font-weight: bold; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="company-info">
+              <h1>HYPER INKER STUDIO</h1>
+              <p>8045 Callaghan Rd, San Antonio, TX 78230</p>
+              <p><strong>Pay Date:</strong> ${formatDate(now)}</p>
+            </div>
+            <div class="stub-title">
+              <h1>RECEPTION PAY STATEMENT</h1>
+              <div class="summary-header">
+                <div class="summary-box"><small>PERIOD</small><span>7 Days</span></div>
+                <div class="summary-box"><small>GROSS PAY</small><span>$${gross.toFixed(2)}</span></div>
+              </div>
             </div>
           </div>
-        </div>
-        <div class="grey-bar">
-          <div>Employee Information</div>
-          <div>Rate</div>
-          <div>Status</div>
-          <div>Pay Period</div>
-        </div>
-        <div class="info-row">
-          <div><strong>${week.user.name}</strong><br />Receptionist</div>
-          <div>$${(rate - 1).toFixed(2)} + ($1 bonus) /hr</div>
-          <div>Weekly</div>
-          <div>${format(fromDate)} to ${format(toDate)}</div>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Pay Description</th>
-              <th>Quantity/Volume</th>
-              <th>Rate</th>
-              <th style="text-align:right">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><strong>Regular Hours</strong></td>
-              <td>${reg.toFixed(1)} hrs</td>
-              <td>$${(rate - 1).toFixed(2)} + ($1 bonus)</td>
-              <td style="text-align:right; font-weight:bold;">$${(reg * rate).toFixed(2)}</td>
-            </tr>
-            ${
-              ot > 0
-                ? `
-            <tr>
-              <td><strong>Bonus Hours</strong></td>
-              <td class="ot-text">${ot.toFixed(1)} hrs</td>
-              <td>$${bonusHourrate}</td>
-              <td style="text-align:right; font-weight:bold;">$${(ot * bonusHourrate).toFixed(2)}</td>
-            </tr>`
-                : ""
-            }
-            ${
-              bookingCommission > 0
-                ? `
-            <tr>
-              <td><strong>Booking Commission (1%)</strong></td>
-              <td class="comm-text">$${totalBookingVolume.toFixed(2)}</td>
-              <td>1%</td>
-              <td style="text-align:right; font-weight:bold; color:#16a34a;">$${bookingCommission.toFixed(2)}</td>
-            </tr>`
-                : ""
-            }
-          </tbody>
-        </table>
-        <div class="footer-totals">
-          <div class="total-item"><small>BOOKINGS</small><span>${qualifiedBookingCount}</span></div>
-          <div class="total-item"><small>WORK DAYS</small><span>${totalWorkDays} Days</span></div>
-          <div class="total-item"><small>TOTAL HOURS</small><span>${(reg + ot).toFixed(1)}</span></div>
-          <div class="total-item" style="color:#000;"><small>Gross Pay</small><span>$${gross.toFixed(2)}</span></div>
-        </div>
-      </body>
-    </html>`;
+          <div class="grey-bar">
+            <div>Employee Information</div>
+            <div>Rate</div>
+            <div>Status</div>
+            <div>Pay Period</div>
+          </div>
+          <div class="info-row">
+            <div><strong>${week.user.name}</strong><br />Receptionist</div>
+            <div>$${(rate - 1).toFixed(2)} + ($1 bonus) /hr</div>
+            <div>Weekly</div>
+            <div>${format(fromDate)} to ${format(toDate)}</div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Pay Description</th>
+                <th>Quantity</th>
+                <th>Rate</th>
+                <th style="text-align:right">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Regular Hours</strong></td>
+                <td>${reg.toFixed(1)} hrs</td>
+                <td>$${rate.toFixed(2)}</td>
+                <td style="text-align:right; font-weight:bold;">$${(reg * rate).toFixed(2)}</td>
+              </tr>
+              ${
+                isFree15Hour
+                  ? `
+              <tr>
+                <td class="apprentice-text"><strong>Apprentice (Skill Training)</strong></td>
+                <td>${apprenticeHours.toFixed(1)} hrs</td>
+                <td>$0.00</td>
+                <td style="text-align:right; color:#888;">FREE</td>
+              </tr>`
+                  : ""
+              }
+              ${
+                ot > 0
+                  ? `
+              <tr>
+                <td><strong>Bonus Hours</strong></td>
+                <td>${ot.toFixed(1)} hrs</td>
+                <td>$${bonusHourrate}</td>
+                <td style="text-align:right; font-weight:bold;">$${(ot * bonusHourrate).toFixed(2)}</td>
+              </tr>`
+                  : ""
+              }
+              ${
+                bookingCommission > 0
+                  ? `
+              <tr>
+                <td><strong>Booking Commission (1%)</strong></td>
+                <td>$${totalBookingVolume.toFixed(2)} vol</td>
+                <td>1%</td>
+                <td style="text-align:right; font-weight:bold; color:#16a34a;">$${bookingCommission.toFixed(2)}</td>
+              </tr>`
+                  : ""
+              }
+            </tbody>
+          </table>
+          <div class="footer-totals">
+            <div class="total-item"><small>TOTAL HOURS</small><span>${rawHrs.toFixed(1)}</span></div>
+            <div class="total-item" style="color:#000;"><small>Gross Pay</small><span>$${gross.toFixed(2)}</span></div>
+          </div>
+        </body>
+      </html>`;
 
-    // 7. Puppeteer Render
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ["--no-sandbox"],
-    });
-    const page = await browser.newPage();
-    await page.setViewport({ width: 850, height: 800, deviceScaleFactor: 2 });
-    await page.setContent(htmlContent);
-    const image = await page.screenshot({ type: "png" });
-    await browser.close();
+      // 7. Puppeteer & Upload
+      const browser = await puppeteer.launch({
+        headless: true,
+        args: ["--no-sandbox"],
+      });
+      const page = await browser.newPage();
+      await page.setViewport({ width: 850, height: 800, deviceScaleFactor: 2 });
+      await page.setContent(htmlContent);
+      const image = await page.screenshot({ type: "png" });
+      await browser.close();
 
-    // 8. Upload & Save
-    const uploadResponse = await imageKit.upload({
-      file: Buffer.from(image),
-      fileName: `paystub_reception_${userId}_${fromDate.format("YYYYMMDD")}.png`,
-      folder: "/paystubs",
-    });
+      const uploadResponse = await imageKit.upload({
+        file: Buffer.from(image),
+        fileName: `paystub_reception_${userId}_${fromDate.format("YYYYMMDD")}.png`,
+        folder: "/paystubs",
+      });
 
-    await prisma.paystub.create({
-      data: {
-        userId: String(userId),
-        name: week.user.name,
-        cash: 0,
-        card: 0,
-        total: totalBookingVolume,
-        imageUrl: uploadResponse.url,
-        startDate: fromDate.toDate(),
-        endDate: toDate.toDate(),
-        grossAmount: gross,
-      },
-    });
-    // 6. Send Email using the Buffer or the new ImageKit URL
-    const mg = new Mailgun(FormData).client({
-      username: "api",
-      key: process.env.MAILGUN_API_KEY!,
-    });
-    await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
-      from: process.env.MAILGUN_FROM!,
-      to: week.user?.email ?? "canhducc@gmail.com",
-      subject: `Weekly Paystub (${fromDate.format("MMM DD")} - ${toDate.format("MMM DD")})`,
-      html: `<p>Your paystub is ready. <a href="${uploadResponse.url}">Click here to view online.</a></p>`,
-      attachment: [{ filename: "paystub.png", data: Buffer.from(image) }],
-    });
-    return res.json({ success: true, gross, imageUrl: uploadResponse.url });
+      // 8. DB & Email
+      await prisma.paystub.create({
+        data: {
+          userId: String(userId),
+          name: week.user.name,
+          cash: 0,
+          card: 0,
+          total: totalBookingVolume,
+          imageUrl: uploadResponse.url,
+          startDate: fromDate.toDate(),
+          endDate: toDate.toDate(),
+          grossAmount: gross,
+        },
+      });
+
+      const mg = new Mailgun(FormData).client({
+        username: "api",
+        key: process.env.MAILGUN_API_KEY!,
+      });
+      await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
+        from: process.env.MAILGUN_FROM!,
+        to: week.user?.email ?? "canhducc@gmail.com",
+        subject: `Weekly Paystub (${fromDate.format("MMM DD")} - ${toDate.format("MMM DD")})`,
+        html: `<p>Your paystub is ready. <a href="${uploadResponse.url}">Click here to view online.</a></p>`,
+        attachment: [{ filename: "paystub.png", data: Buffer.from(image) }],
+      });
+
+      results.push({ name: week.user.name, gross, url: uploadResponse.url });
+    }
+
+    return res.json({ success: true, processed: results });
   } catch (error: any) {
-    console.error("Weekly paystub error:", error);
+    console.error("Weekly paystub batch error:", error);
     return res.status(500).json({ message: error.message });
   }
 };

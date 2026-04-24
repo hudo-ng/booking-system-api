@@ -23,6 +23,7 @@ import {
   duplicateAppointment,
   updateDepositStatusInAppointment,
   updateAppointmentOptional,
+  getMonthlyDaysOff,
 } from "../controllers/appointment.controller";
 import { enforceDevice } from "../middleware/enforceDevice";
 
@@ -31,6 +32,7 @@ const router = Router();
 router.use(authenticate, enforceDevice, authorize(["admin", "employee"]));
 
 router.get("/all", getAllAppointments);
+router.get("/all/off", getMonthlyDaysOff);
 router.put("/optional", updateAppointmentOptional);
 router.get("/count/pending", getCountAppointmentPending);
 router.get("/all/by-date", getAllAppointmentsBySelectedDate);

@@ -31,6 +31,7 @@ router.post("/register", register);
 router.post("/login", login);
 router.post("/login/id-token", logInByIdToken);
 router.get("/mini-photo", getAllMiniPhoto);
+// router.post("/create-square-payment-request", createSquareRequest);
 router.post("/create-payment-request", createPaymentRequest);
 router.post("/create-payment-request/admin", createAdminPaymentRequest);
 router.post("/verify-payment-request/admin", verifyAdminPaymentRequest);
