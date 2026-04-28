@@ -1079,17 +1079,17 @@ export const verifyAdminPaymentRequest = async (
     }
 
     // 5. Final safety check: Ensure we haven't already synced this PNReferenceId
-    const alreadyExists = await prisma.trackingPayment.findFirst({
-      where: { pnReferenceId: match.PNReferenceId },
-    });
+    // const alreadyExists = await prisma.trackingPayment.findFirst({
+    //   where: { pnReferenceId: match.PNReferenceId },
+    // });
 
-    if (alreadyExists) {
-      return res.json({
-        success: true,
-        message: "Payment was already synced previously.",
-        record: alreadyExists,
-      });
-    }
+    // if (alreadyExists) {
+    //   return res.json({
+    //     success: true,
+    //     message: "Payment was already synced previously.",
+    //     record: alreadyExists,
+    //   });
+    // }
 
     // 6. Sync to Prisma
     const syncedRecord = await prisma.trackingPayment.create({
