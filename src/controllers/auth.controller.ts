@@ -3998,3 +3998,41 @@ export const getServiceDemographics = async (req: Request, res: Response) => {
     return res.status(500).json({ message: error.message });
   }
 };
+
+export const createBookingRequest = async (req: Request, res: Response) => {
+  try {
+    const { name, phone, email, dob, artist, service, description } = req.body;
+
+    // Basic Validation
+    if (!name || !email || !phone || !dob) {
+      return res.status(400).json({
+        message: "Required fields are missing: name, phone, email, or dob.",
+      });
+    }
+
+    // 1. Create the record in the database
+    const newRequest = await prisma.formBookingRequest.create({
+      data: {
+        name,
+        phone,
+        email,
+        dob,
+        artist,
+        service,
+        description,
+      },
+    });
+
+    // 2. Return the created object
+    return res.status(201).json({
+      message: "Booking request submitted successfully.",
+      data: newRequest,
+    });
+  } catch (error: any) {
+    console.error("Error creating booking request:", error);
+    return res.status(500).json({
+      message: "Internal server error. Failed to create booking request.",
+      error: error.message,
+    });
+  }
+};

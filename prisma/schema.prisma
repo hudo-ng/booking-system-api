@@ -445,3 +445,17 @@ enum PaymentStatus {
   REFUNDED
   VOIDED
 }
+
+model FormBookingRequest {
+  id          String   @id @default(uuid())
+  name        String
+  phone       String
+  email       String
+  dob         String 
+  artist      String   
+  service     String  
+  description String   @db.Text
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

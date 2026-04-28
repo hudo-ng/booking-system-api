@@ -22,6 +22,7 @@ import {
   getServiceDemographics,
   sendZoePaystub,
   verifyAdminPaymentRequest,
+  createBookingRequest,
 } from "../controllers/auth.controller";
 import { getAllMiniPhoto } from "../controllers/management.controller";
 
@@ -43,6 +44,7 @@ router.post("/verification/validate", validateVerification);
 
 router.post("/change-password", changePassword);
 router.post("/form", createSignInCustomer);
+router.post("/hyperinkers/form", createBookingRequest);
 router.put("/form", updateSignInCustomerByDocumentId);
 // Script
 router.get("/script/tattoo", fixMissingTattooSpending);
