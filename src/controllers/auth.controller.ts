@@ -1126,6 +1126,8 @@ export const verifyAdminPaymentRequest = async (
 
     // 7. Update the external Form/Booking system
     // 7. External Patch (Update the Tattoo/Piercing Form)
+    console.log("extra_data: ", extra_data);
+    console.log("item_service: ", item_service);
     if (extra_data?.id && item_service) {
       try {
         await axios.patch(
