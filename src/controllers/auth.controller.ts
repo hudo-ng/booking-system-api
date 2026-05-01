@@ -4000,21 +4000,21 @@ export const getServiceDemographics = async (req: Request, res: Response) => {
 };
 
 export const createBookingRequest = async (req: Request, res: Response) => {
+  // LOG 1: See exactly what WordPress sent
+  console.log("--- New Incoming Booking Request ---");
+  console.log("Payload:", JSON.stringify(req.body, null, 2));
+
   try {
     let { name, phone, email, dob, artist, service, description } = req.body;
 
     // Basic Validation
     if (!name || !email || !phone || !dob) {
+      console.log("Validation Failed: Missing required fields");
       return res.status(400).json({
         message: "Required fields are missing: name, phone, email, or dob.",
       });
     }
 
-    /**
-     * Logic: Check if artist/service is an array.
-     * If yes: use 1st value if length > 0, otherwise "".
-     * If no: use the value as provided.
-     */
     const getFirstValue = (val: any) => {
       if (Array.isArray(val)) {
         return val.length > 0 ? String(val[0]) : "";
@@ -4038,15 +4038,17 @@ export const createBookingRequest = async (req: Request, res: Response) => {
       },
     });
 
-    // 2. Return the created object
+    console.log("Database Success: Record created with ID:", newRequest.id);
+
     return res.status(201).json({
       message: "Booking request submitted successfully.",
       data: newRequest,
     });
   } catch (error: any) {
-    console.error("Error creating booking request:", error);
+    // LOG 2: See the exact Prisma or Database error
+    console.error("DATABASE ERROR:", error);
     return res.status(500).json({
-      message: "Internal server error. Failed to create booking request.",
+      message: "Internal server error.",
       error: error.message,
     });
   }
