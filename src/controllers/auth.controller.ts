@@ -4001,7 +4001,7 @@ export const getServiceDemographics = async (req: Request, res: Response) => {
 
 export const createBookingRequest = async (req: Request, res: Response) => {
   try {
-    const { name, phone, email, dob, artist, service, description } = req.body;
+    let { name, phone, email, dob, artist, service, description } = req.body;
 
     // Basic Validation
     if (!name || !email || !phone || !dob) {
@@ -4010,6 +4010,21 @@ export const createBookingRequest = async (req: Request, res: Response) => {
       });
     }
 
+    /**
+     * Logic: Check if artist/service is an array.
+     * If yes: use 1st value if length > 0, otherwise "".
+     * If no: use the value as provided.
+     */
+    const getFirstValue = (val: any) => {
+      if (Array.isArray(val)) {
+        return val.length > 0 ? String(val[0]) : "";
+      }
+      return val ? String(val) : "";
+    };
+
+    const finalArtist = getFirstValue(artist);
+    const finalService = getFirstValue(service);
+
     // 1. Create the record in the database
     const newRequest = await prisma.formBookingRequest.create({
       data: {
@@ -4017,9 +4032,9 @@ export const createBookingRequest = async (req: Request, res: Response) => {
         phone,
         email,
         dob,
-        artist,
-        service,
-        description,
+        artist: finalArtist,
+        service: finalService,
+        description: description || "",
       },
     });
 
