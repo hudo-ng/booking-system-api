@@ -84,7 +84,7 @@ export const fetchReviews = async (
 
   const response = await axios.get<GoogleReviewResponse>(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
-    params: { pageSize: 50 },
+    params: { pageSize: 25 },
   });
 
   return response.data.reviews || [];

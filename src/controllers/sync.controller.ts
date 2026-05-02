@@ -130,12 +130,9 @@ export const syncAllArtistReviews1 = async (ownerId: "0ca37281-3084-4c3b-b9b2-fc
   try {
     const token = await getFreshAccessToken(ownerId);
     const keys = await prisma.googleReviewKey.findMany();
-    console.log(`🔑 Found ${keys.length} artist keys to sync.`);
 
     for (const key of keys) {
-      console.log(`📡 Fetching reviews for: ${key.displayName || key.locationId}`);
       const googleReviews = await fetchReviews(token, key.locationId);
-      console.log(`✅ Received ${googleReviews.length} reviews from Google.`);
 
       for (const gr of googleReviews) {
         const reviewDate = new Date(gr.createTime);
