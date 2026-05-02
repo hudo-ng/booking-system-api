@@ -125,12 +125,17 @@ const postGoogleReply = async (
 };
 
 export const syncAllArtistReviews1 = async (ownerId: "0ca37281-3084-4c3b-b9b2-fc0185c28108") => {
+  console.log(`🚀 Starting sync for Owner: ${ownerId}`);
+  
   try {
     const token = await getFreshAccessToken(ownerId);
     const keys = await prisma.googleReviewKey.findMany();
+    console.log(`🔑 Found ${keys.length} artist keys to sync.`);
 
     for (const key of keys) {
+      console.log(`📡 Fetching reviews for: ${key.displayName || key.locationId}`);
       const googleReviews = await fetchReviews(token, key.locationId);
+      console.log(`✅ Received ${googleReviews.length} reviews from Google.`);
 
       for (const gr of googleReviews) {
         const reviewDate = new Date(gr.createTime);
@@ -160,7 +165,7 @@ export const syncAllArtistReviews1 = async (ownerId: "0ca37281-3084-4c3b-b9b2-fc
           },
         });
 
-        if (!isRecent) continue; 
+        if (!isRecent) continue;
 
         const needsReply = !gr.reviewReply?.comment && !savedReview.replyText && !savedReview.replyDraft;
         
@@ -172,28 +177,22 @@ export const syncAllArtistReviews1 = async (ownerId: "0ca37281-3084-4c3b-b9b2-fc
           if (rating === 5 && !hasComment) {
             const msg = "Thank you so much for the 5-star rating! We appreciate the support.";
             await postGoogleReply(token, fullReviewPath, msg);
-            await prisma.review.update({
-              where: { id: savedReview.id },
-              data: { replyText: msg }
-            });
+            await prisma.review.update({ where: { id: savedReview.id }, data: { replyText: msg } });
           }
+
           else if (rating >= 4 && hasComment) {
+            console.log(`🧠 AI Reply for: ${gr.reviewer.displayName}`);
             const aiReply = await generateAIReply(gr.reviewer.displayName, rating, gr.comment!);
             if (aiReply) {
               await postGoogleReply(token, fullReviewPath, aiReply);
-              await prisma.review.update({
-                where: { id: savedReview.id },
-                data: { replyText: aiReply }
-              });
+              await prisma.review.update({ where: { id: savedReview.id }, data: { replyText: aiReply } });
             }
           }
           else if (rating <= 3) {
+            console.log(`📝 Saving 1-3 star draft for: ${gr.reviewer.displayName}`);
             const aiDraft = await generateAIReply(gr.reviewer.displayName, rating, gr.comment || "");
             if (aiDraft) {
-              await prisma.review.update({
-                where: { id: savedReview.id },
-                data: { replyDraft: aiDraft }
-              });
+              await prisma.review.update({ where: { id: savedReview.id }, data: { replyDraft: aiDraft } });
             }
           }
         }
@@ -205,14 +204,21 @@ export const syncAllArtistReviews1 = async (ownerId: "0ca37281-3084-4c3b-b9b2-fc
       include: { googleReviewKey: true }
     });
 
-    for (const rev of approved) {
-      const artistToken = await getFreshAccessToken(ownerId);
-      const path = `${rev.googleReviewKey.locationId}/reviews/${rev.googleReviewId}`;
-      await postGoogleReply(artistToken, path, rev.replyDraft!);
-      await prisma.review.update({
-        where: { id: rev.id },
-        data: { replyText: rev.replyDraft, isReadytoReply: false }
-      });
+    if (approved.length > 0) {
+      console.log(`📨 Sending ${approved.length} approved replies to Google...`);
+      for (const rev of approved) {
+        try {
+          const artistToken = await getFreshAccessToken(ownerId);
+          const path = `${rev.googleReviewKey.locationId}/reviews/${rev.googleReviewId}`;
+          await postGoogleReply(artistToken, path, rev.replyDraft!);
+          await prisma.review.update({
+            where: { id: rev.id },
+            data: { replyText: rev.replyDraft, isReadytoReply: false }
+          });
+        } catch (err) {
+          console.error(`❌ Failed to send approved draft for ${rev.reviewerName}`);
+        }
+      }
     }
 
     console.log(`[${new Date().toISOString()}] Sync & Queue Process Completed.`);
