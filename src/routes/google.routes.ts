@@ -5,6 +5,7 @@ import {
   linkArtistKey,
   getGoogleReviewKeys,
   deleteGoogleReviewKey,
+  updateReviewDraft
 } from "../controllers/review.controller";
 import { PrismaClient } from "@prisma/client";
 
@@ -15,6 +16,7 @@ router.get("/dashboard", getDashboardData);
 router.get("/keys", getGoogleReviewKeys);
 // router.get("/sync", syncGoogleReviews);
 router.post("/artist-key", linkArtistKey);
+router.patch("/review/:reviewId", updateReviewDraft);
 router.delete("/keys/:id", deleteGoogleReviewKey);
 
 router.get("/auth/google/connect", (req, res) => {

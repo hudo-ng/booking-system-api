@@ -93,18 +93,37 @@ export const deleteGoogleReviewKey = async (req: Request, res: Response) => {
   }
 };
 
+export const updateReviewDraft = async (req: Request, res: Response) => {
+  const { reviewId } = req.params;
+  const { replyDraft } = req.body;
 
-// export const syncGoogleReviews = async (req: Request, res: Response) => {
-//   try {
-//     const owner = await prisma.user.findFirst({ where: { isOwner: true } });
-    
-//     if (!owner) return res.status(404).json({ error: "Owner not found" });
-//     await syncAllArtistReviews(owner.id);
+  try {
+    const review = await prisma.review.findUnique({
+      where: { id: reviewId },
+    });
 
-//     return res.json({ message: "Sync successful" });
-//   } catch (error) {
-//     return res.status(500).json({ error: "Sync failed" });
-//   }
-// };
+    if (!review) {
+      return res.status(404).json({ message: "Review not found" });
+    }
+
+    const updatedReview = await prisma.review.update({
+      where: { id: reviewId },
+      data: {
+        replyDraft: replyDraft,
+        isReadytoReply: true,
+      },
+    });
+
+    return res.status(200).json({
+      message: "Draft saved and queued for sync",
+      review: updatedReview,
+    });
+  } catch (error) {
+    console.error("Error updating review draft:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
 
 

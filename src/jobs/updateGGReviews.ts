@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { syncAllArtistReviews } from "../controllers/sync.controller";
+import { syncAllArtistReviews, syncAllArtistReviews1 } from "../controllers/sync.controller";
 
 const prisma = new PrismaClient();
 
@@ -18,7 +18,7 @@ export async function testSync() {
 
   console.log(`🚀 Starting sync for Owner: ${owner.email}`);
   try {
-    await syncAllArtistReviews("0ca37281-3084-4c3b-b9b2-fc0185c28108");
+    await syncAllArtistReviews1("0ca37281-3084-4c3b-b9b2-fc0185c28108");
 
     const count = await prisma.review.count();
     console.log(`✅ Success! Total reviews now in local DB: ${count}`);

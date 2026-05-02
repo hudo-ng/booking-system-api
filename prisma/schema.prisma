@@ -381,9 +381,10 @@ model Review {
   comment           String?
   createTime        DateTime
   replyText         String?
-  replyDraft        String?
   googleReviewKeyId String
   userId            String?
+  replyDraft        String?
+  isReadytoReply       Boolean         @default(false) 
   googleReviewKey   GoogleReviewKey @relation(fields: [googleReviewKeyId], references: [id])
   user              User?           @relation(fields: [userId], references: [id])
 
@@ -408,6 +409,19 @@ model GoogleCredential {
   expiryDate   BigInt
   updatedAt    DateTime @default(now())
   user         User     @relation(fields: [userId], references: [id])
+}
+
+model FormBookingRequest {
+  id          String   @id @default(uuid())
+  name        String
+  phone       String
+  email       String
+  dob         String
+  artist      String
+  service     String
+  description String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 enum AppointmentStatus {
@@ -444,18 +458,4 @@ enum PaymentStatus {
   PAID
   REFUNDED
   VOIDED
-}
-
-model FormBookingRequest {
-  id          String   @id @default(uuid())
-  name        String
-  phone       String
-  email       String
-  dob         String 
-  artist      String   
-  service     String  
-  description String   @db.Text
-  
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
 }
