@@ -2442,6 +2442,7 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
     const commPercent = commRate * 100;
 
     const now = new Date();
+    now.setDate(now.getDate() - 2);
     const dayOfWeek = now.getDay();
     const toDate = new Date(now);
     toDate.setDate(now.getDate() - dayOfWeek - 1);
@@ -2501,12 +2502,13 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
             if (i?.paid_by?.includes("card")) {
               dayCard += recordCard;
             }
+            if (i?.paid_by?.includes("cash")) {
+              dayCash += recordCash;
+            }
             if (recordCash + recordCard > price + pJewelry + pSaline) {
               // Destructure parentSignature out, and collect the rest into 'logData'
               const { signature, parentSignature, ...logData } = i;
               console.warn("Mismatch detected for record:", logData);
-            } else {
-              dayCash += recordCash;
             }
           });
 
@@ -2761,7 +2763,6 @@ export const generateYenPaystubData = async (req: Request, res: Response) => {
     const isHourlyPaid = false; // Set to true if Yen is hourly
     const hourlyRate = 35.0;
     const commRate = 0.5; // 50% commission
-    const commPercent = commRate * 100;
 
     const fromDate = dayjs(start_date).toDate();
     const toDate = dayjs(end_date).toDate();
@@ -2824,7 +2825,9 @@ export const generateYenPaystubData = async (req: Request, res: Response) => {
             if (i?.paid_by?.includes("card")) {
               dayCard += recordCard;
             }
-            dayCash += recordCash;
+            if (i?.paid_by?.includes("cash")) {
+              dayCash += recordCash;
+            }
           });
 
           // Hour Calculation based on signedDate timestamps
@@ -2938,6 +2941,7 @@ export const sendAllArtistPaystubs = async (req: Request, res: Response) => {
     const bookedIds = bookedAppointments.map((a) => a.id);
 
     const now = new Date();
+    now.setDate(now.getDate() - 2);
     const formatDate = (date: Date) => dayjs(date).format("MMM DD, YYYY");
 
     // Date Range Logic
@@ -3402,9 +3406,11 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
     const studioFeeAmount = 65.0;
 
     const now = new Date();
+    now.setDate(now.getDate() - 2);
     // now.setDate(now.getDate() - 5);
     const dayOfWeek = now.getDay();
     const toDate = new Date(now);
+
     toDate.setDate(now.getDate() - dayOfWeek - 1);
     const fromDate = new Date(toDate);
     fromDate.setDate(toDate.getDate() - 13);
