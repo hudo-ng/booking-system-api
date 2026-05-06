@@ -12,6 +12,7 @@ import {
   getAllNotification,
   getAllNotificationByAppointmentId,
   getCleanSchedules,
+  getListOfBookedAppointmentsByFormId,
   getSignInCustomers,
   releaseSms,
   requestTattooArtistPaymentByUserId,
@@ -41,6 +42,7 @@ router.post("/mini-photo", createMiniPhoto);
 router.get("/mini-photo", getAllMiniPhoto);
 router.put("/mini-photo", updateMiniPhoto);
 router.get("/sign-in-customers", getSignInCustomers);
+router.get("/booked-appointments", getListOfBookedAppointmentsByFormId);
 router.post("/tattoo-artist", requestTattooArtistPaymentByUserId);
 
 router.post("/zoe-artist", generateZoePaystubData);

@@ -628,7 +628,6 @@ export const updateMiniPhoto = async (req: Request, res: Response) => {
 export const getSignInCustomers = async (req: Request, res: Response) => {
   try {
     const { userId } = (req as any).user as { userId?: string };
-    // Get dates from query params
     const { start_date, end_date } = req.query;
 
     if (!userId) {
@@ -641,12 +640,11 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
     });
 
     if (!currentUser || !currentUser.isOwner) {
-      return res.json({ success: true, data: [] });
+      return res.json({ success: true, data: [], array_of_form_bookings: [] });
     }
 
-    // Build the filter object
+    // 1. Build date filter for both queries
     let whereClause: any = {};
-
     if (start_date && end_date) {
       whereClause.createdAt = {
         gte: new Date(start_date as string),
@@ -654,19 +652,108 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
       };
     }
 
+    // 2. Fetch SignInCustomers
     const customers = await prisma.signInCustomer.findMany({
       where: whereClause,
+      orderBy: { createdAt: "desc" },
+    });
+
+    // 3. Fetch Form Bookings
+    const formBookings = await prisma.formBookingRequest.findMany({
+      where: whereClause,
+      orderBy: { createdAt: "desc" },
+    });
+
+    // 4. Map through form bookings to check for subsequent appointments
+    const array_of_form_bookings = await Promise.all(
+      formBookings.map(async (booking) => {
+        // Check if an appointment exists for this email created AFTER the booking
+        const matchingAppointment = await prisma.appointment.findFirst({
+          where: {
+            email: booking.email,
+            createdAt: {
+              gt: booking.createdAt, // Check for appointments after this booking
+            },
+          },
+          select: { id: true },
+        });
+
+        return {
+          ...booking,
+          hasAppointment: !!matchingAppointment, // Extra key: true if appointment exists
+        };
+      }),
+    );
+
+    return res.json({
+      success: true,
+      data: customers,
+      array_of_form_bookings,
+    });
+  } catch (error: any) {
+    console.error("Get SignInCustomers error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export const getListOfBookedAppointmentsByFormId = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const { userId } = (req as any).user as { userId?: string };
+    const { id } = req.query as { id?: string };
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (!id) {
+      return res
+        .status(400)
+        .json({ error: "Booking ID is required (?id=...)" });
+    }
+
+    const booking = await prisma.formBookingRequest.findUnique({
+      where: { id: id },
+    });
+
+    if (!booking) {
+      return res.status(404).json({ error: "Form booking request not found" });
+    }
+
+    const appointments = await prisma.appointment.findMany({
+      where: {
+        email: booking.email,
+        createdAt: {
+          gt: booking.createdAt,
+        },
+      },
       orderBy: {
         createdAt: "desc",
+      },
+      include: {
+        employee: {
+          select: { id: true, name: true, colour: true },
+        },
+        // ADDED: Include the name of the staff member who assigned/created it
+        assignedBy: {
+          select: { name: true },
+        },
       },
     });
 
     return res.json({
       success: true,
-      data: customers,
+      booking_info: {
+        name: booking.name,
+        email: booking.email,
+        requested_at: booking.createdAt,
+      },
+      data: appointments,
     });
   } catch (error: any) {
-    console.error("Get SignInCustomers error:", error);
+    console.error("Get Booked Appointments error:", error);
     return res.status(500).json({ error: "Internal server error" });
   }
 };
