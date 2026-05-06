@@ -3733,6 +3733,9 @@ export const generateNicolePaystubData = async (
               i?.paid_by === undefined ||
               i.paid_by?.toLowerCase().includes("cash")
             ) {
+              if (rCash === 0) {
+                rCash = p + pJ + pS;
+              }
               dayCash += rCash;
             }
           } else if (artist === "yen") {
