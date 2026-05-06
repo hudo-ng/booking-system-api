@@ -3479,8 +3479,12 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
           let rCash = parseFloat(i.cash) || 0,
             rCard = parseFloat(i.card) || 0;
           if (rCash + rCard === 0) rCash = p + pJ + pS + pT;
-          if (i.paid_by?.toLowerCase().includes("card")) card += rCard;
-          cash += rCash;
+          if (i.paid_by?.toLowerCase().includes("card")) {
+            card += rCard;
+          }
+          if (i.paid_by?.toLowerCase().includes("card")) {
+            cash += rCash;
+          }
         });
 
         if (totalPiercingForFee > 0) studioFee = studioFeeAmount;
@@ -3716,6 +3720,21 @@ export const generateNicolePaystubData = async (
             jDirect += pJ * 0.6; // 60% Jewelry
             sDirect += pS * 1.0; // 100% Saline
             tips += pT; // 100% Tips
+            // Cash/Card Tracking
+            let rCash = parseFloat(i.cash) || 0;
+            let rCard = parseFloat(i.card) || 0;
+            if (rCash + rCard === 0) rCash = p + pJ + pS + pT;
+
+            if (i.paid_by?.toLowerCase().includes("card")) {
+              dayCard += rCard;
+            }
+            if (
+              !i?.paid_by ||
+              i?.paid_by === undefined ||
+              i.paid_by?.toLowerCase().includes("cash")
+            ) {
+              dayCash += rCash;
+            }
           } else if (artist === "yen") {
             jYen += pJ * 0.1; // 10% Yen's Jewelry
             sYen += pS * 0.5; // 50% Yen's Saline
@@ -3723,14 +3742,6 @@ export const generateNicolePaystubData = async (
             jZoe += pJ * 0.5; // 50% Zoe's Jewelry
             sZoe += pS * 0.9; // 90% Zoe's Saline
           }
-
-          // Cash/Card Tracking
-          let rCash = parseFloat(i.cash) || 0;
-          let rCard = parseFloat(i.card) || 0;
-          if (rCash + rCard === 0) rCash = p + pJ + pS + pT;
-
-          if (i.paid_by?.toLowerCase().includes("card")) dayCard += rCard;
-          dayCash += rCash;
         });
 
         // Apply Studio Fee only if there was piercing activity
