@@ -2825,7 +2825,14 @@ export const generateYenPaystubData = async (req: Request, res: Response) => {
             if (i?.paid_by?.includes("card")) {
               dayCard += recordCard;
             }
-            if (i?.paid_by?.includes("cash")) {
+            if (
+              !i?.paid_by ||
+              i?.paid_by === undefined ||
+              i.paid_by?.toLowerCase().includes("cash")
+            ) {
+              if (recordCash === 0) {
+                recordCash = pJewelry + pSaline + price;
+              }
               dayCash += recordCash;
             }
           });
