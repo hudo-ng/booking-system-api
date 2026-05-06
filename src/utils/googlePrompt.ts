@@ -5,7 +5,7 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 export const generateAIReply = async (
   reviewerName: string,
   starRating: number,
-  comment: string
+  comment: string,
 ) => {
   const prompt = `
     You are the manager of a professional tattoo and piercing studio. 
@@ -18,14 +18,13 @@ export const generateAIReply = async (
     TONE GUIDELINES:
     - 5 Stars: Enthusiastic and friendly.
     - 4 Stars: Warm and appreciative.
-    - 1-3 Stars: Professional, calm, and apologetic. Ask them to contact the shop privately.
 
     RULES: Max 2 sentences. No emojis. Mention specific details if provided.
   `;
 
   try {
     const result = await ai.models.generateContent({
-      model: "gemini-2.5-flash", 
+      model: "gemini-2.5-flash",
       contents: [{ role: "user", parts: [{ text: prompt }] }],
     });
 
@@ -41,6 +40,37 @@ export const generateAIReply = async (
       });
       return fallback.text?.trim() ?? null;
     }
+    return null;
+  }
+};
+
+export const generateBadReviewOptions = async (
+  reviewerName: string,
+  starRating: number,
+  comment: string,
+) => {
+  const prompt = `
+    You are a professional studio manager. Generate TWO response options for a ${starRating}-star review from ${reviewerName}: "${comment}".
+    Return ONLY a JSON object: {"option1": "...", "option2": "..."}
+  `;
+
+  try {
+    const result = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+    });
+
+    const responseText = result.text?.trim() ?? "";
+
+    const cleanedJson = responseText.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(cleanedJson);
+
+    return {
+      option1: parsed.option1 ?? null,
+      option2: parsed.option2 ?? null,
+    };
+  } catch (error: any) {
+    console.error("Gemini AI Error:", error.message);
     return null;
   }
 };

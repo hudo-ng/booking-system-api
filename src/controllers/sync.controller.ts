@@ -4,7 +4,10 @@ import {
   getFreshAccessToken,
   parseRating,
 } from "../utils/googleBusiness";
-import { generateAIReply } from "../utils/googlePrompt";
+import {
+  generateAIReply,
+  generateBadReviewOptions,
+} from "../utils/googlePrompt";
 import { PrismaClient } from "@prisma/client";
 import axios from "axios";
 
@@ -124,9 +127,11 @@ const postGoogleReply = async (
   }
 };
 
-export const syncAllArtistReviews1 = async (ownerId: "0ca37281-3084-4c3b-b9b2-fc0185c28108") => {
+export const syncAllArtistReviews1 = async (
+  ownerId: "0ca37281-3084-4c3b-b9b2-fc0185c28108",
+) => {
   console.log(`🚀 Starting sync for Owner: ${ownerId}`);
-  
+
   try {
     const token = await getFreshAccessToken(ownerId);
     const keys = await prisma.googleReviewKey.findMany();
@@ -164,32 +169,55 @@ export const syncAllArtistReviews1 = async (ownerId: "0ca37281-3084-4c3b-b9b2-fc
 
         if (!isRecent) continue;
 
-        const needsReply = !gr.reviewReply?.comment && !savedReview.replyText && !savedReview.replyDraft;
-        
+        const needsReply =
+          !gr.reviewReply?.comment &&
+          !savedReview.replyText &&
+          !savedReview.replyDraft;
+
         if (needsReply) {
           const rating = parseRating(gr.starRating);
           const hasComment = gr.comment && gr.comment.trim() !== "";
           const fullReviewPath = `${key.locationId}/reviews/${gr.reviewId}`;
 
           if (rating === 5 && !hasComment) {
-            const msg = "Thank you so much for the 5-star rating! We appreciate the support.";
+            const msg =
+              "Thank you so much for the 5-star rating! We appreciate the support.";
             await postGoogleReply(token, fullReviewPath, msg);
-            await prisma.review.update({ where: { id: savedReview.id }, data: { replyText: msg } });
-          }
-
-          else if (rating >= 4 && hasComment) {
+            await prisma.review.update({
+              where: { id: savedReview.id },
+              data: { replyText: msg },
+            });
+          } else if (rating >= 4 && hasComment) {
             console.log(`🧠 AI Reply for: ${gr.reviewer.displayName}`);
-            const aiReply = await generateAIReply(gr.reviewer.displayName, rating, gr.comment!);
+            const aiReply = await generateAIReply(
+              gr.reviewer.displayName,
+              rating,
+              gr.comment!,
+            );
             if (aiReply) {
               await postGoogleReply(token, fullReviewPath, aiReply);
-              await prisma.review.update({ where: { id: savedReview.id }, data: { replyText: aiReply } });
+              await prisma.review.update({
+                where: { id: savedReview.id },
+                data: { replyText: aiReply },
+              });
             }
-          }
-          else if (rating <= 3) {
-            console.log(`📝 Saving 1-3 star draft for: ${gr.reviewer.displayName}`);
-            const aiDraft = await generateAIReply(gr.reviewer.displayName, rating, gr.comment || "");
+          } else if (rating <= 3) {
+            console.log(
+              `📝 Saving 1-3 star draft for: ${gr.reviewer.displayName}`,
+            );
+            const aiDraft = await generateBadReviewOptions(
+              gr.reviewer.displayName,
+              rating,
+              gr.comment || "",
+            );
             if (aiDraft) {
-              await prisma.review.update({ where: { id: savedReview.id }, data: { replyDraft: aiDraft } });
+              await prisma.review.update({
+                where: { id: savedReview.id },
+                data: {
+                  replyDraft: aiDraft.option1,
+                  replyDraft1: aiDraft.option2,
+                },
+              });
             }
           }
         }
@@ -198,11 +226,13 @@ export const syncAllArtistReviews1 = async (ownerId: "0ca37281-3084-4c3b-b9b2-fc
 
     const approved = await prisma.review.findMany({
       where: { isReadytoReply: true, replyText: null },
-      include: { googleReviewKey: true }
+      include: { googleReviewKey: true },
     });
 
     if (approved.length > 0) {
-      console.log(`📨 Sending ${approved.length} approved replies to Google...`);
+      console.log(
+        `📨 Sending ${approved.length} approved replies to Google...`,
+      );
       for (const rev of approved) {
         try {
           const artistToken = await getFreshAccessToken(ownerId);
@@ -210,15 +240,19 @@ export const syncAllArtistReviews1 = async (ownerId: "0ca37281-3084-4c3b-b9b2-fc
           await postGoogleReply(artistToken, path, rev.replyDraft!);
           await prisma.review.update({
             where: { id: rev.id },
-            data: { replyText: rev.replyDraft, isReadytoReply: false }
+            data: { replyText: rev.replyDraft, isReadytoReply: false },
           });
         } catch (err) {
-          console.error(`❌ Failed to send approved draft for ${rev.reviewerName}`);
+          console.error(
+            `❌ Failed to send approved draft for ${rev.reviewerName}`,
+          );
         }
       }
     }
 
-    console.log(`[${new Date().toISOString()}] Sync & Queue Process Completed.`);
+    console.log(
+      `[${new Date().toISOString()}] Sync & Queue Process Completed.`,
+    );
   } catch (error) {
     console.error("Sync failed:", error);
   }

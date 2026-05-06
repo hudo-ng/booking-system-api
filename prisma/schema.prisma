@@ -384,7 +384,8 @@ model Review {
   googleReviewKeyId String
   userId            String?
   replyDraft        String?
-  isReadytoReply       Boolean         @default(false) 
+  replyDraft1 String?
+  isReadytoReply    Boolean         @default(false)
   googleReviewKey   GoogleReviewKey @relation(fields: [googleReviewKeyId], references: [id])
   user              User?           @relation(fields: [userId], references: [id])
 
