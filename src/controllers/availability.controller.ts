@@ -67,7 +67,7 @@ export const getAvailability = async (req: Request, res: Response) => {
     aStart: dayjs.Dayjs,
     aEnd: dayjs.Dayjs,
     bStart: dayjs.Dayjs,
-    bEnd: dayjs.Dayjs
+    bEnd: dayjs.Dayjs,
   ) {
     return aStart.isBefore(bEnd) && bStart.isBefore(aEnd);
   }
@@ -184,7 +184,7 @@ export const getMonthlyAvailability = async (req: Request, res: Response) => {
     const dayEndUtc = day.endOf("day").utc().toDate();
 
     const isOff = timeOffs.some(
-      (t) => t.date >= dayStartUtc && t.date < dayEndUtc
+      (t) => t.date >= dayStartUtc && t.date < dayEndUtc,
     );
 
     if (isOff) {
@@ -193,9 +193,7 @@ export const getMonthlyAvailability = async (req: Request, res: Response) => {
       continue;
     }
 
-    const hoursForDay = workingHours.filter(
-      (w) => w.weekday === weekday
-    );
+    const hoursForDay = workingHours.filter((w) => w.weekday === weekday);
 
     if (!hoursForDay.length) {
       results.push({ date: dateStr, totalSlots: 0, availableSlots: 0 });
@@ -204,7 +202,11 @@ export const getMonthlyAvailability = async (req: Request, res: Response) => {
     }
 
     const apptsForDay = appointments.filter(
-      (a) => a.startTime && a.endTime && a.startTime < dayEndUtc && a.endTime > dayStartUtc
+      (a) =>
+        a.startTime &&
+        a.endTime &&
+        a.startTime < dayEndUtc &&
+        a.endTime > dayStartUtc,
     );
 
     let totalSlots = 0;
@@ -213,14 +215,8 @@ export const getMonthlyAvailability = async (req: Request, res: Response) => {
     for (const interval of hoursForDay) {
       if (!interval.startTime || !interval.endTime) continue;
 
-      const baseStart = dayjs.tz(
-        `${dateStr} ${interval.startTime}`,
-        ZONE
-      );
-      const baseEnd = dayjs.tz(
-        `${dateStr} ${interval.endTime}`,
-        ZONE
-      );
+      const baseStart = dayjs.tz(`${dateStr} ${interval.startTime}`, ZONE);
+      const baseEnd = dayjs.tz(`${dateStr} ${interval.endTime}`, ZONE);
 
       if (interval.type === "custom") {
         totalSlots++;
@@ -229,8 +225,7 @@ export const getMonthlyAvailability = async (req: Request, res: Response) => {
         const e = baseEnd.utc();
 
         const conflict = apptsForDay.some(
-          (a) => s.isBefore(dayjs(a.endTime)) &&
-                 dayjs(a.startTime).isBefore(e)
+          (a) => s.isBefore(dayjs(a.endTime)) && dayjs(a.startTime).isBefore(e),
         );
 
         if (!conflict && s.isAfter(dayjs.utc())) {
@@ -249,8 +244,7 @@ export const getMonthlyAvailability = async (req: Request, res: Response) => {
         const e = cur.add(step, "minute").utc();
 
         const conflict = apptsForDay.some(
-          (a) => s.isBefore(dayjs(a.endTime)) &&
-                 dayjs(a.startTime).isBefore(e)
+          (a) => s.isBefore(dayjs(a.endTime)) && dayjs(a.startTime).isBefore(e),
         );
 
         if (!conflict && s.isAfter(dayjs.utc())) {
@@ -266,4 +260,124 @@ export const getMonthlyAvailability = async (req: Request, res: Response) => {
   }
 
   res.json(results);
+};
+
+export const getShopAvailabilityByDay = async (req: Request, res: Response) => {
+  const { date } = req.query as { date: string };
+  const target = dayjs.tz(date, ZONE);
+
+  if (!target.isValid()) {
+    return res.status(400).json({ message: "Invalid date" });
+  }
+
+  const startOfDayUtc = target.startOf("day").utc().toDate();
+  const endOfDayUtc = target.endOf("day").utc().toDate();
+  const weekday = target.day();
+  const nowUtc = dayjs.utc();
+
+  try {
+    const employees = await prisma.user.findMany({
+      where: { role: "employee" },
+      select: { id: true, name: true },
+    });
+
+    const employeeIds = employees.map((e) => e.id);
+
+    const [allTimeOffs, allWorkingHours, allAppts] = await Promise.all([
+      prisma.timeOff.findMany({
+        where: {
+          employeeId: { in: employeeIds },
+          date: { gte: startOfDayUtc, lt: endOfDayUtc },
+          status: "APPROVED",
+        },
+      }),
+      prisma.workingHours.findMany({
+        where: { employeeId: { in: employeeIds }, weekday },
+      }),
+      prisma.appointment.findMany({
+        where: {
+          employeeId: { in: employeeIds },
+          status: "accepted",
+          startTime: { lt: endOfDayUtc },
+          endTime: { gt: startOfDayUtc },
+        },
+      }),
+    ]);
+
+    const results = [];
+
+    for (const employee of employees) {
+      const hours = allWorkingHours.filter((h) => h.employeeId === employee.id);
+      const appts = allAppts.filter((a) => a.employeeId === employee.id);
+
+      const occupied = new Set<string>();
+      for (const a of appts) {
+        let cur = dayjs(a.startTime).utc();
+        const end = dayjs(a.endTime).utc();
+        while (cur.isBefore(end)) {
+          occupied.add(cur.toISOString());
+          cur = cur.add(1, "hour");
+        }
+      }
+
+      const availableSlots: { start: string; end: string }[] = [];
+
+      for (const interval of hours) {
+        if (!interval.startTime || !interval.endTime) continue;
+
+        const baseStart = dayjs.tz(`${date} ${interval.startTime}`, ZONE);
+        const baseEnd = dayjs.tz(`${date} ${interval.endTime}`, ZONE);
+
+        if (interval.type === "custom") {
+          const sUtc = baseStart.utc();
+          const eUtc = baseEnd.utc();
+          const hasConflict = appts.some(
+            (a) =>
+              sUtc.isBefore(dayjs(a.endTime)) &&
+              dayjs(a.startTime).isBefore(eUtc),
+          );
+
+          if (sUtc.isAfter(nowUtc) && !hasConflict) {
+            availableSlots.push({
+              start: sUtc.toISOString(),
+              end: eUtc.toISOString(),
+            });
+          }
+        } else {
+          const step = interval.intervalLength || 60;
+          let curLocal = baseStart.clone();
+
+          while (curLocal.isBefore(baseEnd)) {
+            const slotStartLocal = curLocal;
+            const slotEndLocal = curLocal.add(step, "minute");
+            if (slotEndLocal.isAfter(baseEnd)) break;
+
+            const sUtc = slotStartLocal.utc();
+            const eUtc = slotEndLocal.utc();
+            const isPast = !sUtc.isAfter(nowUtc);
+            const isOccupied = occupied.has(sUtc.toISOString());
+
+            if (!isPast && !isOccupied) {
+              availableSlots.push({
+                start: sUtc.toISOString(),
+                end: eUtc.toISOString(),
+              });
+            }
+            curLocal = curLocal.add(step, "minute");
+          }
+        }
+      }
+
+      results.push({
+        id: employee.id,
+        name: employee.name,
+        slots: availableSlots,
+      });
+    }
+
+    return res.json(results);
+  } catch (error) {
+    console.error("Error fetching shop availability:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
 };
