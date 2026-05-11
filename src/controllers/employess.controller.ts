@@ -17,6 +17,7 @@ export const listEmployees = async (_req: Request, res: Response) => {
       isOwner: true,
       isAdmin: true,
       email: true,
+      is_piercing: true,
     },
   });
   res.json(employees);

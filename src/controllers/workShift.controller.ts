@@ -794,7 +794,22 @@ export const getPaymentReport = async (req: Request, res: Response) => {
     if (!startDate || !endDate) {
       return res.status(400).json({ message: "Missing startDate or endDate" });
     }
-
+    const bookedAppointments = await prisma.appointment.findMany({
+      where: {
+        assignedById: {
+          in: [
+            "6a0c3e58-d4e4-4f32-8585-9fbb81b08417",
+            "bab24c5b-ec93-4386-bdfb-7b0e1f25eb7f",
+          ],
+        },
+        // Using date conditions makes the query more efficient
+        createdAt: {
+          gte: new Date(startDate),
+          lte: new Date(endDate),
+        },
+      },
+      select: { id: true, customerName: true },
+    });
     const allData: any[] = [];
 
     // Parse start and end dates safely (avoid timezone shifts)
@@ -844,7 +859,10 @@ export const getPaymentReport = async (req: Request, res: Response) => {
       );
     }
 
-    return res.json({ data: piercingData });
+    return res.json({
+      data: piercingData,
+      bookedAppointments: bookedAppointments,
+    });
   } catch (error: any) {
     console.error("Error fetching piercing report:", error.message);
     return res.status(500).json({ message: "Failed to fetch report" });

@@ -19,6 +19,7 @@ import minMax from "dayjs/plugin/minMax";
 import { imageKit } from "../utils/imagekit";
 import customParseFormat from "dayjs/plugin/customParseFormat";
 
+const ST_TIMEZONE = "America/Chicago";
 // This line is crucial for both JS logic and TS types
 dayjs.extend(minMax);
 dayjs.extend(utc);
@@ -1007,10 +1008,19 @@ export const verifyAdminPaymentRequest = async (
 
     // 1. Find the last successful payment ON THIS SPECIFIC TERMINAL
     // before the crash time to establish a search anchor.
+    // 1. Get the local date in San Antonio for the requested timestamp
+    const localTime = dayjs(requested_at).tz(ST_TIMEZONE);
+
+    // 2. Define the exact boundaries of that San Antonio day in UTC
+    const dayStart = localTime.startOf("day").toDate(); // 00:00:00 local
+    const dayEnd = localTime.endOf("day").toDate(); // 23:59:59 local
+
     const lastPaymentBeforeCrash = await prisma.trackingPayment.findFirst({
       where: {
         createdAt: {
-          lt: new Date(requested_at),
+          lt: new Date(requested_at), // Must be before the crash
+          gte: dayStart, // Must be within the same San Antonio day
+          lte: dayEnd,
         },
         statusCode: "0000",
         device_number: targetTerminal,

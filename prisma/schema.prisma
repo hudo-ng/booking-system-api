@@ -27,6 +27,7 @@ model User {
   start_price              Float?
   wage                     Float?            @default(0)
   is_reception             Boolean           @default(false)
+  is_piercing              Boolean           @default(false)
   currentDeviceId          String?
   deletedAt                DateTime?
   Appointment              Appointment[]     @relation("AssignedBy")
@@ -95,6 +96,8 @@ model Appointment {
   DepositAppointment     DepositAppointment[]
   VerificationCodes      VerificationCode[]
   webPayment             WebPaymentTracking?
+
+  @@index([createdAt])
 }
 
 model DepositAppointment {
