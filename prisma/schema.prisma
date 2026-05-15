@@ -13,6 +13,7 @@ model User {
   password                 String
   name                     String
   role                     Role
+  position                 PositionRole      @default(general)
   createdAt                DateTime          @default(now())
   colour                   String?
   isAdmin                  Boolean           @default(false)
@@ -26,6 +27,9 @@ model User {
   slug                     String            @unique
   start_price              Float?
   wage                     Float?            @default(0)
+  bonus_wage               Float?            @default(0)
+  extra_hour_wage          Float?            @default(0)
+  sale_content_bonus       Float?            @default(0)
   is_reception             Boolean           @default(false)
   is_piercing              Boolean           @default(false)
   currentDeviceId          String?
@@ -444,6 +448,14 @@ enum DepositStatus {
 enum Role {
   admin
   employee
+}
+
+enum PositionRole {
+  general
+  piercing
+  tattoo
+  receptionist
+  saleContent
 }
 
 enum RecurrenceFreq {
