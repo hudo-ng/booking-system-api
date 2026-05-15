@@ -6,6 +6,7 @@ import { customAlphabet } from "nanoid";
 import { sendSMS } from "../utils/sms";
 import dayjs from "dayjs";
 import axios from "axios";
+import { normalizeName, normalizePhone } from "../utils/utils";
 
 const prisma = new PrismaClient();
 
@@ -677,7 +678,6 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
       return res.json({ success: true, data: [], array_of_form_bookings: [] });
     }
 
-    // 1. Build date filter for both queries
     let whereClause: any = {};
     if (start_date && end_date) {
       whereClause.createdAt = {
@@ -686,38 +686,107 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
       };
     }
 
-    // 2. Fetch SignInCustomers
-    const customers = await prisma.signInCustomer.findMany({
-      where: whereClause,
-      orderBy: { createdAt: "desc" },
-    });
-
-    // 3. Fetch Form Bookings
-    const formBookings = await prisma.formBookingRequest.findMany({
-      where: whereClause,
-      orderBy: { createdAt: "desc" },
-    });
-
-    // 4. Map through form bookings to check for subsequent appointments
-    const array_of_form_bookings = await Promise.all(
-      formBookings.map(async (booking) => {
-        // Check if an appointment exists for this email created AFTER the booking
-        const matchingAppointment = await prisma.appointment.findFirst({
-          where: {
-            email: booking.email,
-            createdAt: {
-              gt: booking.createdAt, // Check for appointments after this booking
-            },
-          },
-          select: { id: true },
-        });
-
-        return {
-          ...booking,
-          hasAppointment: !!matchingAppointment, // Extra key: true if appointment exists
-        };
+    const [customers, formBookings] = await Promise.all([
+      prisma.signInCustomer.findMany({
+        where: whereClause,
+        orderBy: { createdAt: "desc" },
       }),
+      prisma.formBookingRequest.findMany({
+        where: whereClause,
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
+
+    if (formBookings.length === 0) {
+      return res.json({
+        success: true,
+        data: customers,
+        array_of_form_bookings: [],
+      });
+    }
+
+    const emails = formBookings.map((b) => b.email).filter(Boolean);
+    const rawPhones = formBookings.map((b) => b.phone).filter(Boolean);
+    const names = formBookings.map((b) => b.name).filter(Boolean);
+
+    const earliestFormDate = formBookings.reduce(
+      (min, b) => (b.createdAt < min ? b.createdAt : min),
+      formBookings[0].createdAt,
     );
+
+    // Build targeted conditions for the database initial sweep
+    const matchConditions: any[] = [
+      { email: { in: emails } },
+      { phone: { in: rawPhones } },
+      { customerName: { in: names } },
+    ];
+
+    // Condition 4 (Name -> Email) Database Pre-sweep
+    names.forEach((name) => {
+      const cleanName = normalizeName(name);
+      if (cleanName && cleanName.length >= 3) {
+        matchConditions.push({
+          email: {
+            contains: cleanName,
+            mode: "insensitive",
+          },
+        });
+      }
+    });
+
+    const prospectiveAppointments = await prisma.appointment.findMany({
+      where: {
+        createdAt: { gte: earliestFormDate },
+        OR: matchConditions,
+      },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        customerName: true,
+        createdAt: true,
+      },
+    });
+
+    // Run strict logic checking matrix
+    const array_of_form_bookings = formBookings.map((booking) => {
+      const bookingEmail = booking.email.toLowerCase().trim();
+      const bookingPhoneCleaned = normalizePhone(booking.phone);
+      const bookingNameCleaned = normalizeName(booking.name);
+
+      const hasAppointment = prospectiveAppointments.some((app) => {
+        if (!app.createdAt || app.createdAt <= booking.createdAt) return false;
+
+        const appEmail = app.email?.toLowerCase().trim() || "";
+        const appPhoneCleaned = normalizePhone(app.phone);
+        const appNameCleaned = normalizeName(app.customerName);
+
+        // 1. Email to Email
+        const emailMatch = bookingEmail && appEmail === bookingEmail;
+
+        // 2. Phone to Phone
+        const phoneMatch =
+          bookingPhoneCleaned && appPhoneCleaned === bookingPhoneCleaned;
+
+        // 3. Name to Name
+        const exactNameMatch =
+          bookingNameCleaned && appNameCleaned === bookingNameCleaned;
+
+        // 4. Name inside Email
+        const nameInsideEmailMatch =
+          bookingNameCleaned.length >= 3 &&
+          appEmail.includes(bookingNameCleaned);
+
+        return (
+          emailMatch || phoneMatch || exactNameMatch || nameInsideEmailMatch
+        );
+      });
+
+      return {
+        ...booking,
+        hasAppointment,
+      };
+    });
 
     return res.json({
       success: true,
@@ -756,12 +825,42 @@ export const getListOfBookedAppointmentsByFormId = async (
       return res.status(404).json({ error: "Form booking request not found" });
     }
 
-    const appointments = await prisma.appointment.findMany({
+    const bookingEmail = booking.email.toLowerCase().trim();
+    const bookingPhoneCleaned = normalizePhone(booking.phone);
+    const bookingNameCleaned = normalizeName(booking.name);
+
+    // Setup broad conditions
+    const matchConditions: any[] = [{ email: booking.email }];
+
+    if (bookingPhoneCleaned) {
+      matchConditions.push({ phone: { contains: bookingPhoneCleaned } });
+    }
+
+    if (booking.name) {
+      matchConditions.push({
+        customerName: {
+          equals: booking.name.trim(),
+          mode: "insensitive",
+        },
+      });
+    }
+
+    // Condition 4 Pre-sweep
+    if (bookingNameCleaned && bookingNameCleaned.length >= 3) {
+      matchConditions.push({
+        email: {
+          contains: bookingNameCleaned,
+          mode: "insensitive",
+        },
+      });
+    }
+
+    const prospectiveAppointments = await prisma.appointment.findMany({
       where: {
-        email: booking.email,
         createdAt: {
           gt: booking.createdAt,
         },
+        OR: matchConditions,
       },
       orderBy: {
         createdAt: "desc",
@@ -770,21 +869,45 @@ export const getListOfBookedAppointmentsByFormId = async (
         employee: {
           select: { id: true, name: true, colour: true },
         },
-        // ADDED: Include the name of the staff member who assigned/created it
         assignedBy: {
           select: { name: true },
         },
       },
     });
 
+    // In-Memory filtering block matches the pipeline loop identically
+    const filteredAppointments = prospectiveAppointments.filter((app) => {
+      const appEmail = app.email?.toLowerCase().trim() || "";
+      const appPhoneCleaned = normalizePhone(app.phone);
+      const appNameCleaned = normalizeName(app.customerName);
+
+      // 1. Email to Email
+      const emailMatch = bookingEmail && appEmail === bookingEmail;
+
+      // 2. Phone to Phone
+      const phoneMatch =
+        bookingPhoneCleaned && appPhoneCleaned === bookingPhoneCleaned;
+
+      // 3. Name to Name
+      const exactNameMatch =
+        bookingNameCleaned && appNameCleaned === bookingNameCleaned;
+
+      // 4. Name inside Email
+      const nameInsideEmailMatch =
+        bookingNameCleaned.length >= 3 && appEmail.includes(bookingNameCleaned);
+
+      return emailMatch || phoneMatch || exactNameMatch || nameInsideEmailMatch;
+    });
+    console.log("filteredAppointments: ", filteredAppointments);
     return res.json({
       success: true,
       booking_info: {
         name: booking.name,
         email: booking.email,
+        phone: booking.phone,
         requested_at: booking.createdAt,
       },
-      data: appointments,
+      data: filteredAppointments,
     });
   } catch (error: any) {
     console.error("Get Booked Appointments error:", error);
