@@ -1979,6 +1979,7 @@ export const sendWeeklyReceptionPaystub = async (
             </tbody>
           </table>
           <div class="footer-totals">
+           <div class="total-item"><small>WORK DAYS</small><span>${totalWorkDays} Days</span></div>
             <div class="total-item"><small>TOTAL HOURS</small><span>${rawHrs.toFixed(1)}</span></div>
             <div class="total-item" style="color:#000;"><small>Gross Pay</small><span>$${gross.toFixed(2)}</span></div>
           </div>
