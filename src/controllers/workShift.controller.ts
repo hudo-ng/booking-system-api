@@ -6,7 +6,9 @@ import axios, { all } from "axios";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
 import { sendPushAsync } from "../services/push";
+import isBetween from "dayjs/plugin/isBetween";
 
+dayjs.extend(isBetween);
 dayjs.extend(utc);
 dayjs.extend(timezone);
 
@@ -912,5 +914,221 @@ export const getPaystub = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Error fetching paystubs:", error);
     res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const getAllContentBonuses = async (req: Request, res: Response) => {
+  try {
+    const { start_date, end_date } = req.query as {
+      start_date?: string;
+      end_date?: string;
+    };
+
+    if (!start_date || !end_date) {
+      return res
+        .status(400)
+        .json({
+          error: "Missing date range parameters (?start_date=X&end_date=Y)",
+        });
+    }
+
+    // 1. Fetch all users whose position role matches "saleContent"
+    const salesStaff = await prisma.user.findMany({
+      where: { role: "employee", position: "saleContent", deletedAt: null },
+      select: { id: true, name: true, email: true },
+    });
+
+    if (salesStaff.length === 0) {
+      return res.json({ success: true, data: [] });
+    }
+
+    const staffIds = salesStaff.map((s) => s.id);
+
+    // 2. Concurrently read explicit work clock-ins and saved bonus adjustments
+    const [shifts, savedBonuses] = await Promise.all([
+      prisma.workShift.findMany({
+        where: {
+          userId: { in: staffIds },
+          clockIn: {
+            gte: dayjs(start_date).startOf("day").toDate(),
+            lte: dayjs(end_date).endOf("day").toDate(),
+          },
+        },
+        select: { userId: true, clockIn: true },
+      }),
+      prisma.contentBonus.findMany({
+        where: {
+          userId: { in: staffIds },
+          date: { gte: start_date, lte: end_date },
+        },
+      }),
+    ]);
+
+    // 3. Build lookup maps for performance
+    // Map tracking unique days worked by each staff member: { userId: Set("2026-05-11", "2026-05-12") }
+    const workDaysMap: Record<string, Set<string>> = {};
+    shifts.forEach((shift) => {
+      if (!workDaysMap[shift.userId]) {
+        workDaysMap[shift.userId] = new Set();
+      }
+      workDaysMap[shift.userId].add(dayjs(shift.clockIn).format("YYYY-MM-DD"));
+    });
+
+    // Map tracking existing DB bonus records: { "userId_YYYY-MM-DD": amount }
+    const bonusLookup: Record<string, number> = {};
+    savedBonuses.forEach((b) => {
+      bonusLookup[`${b.userId}_${b.date}`] = b.content_bonus_amount;
+    });
+
+    // 4. Generate the matrix grid for each calendar date in the requested range
+    const startDay = dayjs(start_date);
+    const endDay = dayjs(end_date);
+    const totalDaysCount = endDay.diff(startDay, "day") + 1;
+
+    const reportPayload = salesStaff.map((employee) => {
+      const dailyBreakdown = [];
+      let calculatedTotalBonus = 0;
+      let actualDaysWorked = 0;
+
+      for (let i = 0; i < totalDaysCount; i++) {
+        const currentDateStr = startDay.add(i, "day").format("YYYY-MM-DD");
+        const lookupKey = `${employee.id}_${currentDateStr}`;
+
+        const didWork = workDaysMap[employee.id]?.has(currentDateStr) || false;
+        if (didWork) actualDaysWorked++;
+
+        // Determine bonus: Use database value if set, fallback to 0 if absent
+        const bonusAmount =
+          lookupKey in bonusLookup ? bonusLookup[lookupKey] : 0;
+        calculatedTotalBonus += bonusAmount;
+
+        dailyBreakdown.push({
+          date: currentDateStr,
+          didWork,
+          content_bonus_amount: bonusAmount,
+        });
+      }
+
+      return {
+        employee: {
+          id: employee.id,
+          name: employee.name,
+          email: employee.email,
+        },
+        totalWorkDays: actualDaysWorked,
+        totalBonusPayout: calculatedTotalBonus,
+        dailyBreakdown,
+      };
+    });
+
+    return res.json({ success: true, data: reportPayload });
+  } catch (error: any) {
+    console.error("Fetch content bonus pipeline error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+// =========================================================================
+// 2. UPSERT DAILY BONUS AMOUNT (Set explicit value or Tier Match)
+// =========================================================================
+export const saveDailyContentBonus = async (req: Request, res: Response) => {
+  try {
+    const { userId, date, amount, tierKey } = req.body as {
+      userId: string;
+      date: string;
+      amount?: number;
+      tierKey?: string;
+    };
+
+    if (!userId || !date) {
+      return res
+        .status(400)
+        .json({ error: "userId and date fields are required" });
+    }
+
+    let finalAmount = amount ?? 0;
+
+    // If an owner selects an explicit tier indicator shortcut (A, B, C) from the client view
+    if (tierKey) {
+      const tierConfig = await prisma.quickBonusSetting.findUnique({
+        where: { tier: tierKey.toUpperCase().trim() },
+      });
+      if (!tierConfig) {
+        return res
+          .status(404)
+          .json({
+            error: `Bonus setup rule for Tier '${tierKey}' was not found`,
+          });
+      }
+      finalAmount = tierConfig.amount;
+    }
+
+    // Atomic update or create pattern via the compound unique index constraints
+    const updatedRecord = await prisma.contentBonus.upsert({
+      where: {
+        userId_date: {
+          userId,
+          date,
+        },
+      },
+      update: { content_bonus_amount: finalAmount },
+      create: {
+        userId,
+        date,
+        content_bonus_amount: finalAmount,
+      },
+    });
+
+    return res.json({ success: true, data: updatedRecord });
+  } catch (error: any) {
+    console.error("Save daily configuration error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+// =========================================================================
+// 3. SEED / UPDATE QUICK MATCHING SETTING VALUES (Tier Administration)
+// =========================================================================
+export const updateQuickBonusSettings = async (req: Request, res: Response) => {
+  try {
+    const { settings } = req.body as { settings: Record<string, number> };
+    // Format expected: { "A": 50, "B": 100, "C": 150 }
+
+    if (!settings || Object.keys(settings).length === 0) {
+      return res
+        .status(400)
+        .json({ error: "Configuration object dictionary required" });
+    }
+
+    const updates = Object.entries(settings).map(([tier, amount]) =>
+      prisma.quickBonusSetting.upsert({
+        where: { tier: tier.toUpperCase().trim() },
+        update: { amount },
+        create: { tier: tier.toUpperCase().trim(), amount },
+      }),
+    );
+
+    await Promise.all(updates);
+    const updatedRules = await prisma.quickBonusSetting.findMany();
+
+    return res.json({ success: true, data: updatedRules });
+  } catch (error: any) {
+    console.error("Modify configuration rules error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+// =========================================================================
+// 4. GET QUICK MATCHING CONFIGURATIONS
+// =========================================================================
+export const getQuickBonusSettings = async (_req: Request, res: Response) => {
+  try {
+    const settings = await prisma.quickBonusSetting.findMany({
+      orderBy: { tier: "asc" },
+    });
+    return res.json({ success: true, data: settings });
+  } catch (error: any) {
+    console.error("Get Quick Bonus configurations error:", error);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };

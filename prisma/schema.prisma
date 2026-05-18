@@ -48,6 +48,26 @@ model User {
   WorkShift                WorkShift[]
   workingHours             WorkingHours[]
   Notification             Notification[]
+  ContentBonus             ContentBonus[]
+}
+
+model ContentBonus {
+  id                   String   @id @default(uuid())
+  userId               String
+  date                 String   // Format: "YYYY-MM-DD"
+  content_bonus_amount Float    // The bonus payout amount for that day
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  user                 User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, date]) // Critical guardrail against daily duplicates
+  @@index([date])
+}
+
+model QuickBonusSetting {
+  id     String @id @default(uuid())
+  tier   String @unique // e.g., "A", "B", "C"
+  amount Float  // e.g., 50.0, 100.0, 150.0
 }
 
 model CleanSchedule {

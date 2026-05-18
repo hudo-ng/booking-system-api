@@ -72,7 +72,7 @@ export const setWorkingHours = async (req: Request, res: Response) => {
           weekday,
           startTime,
           endTime,
-          intervalLength: type === "interval" ? interval ?? 60 : null,
+          intervalLength: type === "interval" ? (interval ?? 60) : null,
           type,
         },
       });
