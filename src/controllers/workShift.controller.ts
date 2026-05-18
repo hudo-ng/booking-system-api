@@ -925,11 +925,9 @@ export const getAllContentBonuses = async (req: Request, res: Response) => {
     };
 
     if (!start_date || !end_date) {
-      return res
-        .status(400)
-        .json({
-          error: "Missing date range parameters (?start_date=X&end_date=Y)",
-        });
+      return res.status(400).json({
+        error: "Missing date range parameters (?start_date=X&end_date=Y)",
+      });
     }
 
     // 1. Fetch all users whose position role matches "saleContent"
@@ -1054,11 +1052,9 @@ export const saveDailyContentBonus = async (req: Request, res: Response) => {
         where: { tier: tierKey.toUpperCase().trim() },
       });
       if (!tierConfig) {
-        return res
-          .status(404)
-          .json({
-            error: `Bonus setup rule for Tier '${tierKey}' was not found`,
-          });
+        return res.status(404).json({
+          error: `Bonus setup rule for Tier '${tierKey}' was not found`,
+        });
       }
       finalAmount = tierConfig.amount;
     }
@@ -1121,11 +1117,35 @@ export const updateQuickBonusSettings = async (req: Request, res: Response) => {
 // =========================================================================
 // 4. GET QUICK MATCHING CONFIGURATIONS
 // =========================================================================
-export const getQuickBonusSettings = async (_req: Request, res: Response) => {
+export const getQuickBonusSettings = async (req: Request, res: Response) => {
   try {
+    const { userId } = (req as any).user as { userId?: string };
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    // Get current user status
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { isOwner: true, isAdmin: true },
+    });
+
+    if (!currentUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // 3. Strict Guardian Enforcer: Only allow if isOwner is explicitly true
+    if (!currentUser.isOwner) {
+      return res
+        .status(403)
+        .json({ error: "Forbidden: Owner permissions required" });
+    }
+
+    // 4. Proceed with data retrieval if validation passes
     const settings = await prisma.quickBonusSetting.findMany({
       orderBy: { tier: "asc" },
     });
+
     return res.json({ success: true, data: settings });
   } catch (error: any) {
     console.error("Get Quick Bonus configurations error:", error);
