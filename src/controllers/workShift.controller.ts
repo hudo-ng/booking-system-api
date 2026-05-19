@@ -131,11 +131,11 @@ export const clockIn = async (req: Request, res: Response) => {
     where: { userId, dayOfWeek },
   });
 
-  if (!schedule) {
-    return res
-      .status(403)
-      .json({ message: "No work schedule found for today" });
-  }
+  // if (!schedule) {
+  //   return res
+  //     .status(403)
+  //     .json({ message: "No work schedule found for today" });
+  // }
 
   // 3. Create New Shift
   const shift = await prisma.workShift.create({
@@ -802,6 +802,7 @@ export const getPaymentReport = async (req: Request, res: Response) => {
           in: [
             "6a0c3e58-d4e4-4f32-8585-9fbb81b08417",
             "bab24c5b-ec93-4386-bdfb-7b0e1f25eb7f",
+            "317b8640-2920-4d1d-853f-c8552545e634",
           ],
         },
         // Using date conditions makes the query more efficient
