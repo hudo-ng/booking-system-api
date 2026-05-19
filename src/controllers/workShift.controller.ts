@@ -622,7 +622,7 @@ interface ScheduleInput {
   startTime: string;
   endTime: string;
   is_off?: boolean;
-  salary_type?: string;
+  salary_type: "A" | "B";
 }
 // ✅ Set (replace) weekly schedule for a user
 export const setWorkScheduleByUserId = async (req: Request, res: Response) => {
