@@ -947,6 +947,7 @@ export const requestTattooArtistPaymentByUserId = async (
           in: [
             "6a0c3e58-d4e4-4f32-8585-9fbb81b08417",
             "bab24c5b-ec93-4386-bdfb-7b0e1f25eb7f",
+            "317b8640-2920-4d1d-853f-c8552545e634",
           ],
         },
       },

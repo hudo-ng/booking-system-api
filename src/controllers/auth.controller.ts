@@ -1782,6 +1782,7 @@ export const sendWeeklyReceptionPaystub = async (
     const dataArtist = [
       { userId: "6a0c3e58-d4e4-4f32-8585-9fbb81b08417", isFree15Hour: false },
       { userId: "bab24c5b-ec93-4386-bdfb-7b0e1f25eb7f", isFree15Hour: true },
+      { userId: "317b8640-2920-4d1d-853f-c8552545e634", isFree15Hour: false },
     ];
 
     const results = [];
