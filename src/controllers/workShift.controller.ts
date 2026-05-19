@@ -617,56 +617,82 @@ export const getWorkSchedule = async (req: Request, res: Response) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
-
+interface ScheduleInput {
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+  is_off?: boolean;
+  salary_type?: string;
+}
 // ✅ Set (replace) weekly schedule for a user
 export const setWorkScheduleByUserId = async (req: Request, res: Response) => {
-  const { userId } = (req as any).user as { userId?: string };
-  const { id, schedules } = req.body;
-  // schedules = [{ dayOfWeek: number, startTime: string, endTime: string }, ...]
-  if (!id) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-  // Query the current user
-  const currentUserInToken = await prisma.user.findUnique({
-    where: { id: userId },
-  });
-  if (currentUserInToken?.isOwner === false) {
-    return res.status(403).json({ message: "Only owner can set schedules" });
-  }
-  // Query the current user
-  const currentUser = await prisma.user.findUnique({
-    where: { id: id },
-  });
-  if (!currentUser) {
-    return res.status(404).json({ error: "User not found" });
-  }
+  const { userId: requesterId } = (req as any).user as { userId?: string };
+  const { id: targetUserId, schedules } = req.body;
 
-  if (!id || !Array.isArray(schedules)) {
+  // 1. Initial structural payload validation
+  if (!targetUserId || !Array.isArray(schedules)) {
     return res
       .status(400)
-      .json({ message: "userId and schedules are required" });
+      .json({ message: "Target user id and schedules array are required" });
   }
 
-  // Remove old schedule first
-  await prisma.workSchedule.deleteMany({
-    where: { userId: id },
-  });
+  try {
+    // 2. Authorization check: Verify requester is an owner
+    const currentOwnerCheck = await prisma.user.findUnique({
+      where: { id: requesterId },
+    });
 
-  // Create new schedule
-  const newSchedules = await prisma.$transaction(
-    schedules.map((s) =>
-      prisma.workSchedule.create({
-        data: {
-          userId: id,
-          dayOfWeek: s.dayOfWeek,
-          startTime: new Date(s.startTime),
-          endTime: new Date(s.endTime),
-        },
-      }),
-    ),
-  );
-  console.log("New schedules set for userId", id, newSchedules);
-  res.json({ message: "Schedule updated", schedules: newSchedules });
+    if (!currentOwnerCheck || currentOwnerCheck.isOwner === false) {
+      return res.status(403).json({ message: "Only owner can set schedules" });
+    }
+
+    // 3. Target verification: Verify user exists before wiping data
+    const targetUser = await prisma.user.findUnique({
+      where: { id: targetUserId },
+    });
+
+    if (!targetUser) {
+      return res.status(404).json({ error: "Target user not found" });
+    }
+
+    // 4. Atomic Transaction: Delete old schedules and write the new batch safely
+    const executionResult = await prisma.$transaction(async (tx) => {
+      // Step A: Clear existing dataset
+      await tx.workSchedule.deleteMany({
+        where: { userId: targetUserId },
+      });
+
+      // Step B: Bulk generate formatting maps
+      const creationPromises = (schedules as ScheduleInput[]).map((s) => {
+        const isOffDay = !!s.is_off;
+
+        // If it's a day off, assign structural fallback dates since fields are mandatory
+        const cleanStartTime = isOffDay ? new Date(0) : new Date(s.startTime);
+        const cleanEndTime = isOffDay ? new Date(0) : new Date(s.endTime);
+
+        return tx.workSchedule.create({
+          data: {
+            userId: targetUserId,
+            dayOfWeek: s.dayOfWeek,
+            startTime: cleanStartTime,
+            endTime: cleanEndTime,
+            is_off: isOffDay,
+            salary_type: s.salary_type,
+          },
+        });
+      });
+
+      return Promise.all(creationPromises);
+    });
+
+    return res.json({
+      message: "Schedule updated successfully",
+      schedules: executionResult,
+    });
+  } catch (error) {
+    console.error("Error updating schedule architecture setup:", error);
+    return res.status(500).json({ error: "Internal server processing error" });
+  }
 };
 
 export const getPiercingReport = async (req: Request, res: Response) => {
@@ -1135,11 +1161,9 @@ export const getQuickBonusSettings = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // 3. Strict Guardian Enforcer: Only allow if isOwner is explicitly true
+    // 3. Graceful Guardian: If not an owner, return an empty data array instead of a 403 error
     if (!currentUser.isOwner) {
-      return res
-        .status(403)
-        .json({ error: "Forbidden: Owner permissions required" });
+      return res.json({ success: true, data: [] });
     }
 
     // 4. Proceed with data retrieval if validation passes
