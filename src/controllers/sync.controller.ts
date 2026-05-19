@@ -13,6 +13,8 @@ import axios from "axios";
 
 const prisma = new PrismaClient();
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export const syncAllArtistReviews = async (
   ownerId: "0ca37281-3084-4c3b-b9b2-fc0185c28108",
 ) => {
@@ -62,6 +64,7 @@ export const syncAllArtistReviews = async (
           if (rating === 5 && !hasComment) {
             const msg =
               "Thank you so much for the 5-star rating! We appreciate the support.";
+            await sleep(2000);
             await postGoogleReply(token, fullReviewPath, msg);
             await prisma.review.update({
               where: { id: savedReview.id },
@@ -182,6 +185,7 @@ export const syncAllArtistReviews1 = async (
           if (rating === 5 && !hasComment) {
             const msg =
               "Thank you so much for the 5-star rating! We appreciate the support.";
+            await sleep(2000);
             await postGoogleReply(token, fullReviewPath, msg);
             await prisma.review.update({
               where: { id: savedReview.id },
@@ -195,6 +199,7 @@ export const syncAllArtistReviews1 = async (
               gr.comment!,
             );
             if (aiReply) {
+              await sleep(2000);
               await postGoogleReply(token, fullReviewPath, aiReply);
               await prisma.review.update({
                 where: { id: savedReview.id },
@@ -235,6 +240,13 @@ export const syncAllArtistReviews1 = async (
       );
       for (const rev of approved) {
         try {
+          const minDelay = 45 * 1000;
+          const maxDelay = 120 * 1000;
+          const randomDelay = Math.floor(
+            Math.random() * (maxDelay - minDelay + 1) + minDelay,
+          );
+
+          await sleep(randomDelay);
           const artistToken = await getFreshAccessToken(ownerId);
           const path = `${rev.googleReviewKey.locationId}/reviews/${rev.googleReviewId}`;
           await postGoogleReply(artistToken, path, rev.replyDraft!);

@@ -307,10 +307,24 @@ export const getShopAvailabilityByDay = async (req: Request, res: Response) => {
     const results = [];
 
     for (const employee of employees) {
+      const isOffRecord = allTimeOffs.find((t) => t.employeeId === employee.id);
+
       const hours = allWorkingHours.filter((h) => h.employeeId === employee.id);
       const appts = allAppts.filter((a) => a.employeeId === employee.id);
 
+      if (isOffRecord || !hours.length) {
+        results.push({
+          id: employee.id,
+          name: employee.name,
+          is_day_off: true,
+          slots: [],
+        });
+        continue;
+      }
+
+      const availableSlots: { start: string; end: string }[] = [];
       const occupied = new Set<string>();
+
       for (const a of appts) {
         let cur = dayjs(a.startTime).utc();
         const end = dayjs(a.endTime).utc();
@@ -319,8 +333,6 @@ export const getShopAvailabilityByDay = async (req: Request, res: Response) => {
           cur = cur.add(1, "hour");
         }
       }
-
-      const availableSlots: { start: string; end: string }[] = [];
 
       for (const interval of hours) {
         if (!interval.startTime || !interval.endTime) continue;
@@ -371,6 +383,7 @@ export const getShopAvailabilityByDay = async (req: Request, res: Response) => {
       results.push({
         id: employee.id,
         name: employee.name,
+        is_day_off: false,
         slots: availableSlots,
       });
     }
