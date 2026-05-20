@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, SalaryType } from "@prisma/client";
 import dayjs from "dayjs";
 import { getDistanceFromLatLonInKm } from "../utils/distance";
 import axios, { all } from "axios";
@@ -622,9 +622,11 @@ interface ScheduleInput {
   startTime: string;
   endTime: string;
   is_off?: boolean;
-  salary_type: "A" | "B";
+  salary_type?: SalaryType;
+  is_bonus_hourly?: boolean; // <-- Added to typing interface
+  is_content_bonus?: boolean; // <-- Added to typing interface
 }
-// ✅ Set (replace) weekly schedule for a user
+
 export const setWorkScheduleByUserId = async (req: Request, res: Response) => {
   const { userId: requesterId } = (req as any).user as { userId?: string };
   const { id: targetUserId, schedules } = req.body;
@@ -666,18 +668,16 @@ export const setWorkScheduleByUserId = async (req: Request, res: Response) => {
       const creationPromises = (schedules as ScheduleInput[]).map((s) => {
         const isOffDay = !!s.is_off;
 
-        // If it's a day off, assign structural fallback dates since fields are mandatory
-        const cleanStartTime = isOffDay ? new Date(0) : new Date(s.startTime);
-        const cleanEndTime = isOffDay ? new Date(0) : new Date(s.endTime);
-
         return tx.workSchedule.create({
           data: {
             userId: targetUserId,
             dayOfWeek: s.dayOfWeek,
-            startTime: cleanStartTime,
-            endTime: cleanEndTime,
+            startTime: new Date(s.startTime),
+            endTime: new Date(s.endTime),
             is_off: isOffDay,
-            salary_type: s.salary_type,
+            salary_type: s.salary_type || SalaryType.A,
+            is_content_bonus: !!s.is_content_bonus,
+            is_bonus_hourly: !!s.is_bonus_hourly,
           },
         });
       });
@@ -946,6 +946,26 @@ export const getPaystub = async (req: Request, res: Response) => {
 
 export const getAllContentBonuses = async (req: Request, res: Response) => {
   try {
+    const { userId } = (req as any).user as { userId?: string };
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    // Get current user status
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { isOwner: true, isAdmin: true },
+    });
+
+    if (!currentUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // 3. Graceful Guardian: If not an owner, return an empty data array instead of a 403 error
+    if (!currentUser.isOwner) {
+      return res.json({ success: true, data: [] });
+    }
+
     const { start_date, end_date } = req.query as {
       start_date?: string;
       end_date?: string;
@@ -957,7 +977,7 @@ export const getAllContentBonuses = async (req: Request, res: Response) => {
       });
     }
 
-    // 1. Fetch all users whose position role matches "saleContent"
+    // 2. Fetch all users whose position role matches "saleContent"
     const salesStaff = await prisma.user.findMany({
       where: { role: "employee", position: "saleContent", deletedAt: null },
       select: { id: true, name: true, email: true },
@@ -969,8 +989,8 @@ export const getAllContentBonuses = async (req: Request, res: Response) => {
 
     const staffIds = salesStaff.map((s) => s.id);
 
-    // 2. Concurrently read explicit work clock-ins and saved bonus adjustments
-    const [shifts, savedBonuses] = await Promise.all([
+    // 3. Concurrently pull shifts, database bonus records, and work schedules
+    const [shifts, savedBonuses, workSchedules] = await Promise.all([
       prisma.workShift.findMany({
         where: {
           userId: { in: staffIds },
@@ -987,10 +1007,21 @@ export const getAllContentBonuses = async (req: Request, res: Response) => {
           date: { gte: start_date, lte: end_date },
         },
       }),
+      prisma.workSchedule.findMany({
+        where: {
+          userId: { in: staffIds },
+        },
+        select: {
+          userId: true,
+          dayOfWeek: true,
+          is_content_bonus: true,
+        },
+      }),
     ]);
 
-    // 3. Build lookup maps for performance
-    // Map tracking unique days worked by each staff member: { userId: Set("2026-05-11", "2026-05-12") }
+    // 4. Build lookup maps for fast, O(1) evaluation inside loops
+
+    // Map unique days worked: { userId: Set("2026-05-12") }
     const workDaysMap: Record<string, Set<string>> = {};
     shifts.forEach((shift) => {
       if (!workDaysMap[shift.userId]) {
@@ -999,13 +1030,20 @@ export const getAllContentBonuses = async (req: Request, res: Response) => {
       workDaysMap[shift.userId].add(dayjs(shift.clockIn).format("YYYY-MM-DD"));
     });
 
-    // Map tracking existing DB bonus records: { "userId_YYYY-MM-DD": amount }
+    // Map manual DB bonus adjustments: { "userId_YYYY-MM-DD": amount }
     const bonusLookup: Record<string, number> = {};
     savedBonuses.forEach((b) => {
       bonusLookup[`${b.userId}_${b.date}`] = b.content_bonus_amount;
     });
 
-    // 4. Generate the matrix grid for each calendar date in the requested range
+    // Map standard configurations by day of week: { "userId_dayIdx": true/false }
+    const scheduleBonusLookup: Record<string, boolean> = {};
+    workSchedules.forEach((sched) => {
+      scheduleBonusLookup[`${sched.userId}_${sched.dayOfWeek}`] =
+        !!sched.is_content_bonus;
+    });
+
+    // 5. Generate matrix payload ignoring non-content-bonus days
     const startDay = dayjs(start_date);
     const endDay = dayjs(end_date);
     const totalDaysCount = endDay.diff(startDay, "day") + 1;
@@ -1016,13 +1054,25 @@ export const getAllContentBonuses = async (req: Request, res: Response) => {
       let actualDaysWorked = 0;
 
       for (let i = 0; i < totalDaysCount; i++) {
-        const currentDateStr = startDay.add(i, "day").format("YYYY-MM-DD");
+        const currentDayInstance = startDay.add(i, "day");
+        const currentDayOfWeek = currentDayInstance.day(); // 0 (Sun) to 6 (Sat)
+        const scheduleKey = `${employee.id}_${currentDayOfWeek}`;
+
+        // Rule: If the schedule says this day of the week is NOT a content bonus day, ignore entirely
+        const isScheduleBonusEnabled =
+          scheduleBonusLookup[scheduleKey] || false;
+        if (!isScheduleBonusEnabled) {
+          continue; // Skip directly to the next loop iteration, omitting this date
+        }
+
+        const currentDateStr = currentDayInstance.format("YYYY-MM-DD");
         const lookupKey = `${employee.id}_${currentDateStr}`;
 
+        // Tracking actual shifts on valid content days
         const didWork = workDaysMap[employee.id]?.has(currentDateStr) || false;
         if (didWork) actualDaysWorked++;
 
-        // Determine bonus: Use database value if set, fallback to 0 if absent
+        // Determine payout value using override or 0 fallback
         const bonusAmount =
           lookupKey in bonusLookup ? bonusLookup[lookupKey] : 0;
         calculatedTotalBonus += bonusAmount;
@@ -1042,7 +1092,7 @@ export const getAllContentBonuses = async (req: Request, res: Response) => {
         },
         totalWorkDays: actualDaysWorked,
         totalBonusPayout: calculatedTotalBonus,
-        dailyBreakdown,
+        dailyBreakdown, // Only contains dates where is_content_bonus was true
       };
     });
 

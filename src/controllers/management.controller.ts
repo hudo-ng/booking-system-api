@@ -10,172 +10,6 @@ import { normalizeName, normalizePhone } from "../utils/utils";
 
 const prisma = new PrismaClient();
 
-export const getAllEmployees = async (req: Request, res: Response) => {
-  const { userId } = (req as any).user as { userId?: string };
-  if (!userId) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
-  // Get current user status
-  const currentUser = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { isOwner: true, isAdmin: true },
-  });
-
-  if (!currentUser) {
-    return res.status(404).json({ error: "User not found" });
-  }
-
-  let employees;
-
-  // Owners and Admins usually see the full list
-  if (currentUser?.isOwner || currentUser?.isAdmin) {
-    employees = await prisma.user.findMany({
-      where: { role: "employee", deletedAt: null },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        phone_number: true,
-        start_price: true,
-        colour: true,
-        photo_url: true,
-        percentage_clean: true,
-        percentage_work: true,
-        percentage_shared: true,
-        show_on_calendar_booking: true,
-        isAdmin: true,
-        role: true,
-        is_reception: true,
-        currentDeviceId: true,
-        // Added fields
-        position: true,
-        wage: true,
-        bonus_wage: true,
-        extra_hour_wage: true,
-        sale_content_bonus: true,
-      },
-    });
-  } else {
-    // Standard employees only see themselves
-    const employee = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        phone_number: true,
-        start_price: true,
-        colour: true,
-        photo_url: true,
-        percentage_clean: true,
-        percentage_work: true,
-        percentage_shared: true,
-        show_on_calendar_booking: true,
-        isAdmin: true,
-        role: true,
-        is_reception: true,
-        currentDeviceId: true,
-        // Added fields
-        position: true,
-        wage: true,
-        bonus_wage: true,
-        extra_hour_wage: true,
-        sale_content_bonus: true,
-      },
-    });
-
-    employees = employee ? [employee] : [];
-  }
-
-  res.json(employees);
-};
-
-export const editEmployee = async (req: Request, res: Response) => {
-  const { userId } = (req as any).user as { userId?: string };
-  if (!userId) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
-  const currentUser = await prisma.user.findUnique({
-    where: { id: userId },
-  });
-
-  if (!currentUser) {
-    return res.status(404).json({ error: "User not found" });
-  }
-
-  if (!currentUser?.isOwner) {
-    return res.status(403).json({ error: "You do not have permission" });
-  }
-
-  const {
-    staff_id,
-    name,
-    phone_number,
-    start_price,
-    colour,
-    photo_url,
-    percentage_clean,
-    percentage_work,
-    percentage_shared,
-    show_on_calendar_booking,
-    is_reception,
-    // New optional fields
-    position,
-    wage,
-    bonus_wage,
-    extra_hour_wage,
-    sale_content_bonus,
-  } = req.body;
-
-  try {
-    const updatedEmployee = await prisma.user.update({
-      where: { id: staff_id },
-      data: {
-        name,
-        phone_number,
-        start_price,
-        colour,
-        photo_url,
-        percentage_clean,
-        percentage_work,
-        percentage_shared,
-        show_on_calendar_booking,
-        is_reception,
-        position, // Enum value
-        wage,
-        bonus_wage,
-        extra_hour_wage,
-        sale_content_bonus,
-      },
-      select: {
-        id: true,
-        name: true,
-        phone_number: true,
-        start_price: true,
-        colour: true,
-        photo_url: true,
-        percentage_clean: true,
-        percentage_work: true,
-        percentage_shared: true,
-        show_on_calendar_booking: true,
-        is_reception: true,
-        position: true,
-        wage: true,
-        bonus_wage: true,
-        extra_hour_wage: true,
-        sale_content_bonus: true,
-      },
-    });
-
-    res.json(updatedEmployee);
-  } catch (error) {
-    console.error("Failed to update employee", error);
-    res.status(500).json({ message: "Failed to update employee" });
-  }
-};
-
 export const deleteEmployee = async (req: Request, res: Response) => {
   const { userId } = (req as any).user as { userId?: string };
   if (!userId) {
@@ -270,81 +104,6 @@ export const deleteDeviceToken = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Failed to soft-delete employee", error);
     res.status(500).json({ message: "Failed to delete employee" });
-  }
-};
-
-export const addEmployee = async (req: Request, res: Response) => {
-  try {
-    const { userId } = (req as any).user as { userId?: string };
-    if (!userId) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-
-    const currentUser = await prisma.user.findUnique({
-      where: { id: userId },
-    });
-
-    if (!currentUser) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    // Check if user is admin OR owner
-    if (!currentUser?.isAdmin && !currentUser?.isOwner) {
-      return res.status(403).json({ error: "You do not have permission" });
-    }
-
-    const {
-      email,
-      password,
-      name,
-      colour,
-      start_price,
-      phone_number,
-      isAdmin,
-      // New fields
-      position,
-      wage,
-      bonus_wage,
-      extra_hour_wage,
-      sale_content_bonus,
-    } = req.body;
-
-    const hashed = await bcrypt.hash(password, 10);
-
-    const nano = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 5);
-    const base =
-      slugify(name || "user", { lower: true, strict: true }) || "user";
-    const slug = `${base}-${nano()}`;
-
-    const user = await prisma.user.create({
-      data: {
-        email,
-        password: hashed,
-        name,
-        role: "employee",
-        colour,
-        start_price,
-        isAdmin: isAdmin || false,
-        phone_number,
-        slug,
-        // Mapping new fields
-        position: position || "general", // Defaulting to general if not provided
-        wage: wage ?? 0,
-        bonus_wage: bonus_wage ?? 0,
-        extra_hour_wage: extra_hour_wage ?? 0,
-        sale_content_bonus: sale_content_bonus ?? 0,
-      },
-    });
-
-    return res.status(201).json({
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      position: user.position,
-    });
-  } catch (error) {
-    console.error("Error creating employee:", error);
-    return res.status(500).json({ error: "Internal server error" });
   }
 };
 
@@ -1073,5 +832,270 @@ export const requestTattooArtistPaymentByUserId = async (
   } catch (error: any) {
     console.error("Payment Request Error:", error);
     return res.status(500).json({ error: error.message });
+  }
+};
+
+export const getAllEmployees = async (req: Request, res: Response) => {
+  const { userId } = (req as any).user as { userId?: string };
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  // Get current user status
+  const currentUser = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { isOwner: true, isAdmin: true },
+  });
+
+  if (!currentUser) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  let employees;
+
+  // Full selection configuration including all database fields
+  const completeUserSelection = {
+    id: true,
+    email: true,
+    name: true,
+    role: true,
+    position: true,
+    createdAt: true,
+    colour: true,
+    isAdmin: true,
+    isOwner: true,
+    percentage_clean: true,
+    percentage_shared: true,
+    percentage_work: true,
+    phone_number: true,
+    photo_url: true,
+    show_on_calendar_booking: true,
+    slug: true,
+    start_price: true,
+    wage: true,
+    new_wage: true,
+    bonus_wage: true,
+    extra_hour_wage: true,
+    sale_content_bonus: true,
+    is_reception: true,
+    is_piercing: true,
+    currentDeviceId: true,
+  };
+
+  // Owners and Admins see the full list
+  if (currentUser?.isOwner || currentUser?.isAdmin) {
+    employees = await prisma.user.findMany({
+      where: { deletedAt: null }, // Adjusted to get all employees safely
+      select: completeUserSelection,
+    });
+  } else {
+    // Standard employees only see themselves
+    const employee = await prisma.user.findUnique({
+      where: { id: userId },
+      select: completeUserSelection,
+    });
+
+    employees = employee ? [employee] : [];
+  }
+
+  res.json(employees);
+};
+
+export const editEmployee = async (req: Request, res: Response) => {
+  const { userId } = (req as any).user as { userId?: string };
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const currentUser = await prisma.user.findUnique({
+    where: { id: userId },
+  });
+
+  if (!currentUser) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  if (!currentUser?.isOwner) {
+    return res.status(403).json({ error: "You do not have permission" });
+  }
+
+  const { staff_id, ...updatePayload } = req.body;
+
+  if (!staff_id) {
+    return res.status(400).json({ error: "Target staff_id is required" });
+  }
+
+  try {
+    // Construct data dynamically to update whatever fields the user wants
+    const updateData: any = {};
+
+    const possibleFields = [
+      "name",
+      "email",
+      "phone_number",
+      "start_price",
+      "colour",
+      "photo_url",
+      "percentage_clean",
+      "percentage_work",
+      "percentage_shared",
+      "show_on_calendar_booking",
+      "is_reception",
+      "is_piercing",
+      "position",
+      "wage",
+      "new_wage",
+      "bonus_wage",
+      "extra_hour_wage",
+      "sale_content_bonus",
+      "isAdmin",
+    ];
+
+    possibleFields.forEach((field) => {
+      if (updatePayload[field] !== undefined) {
+        updateData[field] = updatePayload[field];
+      }
+    });
+
+    const updatedEmployee = await prisma.user.update({
+      where: { id: staff_id },
+      data: updateData,
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        position: true,
+        colour: true,
+        isAdmin: true,
+        isOwner: true,
+        percentage_clean: true,
+        percentage_shared: true,
+        percentage_work: true,
+        phone_number: true,
+        photo_url: true,
+        show_on_calendar_booking: true,
+        slug: true,
+        start_price: true,
+        wage: true,
+        new_wage: true,
+        bonus_wage: true,
+        extra_hour_wage: true,
+        sale_content_bonus: true,
+        is_reception: true,
+        is_piercing: true,
+      },
+    });
+
+    res.json(updatedEmployee);
+  } catch (error) {
+    console.error("Failed to update employee:", error);
+    res.status(500).json({ message: "Failed to update employee" });
+  }
+};
+
+export const addEmployee = async (req: Request, res: Response) => {
+  try {
+    const { userId } = (req as any).user as { userId?: string };
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!currentUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    if (!currentUser?.isAdmin && !currentUser?.isOwner) {
+      return res.status(403).json({ error: "You do not have permission" });
+    }
+
+    const { email, password, name, ...optionalFields } = req.body;
+
+    // Strict validation only on critical creation properties
+    if (!email || !password || !name) {
+      return res
+        .status(400)
+        .json({ error: "Email, password, and name are required parameters." });
+    }
+
+    const hashed = await bcrypt.hash(password, 10);
+    const nano = customAlphabet("abcdefghijklmnopqrstuvwxyz0123456789", 5);
+    const base =
+      slugify(name || "user", { lower: true, strict: true }) || "user";
+    const slug = `${base}-${nano()}`;
+
+    // Safely structure creation data using explicit fallbacks or incoming requests values
+    const user = await prisma.user.create({
+      data: {
+        email,
+        password: hashed,
+        name,
+        slug,
+        role: "employee",
+        colour:
+          optionalFields.colour !== undefined ? optionalFields.colour : null,
+        start_price:
+          optionalFields.start_price !== undefined
+            ? optionalFields.start_price
+            : null,
+        isAdmin: !!optionalFields.isAdmin,
+        phone_number:
+          optionalFields.phone_number !== undefined
+            ? optionalFields.phone_number
+            : "111-111-1111",
+        position:
+          optionalFields.position !== undefined
+            ? optionalFields.position
+            : "general",
+        wage: optionalFields.wage !== undefined ? optionalFields.wage : 0,
+        new_wage:
+          optionalFields.new_wage !== undefined ? optionalFields.new_wage : 0,
+        bonus_wage:
+          optionalFields.bonus_wage !== undefined
+            ? optionalFields.bonus_wage
+            : 0,
+        extra_hour_wage:
+          optionalFields.extra_hour_wage !== undefined
+            ? optionalFields.extra_hour_wage
+            : 0,
+        sale_content_bonus:
+          optionalFields.sale_content_bonus !== undefined
+            ? optionalFields.sale_content_bonus
+            : 0,
+        percentage_clean:
+          optionalFields.percentage_clean !== undefined
+            ? optionalFields.percentage_clean
+            : 0,
+        percentage_shared:
+          optionalFields.percentage_shared !== undefined
+            ? optionalFields.percentage_shared
+            : 0,
+        percentage_work:
+          optionalFields.percentage_work !== undefined
+            ? optionalFields.percentage_work
+            : 0,
+        show_on_calendar_booking: !!optionalFields.show_on_calendar_booking,
+        is_reception: !!optionalFields.is_reception,
+        is_piercing: !!optionalFields.is_piercing,
+        photo_url:
+          optionalFields.photo_url !== undefined
+            ? optionalFields.photo_url
+            : null,
+      },
+    });
+
+    return res.status(201).json({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      position: user.position,
+    });
+  } catch (error) {
+    console.error("Error creating employee:", error);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
