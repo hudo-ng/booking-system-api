@@ -1781,38 +1781,60 @@ export const sendWeeklyReceptionPaystub = async (
   try {
     const dataArtist = [
       { userId: "6a0c3e58-d4e4-4f32-8585-9fbb81b08417", isFree15Hour: false },
-      { userId: "bab24c5b-ec93-4386-bdfb-7b0e1f25eb7f", isFree15Hour: true },
+      // { userId: "bab24c5b-ec93-4386-bdfb-7b0e1f25eb7f", isFree15Hour: true },
       { userId: "317b8640-2920-4d1d-853f-c8552545e634", isFree15Hour: false },
     ];
 
     const results = [];
+    const now = new Date();
+    const today = dayjs();
+
+    const fromDate = today.startOf("week").subtract(1, "week").add(1, "day");
+    const toDate = fromDate.add(6, "day");
+
+    const format = (d: dayjs.Dayjs) => d.format("YYYY-MM-DD");
+    const formatDate = (date: Date) => dayjs(date).format("MMM DD, YYYY");
+
+    const startStr = fromDate.startOf("day").toISOString();
+    const endStr = toDate.endOf("day").toISOString();
 
     for (const artist of dataArtist) {
       const { userId, isFree15Hour } = artist;
 
-      const now = new Date();
-      const today = dayjs();
-      const fromDate = today.startOf("week").subtract(1, "week").add(1, "day");
-      const toDate = fromDate.add(6, "day");
-      const format = (d: dayjs.Dayjs) => d.format("YYYY-MM-DD");
-      const formatDate = (date: Date) => dayjs(date).format("MMM DD, YYYY");
-
-      // 1. Fetch Reception Data
       const week = await getReceptionWeekData(
         String(userId),
         format(fromDate),
         format(toDate),
       );
-      if (!week?.user) continue; // Skip if user not found
+      if (!week?.user) continue;
 
-      // 2. Fetch Appointments booked (for commission)
+      const userProfile = week.user;
+
+      const dbWageA = userProfile.wage || 0;
+      const dbWageB = userProfile.new_wage || 0;
+      const dbBonusWage = userProfile.bonus_wage || 0;
+      const dbExtraWage = userProfile.extra_hour_wage || 0;
+
+      const scheduleTemplates = await prisma.workSchedule.findMany({
+        where: {
+          userId: String(userId),
+          is_off: false,
+        },
+      });
+
+      const dailyContentBonuses = await prisma.contentBonus.findMany({
+        where: {
+          userId: String(userId),
+          date: { gte: format(fromDate), lte: format(toDate) },
+        },
+      });
+
       const bookedAppointments = await prisma.appointment.findMany({
         where: { assignedById: String(userId) },
         select: { id: true },
       });
       const bookedIds = bookedAppointments.map((a) => a.id);
 
-      // 3. Fetch External API Data (Cache)
       const apiDataCache = new Map<string, any[]>();
       let fetchCursor = new Date(fromDate.toDate());
       while (fetchCursor <= toDate.toDate()) {
@@ -1829,7 +1851,6 @@ export const sendWeeklyReceptionPaystub = async (
         fetchCursor.setDate(fetchCursor.getDate() + 1);
       }
 
-      // 4. Calculate Commissions
       let totalBookingVolume = 0;
       let qualifiedBookingCount = 0;
       const bookingCommRate = 0.01;
@@ -1854,27 +1875,186 @@ export const sendWeeklyReceptionPaystub = async (
 
       const bookingCommission = totalBookingVolume * bookingCommRate;
 
-      // 5. Calculate Hourly Pay with Apprentice logic
+      // ==========================================
+      // ADVANCED SPLIT & DEDUCTION HOUR MATRICES
+      // ==========================================
       const rawHrs = week.totalHours || 0;
-      const rate = week.user.wage || 0;
-      const bonusHourrate = 14;
       const totalWorkDays = week.totalWorkDays || 0;
       const expectedHours = totalWorkDays * 8;
 
-      // Handle Free 15 Hours logic
-      let apprenticeHours = 0;
-      let payableHours = rawHrs;
+      // Calculate total billable capacity after pulling out training hours
+      const deductionPoolSize = isFree15Hour ? 15 : 0;
+      const totalBillableHours = Math.max(0, rawHrs - deductionPoolSize);
 
-      if (isFree15Hour) {
-        apprenticeHours = Math.min(rawHrs, 15);
-        payableHours = Math.max(0, rawHrs - 15);
+      // Extra hours can ONLY exist if billable hours exceed the expected ceiling
+      const processedExtraHours = Math.max(
+        0,
+        totalBillableHours - expectedHours,
+      );
+
+      // Regular hours to process represent the billable hours that fit under the expected cap
+      const totalRegularHoursToProcess = Math.min(
+        totalBillableHours,
+        expectedHours,
+      );
+
+      // Track raw calculations strictly for UI presentation display state
+      const uiRawExtraHours = Math.max(0, rawHrs - expectedHours);
+
+      let processedRegularHoursA = 0;
+      let processedRegularHoursB = 0;
+      let hoursEligibleForBonusWage = 0;
+      let calculatedBonusWagePay = 0;
+
+      const lastWeekDays: dayjs.Dayjs[] = [];
+      let currentDayCursor = fromDate.clone();
+      while (
+        currentDayCursor.isBefore(toDate) ||
+        currentDayCursor.isSame(toDate, "day")
+      ) {
+        lastWeekDays.push(currentDayCursor.clone());
+        currentDayCursor = currentDayCursor.add(1, "day");
       }
 
-      const reg = Math.min(payableHours, expectedHours);
-      const ot = Math.max(0, payableHours - expectedHours);
-      const gross = reg * rate + ot * bonusHourrate + bookingCommission;
+      const activeWorkedShiftsData: Array<{
+        dateStr: string;
+        displayDate: string;
+        template: any;
+      }> = [];
 
-      // 6. HTML Content
+      // Step 1: Distribute billable regular hours into processed B and A pools day-by-day
+      // We process B first to mimic the prioritization logic
+      let remainingRegularToAllocate = totalRegularHoursToProcess;
+
+      // First pass: Allocate to Type B shifts to prioritize them
+      for (const calendarDay of lastWeekDays) {
+        const jsDayOfWeek = calendarDay.day();
+        const matchedTemplate = scheduleTemplates.find(
+          (t) => t.dayOfWeek === jsDayOfWeek,
+        );
+
+        if (matchedTemplate) {
+          if (
+            !activeWorkedShiftsData.some(
+              (s) => s.dateStr === calendarDay.format("YYYY-MM-DD"),
+            )
+          ) {
+            activeWorkedShiftsData.push({
+              dateStr: calendarDay.format("YYYY-MM-DD"),
+              displayDate: calendarDay.format("ddd, MMM DD"),
+              template: matchedTemplate,
+            });
+          }
+
+          if (
+            remainingRegularToAllocate <= 0 ||
+            matchedTemplate.salary_type !== "B"
+          )
+            continue;
+
+          const allocationForThisDay = Math.min(remainingRegularToAllocate, 8);
+          remainingRegularToAllocate -= allocationForThisDay;
+          processedRegularHoursB += allocationForThisDay;
+
+          if (matchedTemplate.is_bonus_hourly) {
+            calculatedBonusWagePay += allocationForThisDay * dbBonusWage;
+            hoursEligibleForBonusWage += allocationForThisDay;
+          }
+        }
+      }
+
+      // Second pass: Allocate remaining regular hours to Type A shifts
+      for (const calendarDay of lastWeekDays) {
+        const jsDayOfWeek = calendarDay.day();
+        const matchedTemplate = scheduleTemplates.find(
+          (t) => t.dayOfWeek === jsDayOfWeek,
+        );
+
+        if (matchedTemplate && matchedTemplate.salary_type !== "B") {
+          if (remainingRegularToAllocate <= 0) continue;
+
+          const allocationForThisDay = Math.min(remainingRegularToAllocate, 8);
+          remainingRegularToAllocate -= allocationForThisDay;
+          processedRegularHoursA += allocationForThisDay;
+
+          if (matchedTemplate.is_bonus_hourly) {
+            calculatedBonusWagePay += allocationForThisDay * dbBonusWage;
+            hoursEligibleForBonusWage += allocationForThisDay;
+          }
+        }
+      }
+
+      // Safe fallback injection rule for unmapped hours
+      if (remainingRegularToAllocate > 0) {
+        processedRegularHoursA += remainingRegularToAllocate;
+      }
+
+      // Calculate how many hours were actually deducted from each pool for the UI statement
+      // Total Regular Split before deduction would be:
+      const rawRegularHoursToProcess = Math.min(rawHrs, expectedHours);
+      let uiRawRegularA = 0;
+      let uiRawRegularB = 0;
+      let uiRemainingToSplit = rawRegularHoursToProcess;
+
+      for (const calendarDay of lastWeekDays) {
+        const jsDayOfWeek = calendarDay.day();
+        const matchedTemplate = scheduleTemplates.find(
+          (t) => t.dayOfWeek === jsDayOfWeek,
+        );
+        if (matchedTemplate && uiRemainingToSplit > 0) {
+          const alloc = Math.min(uiRemainingToSplit, 8);
+          uiRemainingToSplit -= alloc;
+          if (matchedTemplate.salary_type === "B") uiRawRegularB += alloc;
+          else uiRawRegularA += alloc;
+        }
+      }
+      if (uiRemainingToSplit > 0) uiRawRegularA += uiRemainingToSplit;
+
+      const apprenticeHoursDeductedFromB =
+        uiRawRegularB - processedRegularHoursB;
+      const apprenticeHoursDeductedFromA =
+        uiRawRegularA - processedRegularHoursA;
+      const apprenticeHoursDeductedFromExtra =
+        uiRawExtraHours - processedExtraHours;
+
+      // Final gross item computations
+      const calculatedRegularPayA = processedRegularHoursA * dbWageA;
+      const calculatedRegularPayB = processedRegularHoursB * dbWageB;
+      const calculatedExtraPay = processedExtraHours * dbExtraWage;
+
+      // Content Bonus Breakdown Calculation
+      let totalContentBonusPay = 0;
+      const contentBonusBreakdownHtml = activeWorkedShiftsData
+        .map((shift) => {
+          const matchingBonus = dailyContentBonuses.find(
+            (b) => b.date === shift.dateStr,
+          );
+          const bonusAmount = matchingBonus?.content_bonus_amount || 0;
+          totalContentBonusPay += bonusAmount;
+
+          return bonusAmount > 0
+            ? `
+            <tr class="sub-row">
+              <td>&nbsp;&nbsp;&bull; Content Bonus (${shift.displayDate})</td>
+              <td>—</td>
+              <td>Flat Award</td>
+              <td style="text-align:right;">$${bonusAmount.toFixed(2)}</td>
+            </tr>`
+            : "";
+        })
+        .join("");
+
+      const gross =
+        calculatedRegularPayA +
+        calculatedRegularPayB +
+        calculatedBonusWagePay +
+        calculatedExtraPay +
+        bookingCommission +
+        totalContentBonusPay;
+
+      // ==========================================
+      // HTML PRESENTATION ENGINE
+      // ==========================================
       const htmlContent = `
       <html>
         <head>
@@ -1894,6 +2074,7 @@ export const sendWeeklyReceptionPaystub = async (
             table { width: 100%; border-collapse: collapse; border: 1px solid #ccc; }
             th { background: #f2f2f2; color: #666; font-size: 10px; padding: 12px 10px; text-align: left; text-transform: uppercase; border-bottom: 1px solid #ccc; }
             td { padding: 15px 10px; font-size: 13px; border-bottom: 1px solid #eee; }
+            .sub-row td { padding: 8px 10px 8px 20px; font-size: 12px; color: #555; background: #fafafa; border-bottom: 1px solid #f0f0f0; }
             .apprentice-text { color: #8b5cf6; font-weight: 600; font-style: italic; }
             .footer-totals { display: flex; justify-content: flex-end; padding: 20px; background: #f9f9f9; border: 1px solid #ccc; border-top: none; }
             .total-item { margin-left: 50px; text-align: center; }
@@ -1912,19 +2093,19 @@ export const sendWeeklyReceptionPaystub = async (
               <h1>RECEPTION PAY STATEMENT</h1>
               <div class="summary-header">
                 <div class="summary-box"><small>PERIOD</small><span>7 Days</span></div>
-                <div class="summary-box"><small>GROSS PAY</small><span>$${gross.toFixed(2)}</span></div>
+                <div class="summary-box"><small>GROWS PAY</small><span>$${gross.toFixed(2)}</span></div>
               </div>
             </div>
           </div>
           <div class="grey-bar">
             <div>Employee Information</div>
-            <div>Rate</div>
+            <div>Base Config</div>
             <div>Status</div>
             <div>Pay Period</div>
           </div>
           <div class="info-row">
-            <div><strong>${week.user.name}</strong><br />Receptionist</div>
-            <div>$${(rate - 1).toFixed(2)} + ($1 bonus) /hr</div>
+            <div><strong>${userProfile.name}</strong><br />Receptionist</div>
+            <div>Rates Variable (A: $${dbWageA.toFixed(2)} / B: $${dbWageB.toFixed(2)})</div>
             <div>Weekly</div>
             <div>${format(fromDate)} to ${format(toDate)}</div>
           </div>
@@ -1933,36 +2114,63 @@ export const sendWeeklyReceptionPaystub = async (
               <tr>
                 <th>Pay Description</th>
                 <th>Quantity</th>
-                <th>Rate</th>
+                <th>Rate Mapping</th>
                 <th style="text-align:right">Total</th>
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td><strong>Regular Hours</strong></td>
-                <td>${reg.toFixed(1)} hrs</td>
-                <td>$${rate.toFixed(2)}</td>
-                <td style="text-align:right; font-weight:bold;">$${(reg * rate).toFixed(2)}</td>
-              </tr>
               ${
-                isFree15Hour
+                uiRawRegularA > 0 || processedRegularHoursA > 0
                   ? `
               <tr>
-                <td class="apprentice-text"><strong>Apprentice (Skill Training)</strong></td>
-                <td>${apprenticeHours.toFixed(1)} hrs</td>
+                <td><strong>Regular Hours (A)</strong> </td>
+                <td>${processedRegularHoursA.toFixed(1)} hrs</td>
+                <td>$${dbWageA.toFixed(2)}</td>
+                <td style="text-align:right; font-weight:bold;">$${calculatedRegularPayA.toFixed(2)}</td>
+              </tr>`
+                  : ""
+              }
+              ${
+                uiRawRegularB > 0 || processedRegularHoursB > 0
+                  ? `
+              <tr>
+                <td><strong>Regular Hours (B)</strong></td>
+                <td>${processedRegularHoursB.toFixed(1)} hrs</td>
+                <td>$${dbWageB.toFixed(2)}</td>
+                <td style="text-align:right; font-weight:bold;">$${calculatedRegularPayB.toFixed(2)}</td>
+              </tr>`
+                  : ""
+              }
+              ${
+                calculatedBonusWagePay > 0
+                  ? `
+              <tr>
+                <td><strong>Bonus Hours</strong></td>
+                <td>${hoursEligibleForBonusWage.toFixed(1)} hrs</td>
+                <td>$${dbBonusWage.toFixed(2)}</td>
+                <td style="text-align:right; font-weight:bold;">$${calculatedBonusWagePay.toFixed(2)}</td>
+              </tr>`
+                  : ""
+              }
+              ${
+                isFree15Hour && deductionPoolSize > 0
+                  ? `
+              <tr>
+                <td class="apprentice-text"><strong>Apprentice Mandatory Training Deduct</strong></td>
+                <td>${deductionPoolSize.toFixed(1)} hrs</td>
                 <td>$0.00</td>
                 <td style="text-align:right; color:#888;">FREE</td>
               </tr>`
                   : ""
               }
               ${
-                ot > 0
+                uiRawExtraHours > 0 || processedExtraHours > 0
                   ? `
               <tr>
-                <td><strong>Bonus Hours</strong></td>
-                <td>${ot.toFixed(1)} hrs</td>
-                <td>$${bonusHourrate}</td>
-                <td style="text-align:right; font-weight:bold;">$${(ot * bonusHourrate).toFixed(2)}</td>
+                <td><strong>Extra Hour Payout</strong></td>
+                <td>${processedExtraHours.toFixed(1)} hrs</td>
+                <td>$${dbExtraWage.toFixed(2)}</td>
+                <td style="text-align:right; font-weight:bold;">$${calculatedExtraPay.toFixed(2)}</td>
               </tr>`
                   : ""
               }
@@ -1970,32 +2178,53 @@ export const sendWeeklyReceptionPaystub = async (
                 bookingCommission > 0
                   ? `
               <tr>
-                <td><strong>Booking Commission (1%)</strong></td>
+                <td><strong>Booking Commissions (1%)</strong></td>
                 <td>$${totalBookingVolume.toFixed(2)} vol</td>
                 <td>1%</td>
                 <td style="text-align:right; font-weight:bold; color:#16a34a;">$${bookingCommission.toFixed(2)}</td>
               </tr>`
                   : ""
               }
+              
+              ${
+                totalContentBonusPay > 0
+                  ? `
+              <tr style="background-color: #fcfcfc;">
+                <td><strong>Content Bonus Summary Breakdown</strong></td>
+                <td>—</td>
+                <td>Daily Split</td>
+                <td style="text-align:right; font-weight:bold; color:#4F46E5;">$${totalContentBonusPay.toFixed(2)}</td>
+              </tr>
+              ${contentBonusBreakdownHtml}
+              `
+                  : ""
+              }
+
             </tbody>
           </table>
           <div class="footer-totals">
-           <div class="total-item"><small>WORK DAYS</small><span>${totalWorkDays} Days</span></div>
+            <div class="total-item"><small>WORK DAYS</small><span>${totalWorkDays} Days</span></div>
+            <div class="total-item"><small>EXPECTED HOURS</small><span>${expectedHours} hrs</span></div>
             <div class="total-item"><small>TOTAL HOURS</small><span>${rawHrs.toFixed(1)}</span></div>
             <div class="total-item" style="color:#000;"><small>Gross Pay</small><span>$${gross.toFixed(2)}</span></div>
           </div>
         </body>
       </html>`;
 
-      // 7. Puppeteer & Upload
       const browser = await puppeteer.launch({
         headless: true,
         args: ["--no-sandbox"],
       });
       const page = await browser.newPage();
-      await page.setViewport({ width: 850, height: 800, deviceScaleFactor: 2 });
+
+      await page.setViewport({
+        width: 850,
+        deviceScaleFactor: 2,
+        height: 1100,
+      });
       await page.setContent(htmlContent);
-      const image = await page.screenshot({ type: "png" });
+
+      const image = await page.screenshot({ type: "png", fullPage: true });
       await browser.close();
 
       const uploadResponse = await imageKit.upload({

@@ -832,9 +832,9 @@ export const getPaymentReport = async (req: Request, res: Response) => {
           ],
         },
         // Using date conditions makes the query more efficient
-        createdAt: {
-          gte: new Date(startDate),
-          lte: new Date(endDate),
+        startTime: {
+          gte: dayjs(startDate).subtract(1, "day").toDate(), // buffer to ensure we capture all appointments on the start date
+          lte: dayjs(endDate).add(1, "day").toDate(), // buffer to ensure we capture all appointments on the end date
         },
       },
       select: { id: true, customerName: true },
