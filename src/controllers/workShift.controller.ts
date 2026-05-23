@@ -882,6 +882,13 @@ export const getPaymentReport = async (req: Request, res: Response) => {
         item?.status?.toLowerCase() === "paid" ||
         item?.status?.toLowerCase() === "done",
     );
+    let totalCountTattooForm = allData.filter(
+      (k) => k.color !== "piercing",
+    ).length;
+    let totalCountTattooFormPaid = allData.filter(
+      (k) =>
+        k.color !== "piercing" && (k.status === "paid" || k.status === "done"),
+    ).length;
     if (artist !== "All") {
       piercingData = piercingData?.filter(
         (k) => k?.artist?.toLowerCase() === artist?.toLowerCase(),
@@ -891,6 +898,11 @@ export const getPaymentReport = async (req: Request, res: Response) => {
     return res.json({
       data: piercingData,
       bookedAppointments: bookedAppointments,
+      count: {
+        totalCountTattooForm: totalCountTattooForm,
+        totalCountTattooFormPaid: totalCountTattooFormPaid,
+      },
+      tattooData: allData.filter((k) => k.color !== "piercing"),
     });
   } catch (error: any) {
     console.error("Error fetching piercing report:", error.message);
