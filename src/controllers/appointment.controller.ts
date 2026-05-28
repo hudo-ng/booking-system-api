@@ -288,9 +288,33 @@ export const duplicateAppointment = async (req: Request, res: Response) => {
             deposit_status: "ignored",
           },
         });
+
+        // 🔔 Notification for ORIGINAL appointment regarding the moved deposit
+        const formattedNewTime = startTime
+          ? dayjs(startTime)
+              .tz("America/Chicago")
+              .format("MMM DD, YYYY hh:mm A")
+          : "Unscheduled / TBD";
+
+        await tx.notification.create({
+          data: {
+            created_by: userId,
+            title: "deposit transfer out",
+            description: `This appointment's deposit of $${(currentAppointment.deposit_amount ?? 0).toFixed(2)} has been moved to a new duplicated appointment (ID: ${newAppointment.id}) for Customer "${customerName ?? "No name provided"}" scheduled on ${formattedNewTime}.`,
+            customer_name:
+              currentAppointment.customerName ?? "No name provided",
+            quote_amount: currentAppointment?.quote_amount || 0,
+            deposit_amount: 0,
+            deposit_category: "Has been moved",
+            extra_deposit_category: "",
+            appointment_start_time: currentAppointment.startTime ?? new Date(),
+            appointment_end_time: currentAppointment.endTime ?? new Date(),
+            appointment_id: currentAppointment.id,
+          },
+        });
       }
 
-      // 5️⃣ Notification
+      // 5️⃣ Notification for NEW appointment
       await tx.notification.create({
         data: {
           created_by: userId,
@@ -321,7 +345,7 @@ export const duplicateAppointment = async (req: Request, res: Response) => {
         result.customerName
       } has been scheduled ${
         result?.assignedBy?.name ? ` by ${result?.assignedBy?.name}` : ""
-      }} with Artist: ${
+      } with Artist: ${
         result?.employee?.name
       } on ${chicagoTime} with deposit: ${result?.deposit_amount}USD via ${
         result?.deposit_category
@@ -339,7 +363,6 @@ export const duplicateAppointment = async (req: Request, res: Response) => {
     });
   }
 };
-
 export const getLatestDepositAppointment = async (
   req: Request,
   res: Response,
