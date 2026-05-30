@@ -1781,7 +1781,7 @@ export const sendWeeklyReceptionPaystub = async (
   try {
     const dataArtist = [
       { userId: "6a0c3e58-d4e4-4f32-8585-9fbb81b08417", isFree15Hour: false },
-      // { userId: "bab24c5b-ec93-4386-bdfb-7b0e1f25eb7f", isFree15Hour: true },
+      { userId: "bab24c5b-ec93-4386-bdfb-7b0e1f25eb7f", isFree15Hour: true },
       { userId: "317b8640-2920-4d1d-853f-c8552545e634", isFree15Hour: false },
     ];
 
@@ -3167,7 +3167,6 @@ export const generateYenPaystubData = async (req: Request, res: Response) => {
 export const sendAllArtistPaystubs = async (req: Request, res: Response) => {
   try {
     const arrayArtistNeedToHavePaystub = [
-      { name: "Damian", commission: 0.55 },
       { name: "Pablo", commission: 0.55 },
       { name: "Navei", commission: 0.55 },
       { name: "Jackie", commission: 0.55 },
@@ -3651,7 +3650,8 @@ export const sendAllArtistPaystubs = async (req: Request, res: Response) => {
 export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
   try {
     const targetEmail = (req.query.email as string) || "nicole@example.com";
-    const studioFeeAmount = 65.0;
+    const studioFee1Amount = 65.0;
+    const studioFee2Amount = 50.0;
 
     const now = new Date();
     now.setDate(now.getDate() - 2);
@@ -3680,7 +3680,8 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
       let piercing = 0,
         service = 0,
         tips = 0,
-        studioFee = 0;
+        studioFeeOne = 0,
+        studioFeeTwo = 0;
       let totalPiercingForFee = 0;
       let cash = 0,
         card = 0;
@@ -3735,7 +3736,10 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
           }
         });
 
-        if (totalPiercingForFee > 0) studioFee = studioFeeAmount;
+        if (totalPiercingForFee > 0) {
+          studioFeeOne = studioFee1Amount;
+          studioFeeTwo = studioFee2Amount;
+        }
       } catch (err) {
         console.error(err);
       }
@@ -3751,7 +3755,8 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
         piercing,
         service,
         tips,
-        studioFee,
+        studioFeeOne,
+        studioFeeTwo,
         cash,
         card,
         dailyNet:
@@ -3764,7 +3769,8 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
           piercing +
           service +
           tips -
-          studioFee,
+          studioFeeOne -
+          studioFeeTwo,
       });
       cursor.setDate(cursor.getDate() + 1);
     }
@@ -3774,11 +3780,10 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
       (d) => d.jDirect + d.sDirect + d.piercing + d.service > 0,
     ).length;
 
-    // A Studio Open Day is any day where there was activity from anyone (Nicole, Yen, or Zoe)
-    // We can check if any commission or fee was generated
     const totalOpenDays = dailyLogs.filter(
       (d) => d.sDirect + d.sYen + d.sZoe + d.piercing + d.service > 0,
     ).length;
+
     const htmlContent = `
     <html>
       <head>
@@ -3796,9 +3801,9 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
           .net { color: #009e3d; }
           .fee { color: #c7c7c7; }
           .footer-totals { display: flex; justify-content: flex-end; margin-top: 20px; padding: 20px; background: #fcfcfc; border: 1px solid #eee; border-radius: 8px; }
-          .total-item { margin-left: 40px; text-align: center; }
+          .total-item { margin-left: 30px; text-align: center; }
           .total-item small { display: block; font-size: 9px; font-weight: 700; color: #aaa; text-transform: uppercase; }
-          .total-item span { font-size: 18px; font-weight: 700; }
+          .total-item span { font-size: 16px; font-weight: 700; }
         </style>
       </head>
       <body>
@@ -3815,7 +3820,8 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
               <th colspan="3" style="background: #e8f5e9;">Saline Commission</th>
               <th rowspan="2">Piercing</th>
               <th rowspan="2">Service</th>
-              <th rowspan="2">Studio Fee</th>
+              <th rowspan="2">Studio Fee One</th>
+              <th rowspan="2">Studio Fee Two</th>
               <th rowspan="2">Tips</th>
               <th rowspan="2" class="bold-total">Daily Net</th>
             </tr>
@@ -3842,7 +3848,8 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
                 <td class="passive-cell">$${d.sZoe.toFixed(2)}</td>
                 <td>$${d.piercing.toFixed(2)}</td>
                 <td>$${d.service.toFixed(2)}</td>
-                <td class="fee">-$${d.studioFee.toFixed(2)}</td>
+                <td class="fee">-$${d.studioFeeOne.toFixed(2)}</td>
+                <td class="fee">-$${d.studioFeeTwo.toFixed(2)}</td>
                 <td style="color:green;">$${d.tips.toFixed(2)}</td>
                 <td class="bold-total">$${d.dailyNet.toFixed(2)}</td>
               </tr>
@@ -3855,7 +3862,7 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
         <div class="footer-totals">
           <div class="total-item">
             <small>Total Open</small>
-              <span class="count-badge">${totalOpenDays} Days</span>
+            <span class="count-badge">${totalOpenDays} Days</span>
           </div>
           <div class="total-item">
             <small>Total Work Days</small>
@@ -3864,7 +3871,8 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
           <div class="total-item"><small>Direct Earnings</small><span>$${dailyLogs.reduce((acc, d) => acc + d.jDirect + d.sDirect + d.piercing + d.service, 0).toFixed(2)}</span></div>
           <div class="total-item"><small>Passive (Yen/Zoe)</small><span>$${dailyLogs.reduce((acc, d) => acc + d.jYen + d.jZoe + d.sYen + d.sZoe, 0).toFixed(2)}</span></div>
           <div class="total-item"><small>Tips</small><span>$${dailyLogs.reduce((acc, d) => acc + d.tips, 0).toFixed(2)}</span></div>
-          <div class="total-item"><small>Studio Fees</small><span class="fee">-$${dailyLogs.reduce((acc, d) => acc + d.studioFee, 0).toFixed(2)}</span></div>
+          <div class="total-item"><small>Studio Fees 1</small><span class="fee">-$${dailyLogs.reduce((acc, d) => acc + d.studioFeeOne, 0).toFixed(2)}</span></div>
+          <div class="total-item"><small>Studio Fees 2</small><span class="fee">-$${dailyLogs.reduce((acc, d) => acc + d.studioFeeTwo, 0).toFixed(2)}</span></div>
           <div class="total-item"><small>Total Net</small><span class="net">$${netPay.toFixed(2)}</span></div>
         </div>
       </body>
@@ -3909,7 +3917,8 @@ export const generateNicolePaystubData = async (
   try {
     const { start_date, end_date } = req.body;
     const artistName = "Nicole";
-    const studioFeeAmount = 65.0;
+    const studioFee1Amount = 65.0;
+    const studioFee2Amount = 50.0;
 
     const fromDate = dayjs(start_date).toDate();
     const toDate = dayjs(end_date).toDate();
@@ -3930,7 +3939,8 @@ export const generateNicolePaystubData = async (
       let piercing = 0,
         service = 0,
         tips = 0,
-        studioFee = 0;
+        studioFeeOne = 0,
+        studioFeeTwo = 0;
       let totalPiercingForFee = 0;
       let dayCash = 0,
         dayCard = 0;
@@ -3968,6 +3978,7 @@ export const generateNicolePaystubData = async (
             jDirect += pJ * 0.6; // 60% Jewelry
             sDirect += pS * 1.0; // 100% Saline
             tips += pT; // 100% Tips
+
             // Cash/Card Tracking
             let rCash = parseFloat(i.cash) || 0;
             let rCard = parseFloat(i.card) || 0;
@@ -3995,8 +4006,11 @@ export const generateNicolePaystubData = async (
           }
         });
 
-        // Apply Studio Fee only if there was piercing activity
-        if (totalPiercingForFee > 0) studioFee = studioFeeAmount;
+        // Apply Studio Fee One & Two if there was piercing activity
+        if (totalPiercingForFee > 0) {
+          studioFeeOne = studioFee1Amount;
+          studioFeeTwo = studioFee2Amount;
+        }
       } catch (err) {
         console.error(`Fetch failed for ${formatted}`);
       }
@@ -4011,7 +4025,8 @@ export const generateNicolePaystubData = async (
         piercing +
         service +
         tips -
-        studioFee;
+        studioFeeOne -
+        studioFeeTwo;
 
       dailyLogs.push({
         date: dayjs(cursor).format("MMM DD, YYYY"),
@@ -4024,7 +4039,8 @@ export const generateNicolePaystubData = async (
         piercing,
         service,
         tips,
-        studioFee,
+        studioFeeOne,
+        studioFeeTwo,
         cash: dayCash,
         subtotal: daySubtotal,
         // Helper properties for the aggregations below
@@ -4039,18 +4055,24 @@ export const generateNicolePaystubData = async (
       totalDirect: dailyLogs.reduce((acc, d) => acc + d.direct, 0),
       totalPassive: dailyLogs.reduce((acc, d) => acc + d.passive, 0),
       totalTips: dailyLogs.reduce((acc, d) => acc + d.tips, 0),
-      totalFees: dailyLogs.reduce((acc, d) => acc + d.studioFee, 0),
+      totalFeesOne: dailyLogs.reduce((acc, d) => acc + d.studioFeeOne, 0),
+      totalFeesTwo: dailyLogs.reduce((acc, d) => acc + d.studioFeeTwo, 0),
+      totalFeesCombined: dailyLogs.reduce(
+        (acc, d) => acc + d.studioFeeOne + d.studioFeeTwo,
+        0,
+      ),
       totalCash: dailyLogs.reduce((acc, d) => acc + d.cash, 0),
       netPay: 0, // calculated below
       totalWorkDays: dailyLogs.filter((d) => d.direct > 0).length,
-      totalOpenDays: dailyLogs.filter((d) => d.studioFee > 0).length, // Useful for the studio owner
+      totalOpenDays: dailyLogs.filter((d) => d.studioFeeOne > 0).length,
     };
 
     stats.netPay =
       stats.totalDirect +
       stats.totalPassive +
       stats.totalTips -
-      stats.totalFees;
+      stats.totalFeesCombined;
+
     return res.json({
       success: true,
       artist: { name: artistName },

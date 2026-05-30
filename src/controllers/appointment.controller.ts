@@ -17,17 +17,47 @@ export const getAppointments = async (req: Request, res: Response) => {
     userId: string;
     role: string;
   };
-  const roleToSearch = role === "employee" ? { employeeId: userId } : {};
-  const appointments = await prisma.appointment.findMany({
-    where: roleToSearch,
-    orderBy: { createdAt: "desc" },
-    include: {
-      employee: {
-        select: { id: true, name: true },
+
+  try {
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    // Query the current user to check owner permissions
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!currentUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const isOwner = currentUser.isOwner;
+
+    // Filter appointments by employee context if role is an employee
+    const roleToSearch = role === "employee" ? { employeeId: userId } : {};
+
+    // 🛡️ Filter rules based on role authorization
+    const deletionFilter = isOwner ? {} : { deletedAt: null };
+
+    const appointments = await prisma.appointment.findMany({
+      where: {
+        ...roleToSearch,
+        ...deletionFilter, // Hide soft-deleted rows unless user is an owner
       },
-    },
-  });
-  res.json(appointments);
+      orderBy: { createdAt: "desc" },
+      include: {
+        employee: {
+          select: { id: true, name: true },
+        },
+      },
+    });
+
+    return res.json(appointments);
+  } catch (error) {
+    console.error("❌ getAppointments error:", error);
+    return res.status(500).json({ message: "Failed to fetch appointments" });
+  }
 };
 
 export const createAppointment = async (req: Request, res: Response) => {
@@ -399,6 +429,11 @@ export const getLatestDepositAppointment = async (
   }
 };
 export const updateDepositAppointment = async (req: Request, res: Response) => {
+  const { userId } = (req as any).user as { userId?: string };
+  if (!userId) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
   const {
     id,
     status,
@@ -431,11 +466,35 @@ export const updateDepositAppointment = async (req: Request, res: Response) => {
         },
       });
 
-      // 2️⃣ Sync Appointment.deposit_status
-      await tx.appointment.update({
+      // 2️⃣ Sync and fetch parent Appointment info for the notification payload
+      const updatedAppointment = await tx.appointment.update({
         where: { id: updatedDeposit.appointment_id },
         data: {
           deposit_status: status,
+        },
+      });
+
+      // 3️⃣ Create activity/status alert notification log entry
+      await tx.notification.create({
+        data: {
+          created_by: userId,
+          title: "update deposit appointment",
+          description: `Deposit appointment status updated to "${status}".`,
+          customer_name: updatedAppointment.customerName ?? "No name provided",
+          quote_amount: updatedAppointment.quote_amount ?? 0,
+          deposit_amount:
+            deposit_amount ?? updatedAppointment.deposit_amount ?? 0,
+          deposit_category:
+            deposit_category ??
+            updatedAppointment.deposit_category ??
+            "No deposit",
+          extra_deposit_category:
+            (extra_deposit_category ??
+              updatedAppointment.extra_deposit_category) ||
+            "",
+          appointment_start_time: updatedAppointment.startTime ?? new Date(),
+          appointment_end_time: updatedAppointment.endTime ?? new Date(),
+          appointment_id: updatedAppointment.id,
         },
       });
 
@@ -455,6 +514,11 @@ export const updateDepositStatusInAppointment = async (
   req: Request,
   res: Response,
 ) => {
+  const { userId } = (req as any).user as { userId?: string };
+  if (!userId) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
   const { appointment_id, status } = req.body;
 
   if (!appointment_id) {
@@ -471,8 +535,8 @@ export const updateDepositStatusInAppointment = async (
 
   try {
     const result = await prisma.$transaction(async (tx) => {
-      // 1️⃣ Update appointment deposit_status
-      await tx.appointment.update({
+      // 1️⃣ Update appointment deposit_status and return its fields
+      const updatedAppointment = await tx.appointment.update({
         where: { id: appointment_id },
         data: {
           deposit_status: status,
@@ -496,6 +560,24 @@ export const updateDepositStatusInAppointment = async (
         });
       }
 
+      // 4️⃣ Create notification tracking the update activity status
+      await tx.notification.create({
+        data: {
+          created_by: userId,
+          title: "update deposit status in appointment",
+          description: `Appointment deposit status changed to "${status}". synced down across ${deposits.length} related deposit logs.`,
+          customer_name: updatedAppointment.customerName ?? "No name provided",
+          quote_amount: updatedAppointment.quote_amount ?? 0,
+          deposit_amount: updatedAppointment.deposit_amount ?? 0,
+          deposit_category: updatedAppointment.deposit_category ?? "No deposit",
+          extra_deposit_category:
+            updatedAppointment.extra_deposit_category || "",
+          appointment_start_time: updatedAppointment.startTime ?? new Date(),
+          appointment_end_time: updatedAppointment.endTime ?? new Date(),
+          appointment_id: updatedAppointment.id,
+        },
+      });
+
       return {
         appointment_id,
         deposit_status: status,
@@ -511,7 +593,6 @@ export const updateDepositStatusInAppointment = async (
     });
   }
 };
-
 export const createDepositAppointment = async (req: Request, res: Response) => {
   try {
     const {
@@ -737,6 +818,8 @@ export const getAllAppointments = async (req: Request, res: Response) => {
     return res.status(404).json({ error: "User not found" });
   }
 
+  const isOwner = currentUser.isOwner;
+
   const { year, month } = req.query as { year?: string; month?: string };
 
   let dateFilter = {};
@@ -758,9 +841,13 @@ export const getAllAppointments = async (req: Request, res: Response) => {
     };
   }
 
+  // 🛡️ Build structural filtering rule based on role privilege
+  const deletionFilter = isOwner ? {} : { deletedAt: null };
+
   const appointments = await prisma.appointment.findMany({
     where: {
       ...dateFilter,
+      ...deletionFilter, // inject conditional rule depending on owner identity flag state
     },
     orderBy: { createdAt: "desc" },
     include: {
@@ -874,28 +961,33 @@ export const deleteAppointment = async (req: Request, res: Response) => {
     appointmentId?: string;
     issendSMS: string;
   };
-  const is_sms_released = issendSMS === "true" ? true : false;
+  const is_sms_released = issendSMS === "true";
+
   if (!userId) return res.status(401).json({ message: "Unauthorized" });
   if (!appointmentId)
     return res.status(400).json({ message: "Appointment ID required" });
 
   try {
-    // ✅ Step 1: Delete all attachments linked to this appointment
-    await prisma.appointmentAttachment.deleteMany({
-      where: { appointmentId },
-    });
-    await prisma.depositAppointment.deleteMany({
-      where: { appointment_id: appointmentId },
-    });
-    await prisma.verificationCode.deleteMany({
-      where: { appointment_id: appointmentId },
-    });
-    // ✅ Step 2: Delete appointment itself
-    const deletedAppointment = await prisma.appointment.delete({
+    // 1️⃣ Fetch the appointment first to check existence and get details for SMS/Notifications
+    const appointment = await prisma.appointment.findUnique({
       where: { id: appointmentId },
       include: { employee: { select: { id: true, name: true } } },
     });
 
+    if (!appointment || appointment.deletedAt) {
+      return res
+        .status(404)
+        .json({ message: "Appointment not found or already deleted" });
+    }
+
+    // 2️⃣ Perform Soft Delete by updating the deletedAt timestamp
+    const deletedAppointment = await prisma.appointment.update({
+      where: { id: appointmentId },
+      data: { deletedAt: new Date() },
+      include: { employee: { select: { id: true, name: true } } },
+    });
+
+    // 3️⃣ Optional SMS Notification
     if (is_sms_released) {
       const chicagoTime = dayjs(deletedAppointment.startTime)
         .tz("America/Chicago")
@@ -904,12 +996,13 @@ export const deleteAppointment = async (req: Request, res: Response) => {
 Text (210) 997-9737 or your artist to reschedule when you’re ready`;
       await sendSMS(deletedAppointment.phone, customerBody);
     }
-    // ✅ Step 3: Log deletion in notifications
+
+    // 4️⃣ Log deletion activity in notifications
     await prisma.notification.create({
       data: {
         created_by: userId,
         title: "Delete Appointment",
-        description: deletedAppointment.detail || "Appointment deleted",
+        description: deletedAppointment.detail || "Appointment soft-deleted",
         customer_name: deletedAppointment.customerName,
         quote_amount: deletedAppointment?.quote_amount || 0,
         deposit_amount: deletedAppointment?.deposit_amount || 0,
@@ -917,15 +1010,16 @@ Text (210) 997-9737 or your artist to reschedule when you’re ready`;
         extra_deposit_category: deletedAppointment.extra_deposit_category || "",
         appointment_start_time: deletedAppointment.startTime || new Date(),
         appointment_end_time: deletedAppointment.endTime || new Date(),
+        appointment_id: deletedAppointment.id,
       },
     });
 
     res.status(200).json({
-      message: "Appointment and attachments deleted",
+      message: "Appointment successfully soft-deleted",
       appointment: deletedAppointment,
     });
   } catch (error) {
-    console.error("Failed to delete appointment", error);
+    console.error("Failed to soft-delete appointment", error);
     res.status(500).json({ message: "Failed to delete appointment" });
   }
 };
@@ -949,6 +1043,8 @@ export const getAllAppointmentsBySelectedDate = async (
       return res.status(404).json({ error: "User not found" });
     }
 
+    const isOwner = currentUser.isOwner;
+
     const { date } = req.query as { date?: string };
     if (!date) {
       return res
@@ -967,11 +1063,15 @@ export const getAllAppointmentsBySelectedDate = async (
       endOfDay: endOfDay.toISOString(),
     });
 
+    // 🛡️ Filter rules based on role authorization
+    const deletionFilter = isOwner ? {} : { deletedAt: null };
+
     const appointments = await prisma.appointment.findMany({
       where: {
         startTime: { lte: endOfDay },
         endTime: { gte: startOfDay },
         status: "accepted",
+        ...deletionFilter, // Hide soft-deleted rows unless user is an owner
       },
       orderBy: { startTime: "asc" },
       include: {
@@ -990,7 +1090,6 @@ export const getAllAppointmentsBySelectedDate = async (
     return res.status(500).json({ error: "Internal server error" });
   }
 };
-
 export const getAppointmentById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params; // appointment ID from URL param
@@ -1483,12 +1582,16 @@ export const deleteRecurringAppointments = async (
       return res.status(404).json({ message: "Series not found" });
     }
 
-    // ✅ Delete only upcoming appointments (not past)
+    // ✅ Soft delete only upcoming appointments (not past)
     await prisma.$transaction(async (tx) => {
-      await tx.appointment.deleteMany({
+      await tx.appointment.updateMany({
         where: {
           seriesId,
-          startTime: { gt: dayjs().toDate() }, // only delete future appointments
+          startTime: { gt: dayjs().toDate() }, // only target future appointments
+          deletedAt: null, // target only active ones that haven't been deleted yet
+        },
+        data: {
+          deletedAt: new Date(),
         },
       });
 
@@ -1499,7 +1602,7 @@ export const deleteRecurringAppointments = async (
     });
 
     return res.json({
-      message: "Future appointments deleted and series deactivated",
+      message: "Future appointments soft-deleted and series deactivated",
       seriesId,
     });
   } catch (error) {
@@ -1517,11 +1620,27 @@ export const getAppointmentsByAssigneeAndDate = async (
 ) => {
   const { assigneeId } = req.params;
   const { startDate, endDate } = req.query;
+  const { userId } = (req as any).user as { userId?: string };
 
   try {
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
     if (!assigneeId || !startDate || !endDate) {
       return res.status(400).json({ message: "Missing required parameters" });
     }
+
+    // Query current user to verify if they are an owner
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!currentUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const isOwner = currentUser.isOwner;
 
     const start = dayjs(startDate as string)
       .startOf("day")
@@ -1530,10 +1649,14 @@ export const getAppointmentsByAssigneeAndDate = async (
       .endOf("day")
       .toDate();
 
+    // 🛡️ Filter rules based on role authorization
+    const deletionFilter = isOwner ? {} : { deletedAt: null };
+
     const appointments = await prisma.appointment.findMany({
       where: {
         assignedById: assigneeId,
         startTime: { gte: start, lte: end },
+        ...deletionFilter, // Hide soft-deleted rows unless user is an owner
       },
       include: {
         employee: true,
