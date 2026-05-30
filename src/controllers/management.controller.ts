@@ -461,6 +461,7 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
         success: true,
         data: customers,
         array_of_form_bookings: [],
+        summaryAnalytics: { totalBooked: 0, breakdowns: [] },
       });
     }
 
@@ -473,14 +474,12 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
       formBookings[0].createdAt,
     );
 
-    // Build targeted conditions for the database initial sweep
     const matchConditions: any[] = [
       { email: { in: emails } },
       { phone: { in: rawPhones } },
       { customerName: { in: names } },
     ];
 
-    // Condition 4 (Name -> Email) Database Pre-sweep
     names.forEach((name) => {
       const cleanName = normalizeName(name);
       if (cleanName && cleanName.length >= 3) {
@@ -504,34 +503,36 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
         phone: true,
         customerName: true,
         createdAt: true,
+        assignedBy: {
+          select: {
+            id: true,
+            name: true,
+            colour: true,
+          },
+        },
       },
     });
 
-    // Run strict logic checking matrix
+    const bookedAppointmentsTracked: any[] = [];
+
     const array_of_form_bookings = formBookings.map((booking) => {
       const bookingEmail = booking.email.toLowerCase().trim();
       const bookingPhoneCleaned = normalizePhone(booking.phone);
       const bookingNameCleaned = normalizeName(booking.name);
 
-      const hasAppointment = prospectiveAppointments.some((app) => {
+      const matchingApp = prospectiveAppointments.find((app) => {
+        // Crucial: strict timeline evaluation rule (Appointment must happen after booking request)
         if (!app.createdAt || app.createdAt <= booking.createdAt) return false;
 
         const appEmail = app.email?.toLowerCase().trim() || "";
         const appPhoneCleaned = normalizePhone(app.phone);
         const appNameCleaned = normalizeName(app.customerName);
 
-        // 1. Email to Email
         const emailMatch = bookingEmail && appEmail === bookingEmail;
-
-        // 2. Phone to Phone
         const phoneMatch =
           bookingPhoneCleaned && appPhoneCleaned === bookingPhoneCleaned;
-
-        // 3. Name to Name
         const exactNameMatch =
           bookingNameCleaned && appNameCleaned === bookingNameCleaned;
-
-        // 4. Name inside Email
         const nameInsideEmailMatch =
           bookingNameCleaned.length >= 3 &&
           appEmail.includes(bookingNameCleaned);
@@ -541,16 +542,73 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
         );
       });
 
+      if (matchingApp) {
+        bookedAppointmentsTracked.push(matchingApp);
+      }
+
       return {
         ...booking,
-        hasAppointment,
+        hasAppointment: !!matchingApp,
+        bookedBy: matchingApp?.assignedBy
+          ? {
+              id: matchingApp.assignedBy.id,
+              name: matchingApp.assignedBy.name,
+              colour: matchingApp.assignedBy.colour,
+            }
+          : matchingApp
+            ? { name: "System/Unknown" }
+            : null,
       };
     });
 
+    const totalBookedCount = bookedAppointmentsTracked.length;
+    const assigneeMap: {
+      [key: string]: { count: number; name: string; colour: string | null };
+    } = {};
+
+    bookedAppointmentsTracked.forEach((app) => {
+      const id = app.assignedBy?.id || "unassigned_or_system";
+      const name = app.assignedBy?.name || "Online Booking";
+      const colour = app.assignedBy?.colour || null;
+
+      if (!assigneeMap[id]) {
+        assigneeMap[id] = { count: 0, name, colour };
+      }
+      assigneeMap[id].count += 1;
+    });
+
+    const breakdowns = Object.entries(assigneeMap)
+      .map(([id, data]) => {
+        const percentage =
+          totalBookedCount > 0
+            ? parseFloat(((data.count / totalBookedCount) * 100).toFixed(2))
+            : 0;
+
+        return {
+          userId: id === "unassigned_or_system" ? null : id,
+          userName: data.name,
+          userColour: data.colour,
+          count: data.count,
+          percentage: percentage,
+        };
+      })
+      .sort((a, b) => b.count - a.count);
+    console.log("breakdowns: ", breakdowns);
     return res.json({
       success: true,
       data: customers,
       array_of_form_bookings,
+      summaryAnalytics: {
+        totalBookedAppointments: totalBookedCount,
+        totalFormBookingsProcessed: formBookings.length,
+        conversionRatePercentage:
+          formBookings.length > 0
+            ? parseFloat(
+                ((totalBookedCount / formBookings.length) * 100).toFixed(2),
+              )
+            : 0,
+        breakdowns,
+      },
     });
   } catch (error: any) {
     console.error("Get SignInCustomers error:", error);
@@ -584,17 +642,19 @@ export const getListOfBookedAppointmentsByFormId = async (
       return res.status(404).json({ error: "Form booking request not found" });
     }
 
-    const bookingEmail = booking.email.toLowerCase().trim();
+    const bookingEmail = booking.email?.toLowerCase().trim() || "";
     const bookingPhoneCleaned = normalizePhone(booking.phone);
     const bookingNameCleaned = normalizeName(booking.name);
 
-    // Setup broad conditions
-    const matchConditions: any[] = [{ email: booking.email }];
+    // Completely aligned DB pre-sweep conditions mirroring the pipeline
+    const matchConditions: any[] = [];
 
-    if (bookingPhoneCleaned) {
-      matchConditions.push({ phone: { contains: bookingPhoneCleaned } });
+    if (booking.email) {
+      matchConditions.push({ email: booking.email });
     }
-
+    if (booking.phone) {
+      matchConditions.push({ phone: booking.phone });
+    }
     if (booking.name) {
       matchConditions.push({
         customerName: {
@@ -604,7 +664,6 @@ export const getListOfBookedAppointmentsByFormId = async (
       });
     }
 
-    // Condition 4 Pre-sweep
     if (bookingNameCleaned && bookingNameCleaned.length >= 3) {
       matchConditions.push({
         email: {
@@ -614,10 +673,24 @@ export const getListOfBookedAppointmentsByFormId = async (
       });
     }
 
+    // Safeguard condition if the booking object has completely empty search parameters
+    if (matchConditions.length === 0) {
+      return res.json({
+        success: true,
+        booking_info: {
+          name: booking.name,
+          email: booking.email,
+          phone: booking.phone,
+          requested_at: booking.createdAt,
+        },
+        data: [],
+      });
+    }
+
     const prospectiveAppointments = await prisma.appointment.findMany({
       where: {
         createdAt: {
-          gt: booking.createdAt,
+          gt: booking.createdAt, // Aligns perfectly with pipeline evaluation
         },
         OR: matchConditions,
       },
@@ -629,35 +702,31 @@ export const getListOfBookedAppointmentsByFormId = async (
           select: { id: true, name: true, colour: true },
         },
         assignedBy: {
-          select: { name: true },
+          select: { id: true, name: true, colour: true },
         },
       },
     });
 
-    // In-Memory filtering block matches the pipeline loop identically
+    // Mirroring strict match logic evaluation
     const filteredAppointments = prospectiveAppointments.filter((app) => {
+      // Duplicated conditional break out logic from getSignInCustomers pipeline
+      if (!app.createdAt || app.createdAt <= booking.createdAt) return false;
+
       const appEmail = app.email?.toLowerCase().trim() || "";
       const appPhoneCleaned = normalizePhone(app.phone);
       const appNameCleaned = normalizeName(app.customerName);
 
-      // 1. Email to Email
       const emailMatch = bookingEmail && appEmail === bookingEmail;
-
-      // 2. Phone to Phone
       const phoneMatch =
         bookingPhoneCleaned && appPhoneCleaned === bookingPhoneCleaned;
-
-      // 3. Name to Name
       const exactNameMatch =
         bookingNameCleaned && appNameCleaned === bookingNameCleaned;
-
-      // 4. Name inside Email
       const nameInsideEmailMatch =
         bookingNameCleaned.length >= 3 && appEmail.includes(bookingNameCleaned);
 
       return emailMatch || phoneMatch || exactNameMatch || nameInsideEmailMatch;
     });
-    console.log("filteredAppointments: ", filteredAppointments);
+
     return res.json({
       success: true,
       booking_info: {
