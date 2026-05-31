@@ -107,7 +107,6 @@ export const clockIn = async (req: Request, res: Response) => {
       where: { shiftId: openShift.id },
     });
 
-    // If NO request exists, they are stuck and must submit one
     if (!pendingRequest) {
       const missedDate = dayjs(openShift.clockIn).format("MMM DD, YYYY");
       return res.status(400).json({
@@ -117,13 +116,12 @@ export const clockIn = async (req: Request, res: Response) => {
       });
     }
 
-    // If a request DOES exist, we ignore the open shift and let them proceed to step 2
     console.log(
       `User ${userId} has a pending request for shift ${openShift.id}. Allowing new clock-in.`,
     );
   }
 
-  // 2. Schedule Validation
+  // 2. Schedule Validation & Max Allowed Hours Verification
   const nowChicago = dayjs().tz("America/Chicago");
   const dayOfWeek = nowChicago.day();
 
@@ -131,11 +129,42 @@ export const clockIn = async (req: Request, res: Response) => {
     where: { userId, dayOfWeek },
   });
 
-  // if (!schedule) {
-  //   return res
-  //     .status(403)
-  //     .json({ message: "No work schedule found for today" });
-  // }
+  // Default limit is 20 if schedule configuration is missing or property is null
+  const maxHourAllow = schedule?.max_hour_allow ?? 20;
+
+  // Define start and end boundaries of today in the local timezone
+  const startOfToday = nowChicago.startOf("day").toDate();
+  const endOfToday = nowChicago.endOf("day").toDate();
+
+  // Fetch all completed shifts started today to tally worked hours
+  const todayShifts = await prisma.workShift.findMany({
+    where: {
+      userId,
+      clockIn: {
+        gte: startOfToday,
+        lte: endOfToday,
+      },
+      clockOut: { not: null },
+    },
+  });
+
+  let hoursWorkedToday = 0;
+  todayShifts.forEach((s) => {
+    if (s.clockOut) {
+      const diffMs =
+        new Date(s.clockOut).getTime() - new Date(s.clockIn).getTime();
+      hoursWorkedToday += diffMs / (1000 * 60 * 60);
+    }
+  });
+
+  if (hoursWorkedToday >= maxHourAllow) {
+    return res.status(400).json({
+      message: `Cannot clock in. You have already reached your maximum allowance of ${maxHourAllow} hours for today.`,
+    });
+  }
+
+  const hoursRemaining = maxHourAllow - hoursWorkedToday;
+  const msRemaining = hoursRemaining * 60 * 60 * 1000;
 
   // 3. Create New Shift
   const shift = await prisma.workShift.create({
@@ -145,7 +174,72 @@ export const clockIn = async (req: Request, res: Response) => {
     },
   });
 
-  return res.json({ message: "Clocked in successfully", shift });
+  // 4. Auto Clock-Out Scheduler (Fire and Forget Background Routine)
+  // Only trigger the auto clock-out execution loop if maxHourAllow is strictly less than 18
+  if (maxHourAllow < 18) {
+    (async () => {
+      try {
+        setTimeout(async () => {
+          try {
+            // Check if this specific shift is still active and has not been manually closed
+            const currentShiftState = await prisma.workShift.findUnique({
+              where: { id: shift.id },
+            });
+
+            if (currentShiftState && !currentShiftState.clockOut) {
+              const autoClockOutTime = new Date();
+
+              // Execute forced clock-out update
+              await prisma.workShift.update({
+                where: { id: shift.id },
+                data: { clockOut: autoClockOutTime },
+              });
+
+              console.log(
+                `Shift ${shift.id} has been automatically clocked out due to daily max hour limit reach (${maxHourAllow}h).`,
+              );
+
+              // Retrieve registered device notification push targets
+              const tokens = (
+                await prisma.deviceToken.findMany({
+                  where: { userId: userId, enabled: true },
+                  select: { token: true },
+                })
+              ).map((d) => d.token);
+
+              if (tokens.length) {
+                await sendPushAsync(tokens, {
+                  title: "Shift Auto Clock-Out ⚠️",
+                  body: `You have been clocked out automatically because you reached your max limit of ${maxHourAllow} hours today.`,
+                  data: { type: "SHIFT_AUTO_CO", status: "auto_clocked_out" },
+                });
+              }
+            }
+          } catch (innerErr) {
+            console.error(
+              "Error executing automated background shift clock-out routine:",
+              innerErr,
+            );
+          }
+        }, msRemaining);
+      } catch (timeoutSetupErr) {
+        console.error(
+          "Failed to initialize system auto clock-out scheduler thread:",
+          timeoutSetupErr,
+        );
+      }
+    })();
+  } else {
+    console.log(
+      `Skipping background auto-clockout timer rule for user ${userId}. (maxHourAllow: ${maxHourAllow} >= 18)`,
+    );
+  }
+
+  return res.json({
+    message: "Clocked in successfully",
+    shift,
+    hoursRemaining: parseFloat(hoursRemaining.toFixed(2)),
+  });
 };
 
 export const createShiftRequest = async (req: Request, res: Response) => {
@@ -623,8 +717,9 @@ interface ScheduleInput {
   endTime: string;
   is_off?: boolean;
   salary_type?: SalaryType;
-  is_bonus_hourly?: boolean; // <-- Added to typing interface
-  is_content_bonus?: boolean; // <-- Added to typing interface
+  is_bonus_hourly?: boolean;
+  is_content_bonus?: boolean;
+  max_hour_allow?: number; // <-- Added to typing interface
 }
 
 export const setWorkScheduleByUserId = async (req: Request, res: Response) => {
@@ -678,6 +773,10 @@ export const setWorkScheduleByUserId = async (req: Request, res: Response) => {
             salary_type: s.salary_type || SalaryType.A,
             is_content_bonus: !!s.is_content_bonus,
             is_bonus_hourly: !!s.is_bonus_hourly,
+            // Map the field directly. If it can be empty or null in the database,
+            // you can use s.max_hour_allow ?? null (or provide a default number)
+            max_hour_allow:
+              s.max_hour_allow !== undefined ? s.max_hour_allow : 20,
           },
         });
       });

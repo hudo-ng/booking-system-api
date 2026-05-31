@@ -252,6 +252,7 @@ model WorkSchedule {
   is_bonus_hourly Boolean    @default(true)
   salary_type SalaryType @default(A)
   createdAt   DateTime   @default(now())
+  max_hour_allow   Float      @default(20.0)
 
   user        User       @relation(fields: [userId], references: [id])
 }
