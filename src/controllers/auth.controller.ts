@@ -3917,9 +3917,9 @@ export const generateNicolePaystubData = async (
   try {
     const { start_date, end_date } = req.body;
     const artistName = "Nicole";
-    const studioFee1Amount = 65.0;
 
-    // The conditional threshold date
+    // Fee Structures
+    const studioFeeOneAmount = 65.0;
     const feeChangeDate = dayjs("2026-05-10");
 
     const fromDate = dayjs(start_date).toDate();
@@ -3931,12 +3931,6 @@ export const generateNicolePaystubData = async (
     while (cursor <= toDate) {
       const currentCursorDayjs = dayjs(cursor);
       const formatted = currentCursorDayjs.format("MMDDYYYY");
-
-      // Dynamic rule: Starting May 10, 2026, Studio Fee Two is 50.0.
-      // If you ever need a different fee before that date, adjust the fallback value here.
-      const studioFee2Amount = currentCursorDayjs.isBefore(feeChangeDate, "day")
-        ? 0 // Adjust this value if the fee was different prior to May 10, 2026
-        : 50.0;
 
       // Reset Daily Accumulators
       let jDirect = 0,
@@ -4015,15 +4009,20 @@ export const generateNicolePaystubData = async (
           }
         });
 
-        // Apply Studio Fee One & Two if there was piercing activity
+        // Apply Studio Fees only if there was piercing activity
         if (totalPiercingForFee > 0) {
-          studioFeeOne = studioFee1Amount;
-          studioFeeTwo = studioFee2Amount;
+          studioFeeOne = studioFeeOneAmount;
+
+          // Fee 2 logic: Active only on or after May 10, 2026
+          studioFeeTwo = currentCursorDayjs.isBefore(feeChangeDate, "day")
+            ? 0.0
+            : 50.0;
         }
       } catch (err) {
         console.error(`Fetch failed for ${formatted}`);
       }
 
+      // Deduct both Fee One and Fee Two from the daily subtotal
       const daySubtotal =
         jDirect +
         jYen +
@@ -4034,8 +4033,7 @@ export const generateNicolePaystubData = async (
         piercing +
         service +
         tips -
-        studioFeeOne -
-        studioFeeTwo;
+        (studioFeeOne + studioFeeTwo);
 
       dailyLogs.push({
         date: currentCursorDayjs.format("MMM DD, YYYY"),
@@ -4052,6 +4050,7 @@ export const generateNicolePaystubData = async (
         studioFeeTwo,
         cash: dayCash,
         subtotal: daySubtotal,
+        dailyNet: daySubtotal, // Explicit mapping for the UI's parsing fallback
         direct: jDirect + sDirect + piercing + service,
         passive: jYen + jZoe + sYen + sZoe,
       });
@@ -4065,21 +4064,18 @@ export const generateNicolePaystubData = async (
       totalTips: dailyLogs.reduce((acc, d) => acc + d.tips, 0),
       totalFeesOne: dailyLogs.reduce((acc, d) => acc + d.studioFeeOne, 0),
       totalFeesTwo: dailyLogs.reduce((acc, d) => acc + d.studioFeeTwo, 0),
-      totalFeesCombined: dailyLogs.reduce(
-        (acc, d) => acc + d.studioFeeOne + d.studioFeeTwo,
-        0,
-      ),
       totalCash: dailyLogs.reduce((acc, d) => acc + d.cash, 0),
-      netPay: 0,
+      netPay: 0, // calculated below
       totalWorkDays: dailyLogs.filter((d) => d.direct > 0).length,
       totalOpenDays: dailyLogs.filter((d) => d.studioFeeOne > 0).length,
     };
 
+    // Aggregate everything into the total Net Pay
     stats.netPay =
       stats.totalDirect +
       stats.totalPassive +
       stats.totalTips -
-      stats.totalFeesCombined;
+      (stats.totalFeesOne + stats.totalFeesTwo);
 
     return res.json({
       success: true,
