@@ -3918,7 +3918,9 @@ export const generateNicolePaystubData = async (
     const { start_date, end_date } = req.body;
     const artistName = "Nicole";
     const studioFee1Amount = 65.0;
-    const studioFee2Amount = 50.0;
+
+    // The conditional threshold date
+    const feeChangeDate = dayjs("2026-05-10");
 
     const fromDate = dayjs(start_date).toDate();
     const toDate = dayjs(end_date).toDate();
@@ -3927,7 +3929,14 @@ export const generateNicolePaystubData = async (
     let cursor = new Date(fromDate);
 
     while (cursor <= toDate) {
-      const formatted = dayjs(cursor).format("MMDDYYYY");
+      const currentCursorDayjs = dayjs(cursor);
+      const formatted = currentCursorDayjs.format("MMDDYYYY");
+
+      // Dynamic rule: Starting May 10, 2026, Studio Fee Two is 50.0.
+      // If you ever need a different fee before that date, adjust the fallback value here.
+      const studioFee2Amount = currentCursorDayjs.isBefore(feeChangeDate, "day")
+        ? 50.0 // Adjust this value if the fee was different prior to May 10, 2026
+        : 50.0;
 
       // Reset Daily Accumulators
       let jDirect = 0,
@@ -4029,7 +4038,7 @@ export const generateNicolePaystubData = async (
         studioFeeTwo;
 
       dailyLogs.push({
-        date: dayjs(cursor).format("MMM DD, YYYY"),
+        date: currentCursorDayjs.format("MMM DD, YYYY"),
         jDirect,
         jYen,
         jZoe,
@@ -4043,7 +4052,6 @@ export const generateNicolePaystubData = async (
         studioFeeTwo,
         cash: dayCash,
         subtotal: daySubtotal,
-        // Helper properties for the aggregations below
         direct: jDirect + sDirect + piercing + service,
         passive: jYen + jZoe + sYen + sZoe,
       });
@@ -4062,7 +4070,7 @@ export const generateNicolePaystubData = async (
         0,
       ),
       totalCash: dailyLogs.reduce((acc, d) => acc + d.cash, 0),
-      netPay: 0, // calculated below
+      netPay: 0,
       totalWorkDays: dailyLogs.filter((d) => d.direct > 0).length,
       totalOpenDays: dailyLogs.filter((d) => d.studioFeeOne > 0).length,
     };
