@@ -3935,7 +3935,7 @@ export const generateNicolePaystubData = async (
       // Dynamic rule: Starting May 10, 2026, Studio Fee Two is 50.0.
       // If you ever need a different fee before that date, adjust the fallback value here.
       const studioFee2Amount = currentCursorDayjs.isBefore(feeChangeDate, "day")
-        ? 50.0 // Adjust this value if the fee was different prior to May 10, 2026
+        ? 0 // Adjust this value if the fee was different prior to May 10, 2026
         : 50.0;
 
       // Reset Daily Accumulators
