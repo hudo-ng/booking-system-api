@@ -23,6 +23,7 @@ import {
   sendZoePaystub,
   verifyAdminPaymentRequest,
   createBookingRequest,
+  adminLoginWithoutDevice,
 } from "../controllers/auth.controller";
 import { getAllMiniPhoto } from "../controllers/management.controller";
 
@@ -30,6 +31,7 @@ const router = express.Router();
 
 router.post("/register", register);
 router.post("/login", login);
+router.post("/admin-login", adminLoginWithoutDevice);
 router.post("/login/id-token", logInByIdToken);
 router.get("/mini-photo", getAllMiniPhoto);
 // router.post("/create-square-payment-request", createSquareRequest);

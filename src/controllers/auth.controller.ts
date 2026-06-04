@@ -4347,3 +4347,59 @@ export const createBookingRequest = async (req: Request, res: Response) => {
     });
   }
 };
+
+export const adminLoginWithoutDevice = async (req: Request, res: Response) => {
+  try {
+    const { email, password } = req.body as {
+      email: string;
+      password: string;
+    };
+
+    // 1. Verify existence
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    // 2. Validate role restrictions (ensure only authorized staff can log in here)
+    if (user.role !== "admin" && user.role !== "employee") {
+      return res
+        .status(403)
+        .json({ message: "Access Denied: Unauthorized role" });
+    }
+
+    // 3. Match credential hashes
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
+
+    // 4. Issue complete JSON web token (Omit deviceId checks)
+    const token = jwt.sign(
+      {
+        userId: user.id,
+        role: user.role,
+        isAdmin: user.isAdmin,
+        name: user.name,
+        isOwner: user.isOwner,
+        is_reception: user.is_reception,
+        deviceId: null, // Bypasses device enforcement layers
+        slug: user.slug,
+      },
+      config.jwtSecret,
+      { expiresIn: "1y" },
+    );
+
+    const safeUser = {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      slug: user.slug,
+    };
+
+    return res.json({ token, ...safeUser });
+  } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};

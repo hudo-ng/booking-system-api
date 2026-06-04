@@ -508,3 +508,206 @@ enum PaymentStatus {
   REFUNDED
   VOIDED
 }
+
+
+
+// 1. LaserCustomer Profile
+model LaserCustomer {
+  id           String                 @id @default(uuid())
+  name         String
+  email        String
+  phoneNumber  String                 @unique // Enforced unique constraint
+  address      String?
+  city         String?
+  state        String?
+  zipCode      String?
+  createdAt    DateTime               @default(now())
+  
+  // Relations
+  packages     LaserCustomerPackage[]
+  visits       LaserVisit[]
+}
+
+// 2. Structural Package Template
+model Package {
+  id          String                 @id @default(uuid())
+  name        String
+  description String?
+  price       Float
+  credit      Int                    // Total initial visits allowed
+  isActive    Boolean                @default(true)
+  createdAt   DateTime               @default(now())
+
+  // Relations
+  customerPurchases LaserCustomerPackage[]
+}
+
+model LaserCustomerPackage {
+  id               String   @id @default(uuid())
+  customerId       String
+  packageId        String
+  totalCredits     Int
+  remainingCredits Int
+  status           String   @default("ACTIVE")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  purchaseDate     DateTime @default(now()) 
+
+  // ====== STRICT ENFORCEMENT FIELDS ======
+  paymentMethod    String   // Required (No default fallback, forces explicit assignment)
+  soldById         String   // Required (No '?', cannot be null)
+
+  customer         LaserCustomer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  package          Package                  @relation(fields: [packageId], references: [id])
+  visitUsages      LaserVisitPackageUsage[]
+}
+
+// 4. LaserVisit (Comprehensive Intake, Settings, & Session Log)
+model LaserVisit {
+  id                            String   @id @default(uuid())
+  customerId                    String
+  uuid                          String   @default("") // From payload uuid
+
+  // Core Flags & Meta
+  status                        String   @default("In-progress")
+  completed                     Boolean  @default(false)
+  submittedAt                   String   @default("")
+  dateOfService                 String   @default("")
+  artistName                    String   @default("") // Technician/Artist name
+
+  // Personal Info
+  name                          String   @default("")
+  dob                           String   @default("")
+  age                           Int?
+  gender                        String   @default("")
+  occupation                    String   @default("")
+  homeAddress                   String   @default("")
+  licenseNumber                 String   @default("")
+  country                       String   @default("")
+  state                         String   @default("")
+  zipCode                       String   @default("")
+  phone                         String   @default("")
+  email                         String   @default("")
+  
+  // Flattened City Geo Object
+  cityName                      String   @default("")
+  cityCountryCode               String   @default("")
+  cityStateCode                 String   @default("")
+  cityLatitude                  String   @default("")
+  cityLongitude                 String   @default("")
+
+  // Contacts & Attribution
+  emergencyContactName          String   @default("")
+  emergencyContactPhone         String   @default("")
+  howDidYouHearAboutUs          String   @default("")
+  referredBy                    String   @default("")
+
+  // File Uploads & Media URLs
+  photoId                       String   @default("")
+  proofUrl                      String   @default("")
+  signatureUrl                  String   @default("")
+  specialistSignature           String   @default("")
+  bodyDrawing                   String   @default("")
+  arrayProofOfOriginalPhoto     String   @default("") // Comma-separated or stringified array
+
+  // Tattoo Profiles
+  oldTattoo                     String   @default("") // Comma-separated or stringified array
+  isItHomemade                  String   @default("")
+  shortDescription              String   @default("")
+  tattooLocation                String   @default("")
+  tattooLocations               String   @default("")
+  tattooSizeCategory            String   @default("")
+  tattooIssueCosmetic           String   @default("")
+
+  // Clinical & Technical Laser Settings
+  treatmentNumber               String   @default("")
+  wavelength                    String   @default("")
+  fluence                       String   @default("")
+  tipSize                       String   @default("")
+  treatmentArea                 String   @default("")
+  goodCandidate                 String   @default("")
+
+  // Medical History / Screening
+  underPhysician                String   @default("")
+  physicianCare                 String   @default("")
+  physicianReason               String   @default("")
+  underDermatologist            String   @default("")
+  dermatologistCare             String   @default("")
+  dermatologistReason           String   @default("")
+  medicalConditions             String   @default("") 
+  otherHealthProblems           String   @default("")
+
+  // Screening Risks & Signs
+  abnormalPigmentation          String   @default("")
+  abnormalScarring              String   @default("")
+  adverseReactions              String   @default("")
+  allergies                     String   @default("")
+  allergicReactions             String   @default("")
+  laserReaction                 String   @default("")
+  treatmentReaction             String   @default("")
+  lingeringSigns                String   @default("")
+
+  // Medications
+  oralMedications               String   @default("")
+  topicalMedications            String   @default("") 
+  topicalOtherList              String   @default("")
+  photosensitivityMeds          String   @default("")
+  takenAccutane                 String   @default("")
+  accutaneLastUsed              String   @default("")
+
+  // Physical Statuses
+  skinType                      String   @default("")
+  skinReactionProtection        String   @default("") // Comma-separated or stringified array
+  sunburn                       String   @default("")
+  raisedScars                   String   @default("")
+  pigmentationMarks             String   @default("")
+  pigmentationDescription       String   @default("")
+  pregnant                      String   @default("")
+  breastfeeding                 String   @default("")
+
+  // Session Notes & Follow Ups
+  healingNotes                  String   @default("")
+  aftercareGiven                String   @default("")
+  frequency                     String   @default("")
+  nextTxIn                      String   @default("")
+
+  // Financial Ledger Overrides
+  feeCharged                    String   @default("")
+  amountPaid                    String   @default("")
+  balanceOwed                   String   @default("")
+  priceGuaranteedRemoval        String   @default("")
+  pricePerTreatment             String   @default("")
+  pricePackage3                 String   @default("")
+  pricePackage5                 String   @default("")
+
+  // Legal Authorized Sign-offs
+  authorizeName                 String   @default("")
+  clinicName                    String   @default("Hyper Laser")
+  releaseTo                     String   @default("Hyper Laser")
+  clientDate                    String   @default("")
+  specialistName                String   @default("")
+  specialistDate                String   @default("")
+
+  createdAt                     DateTime @default(now())
+  updatedAt                     DateTime @updatedAt
+
+  // Relations
+  customer                      LaserCustomer          @relation(fields: [customerId], references: [id])
+  packageUsages                 LaserVisitPackageUsage[]
+}
+
+// 5. LaserVisitPackageUsage (Junction tracking)
+model LaserVisitPackageUsage {
+  id                String               @id @default(uuid())
+  visitId           String
+  customerPackageId String
+  creditsDeducted   Int                  @default(1)
+  usedAt            DateTime             @default(now())
+
+  // ====== FLAT STRING FOR ARTIST NAME ======
+  artistName        String?              // Just a text string (e.g., "Nicole", "Zoe", "Yen")
+
+  // Relations
+  visit             LaserVisit           @relation(fields: [visitId], references: [id])
+  customerPackage   LaserCustomerPackage @relation(fields: [customerPackageId], references: [id])
+}
