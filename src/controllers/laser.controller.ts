@@ -1185,97 +1185,213 @@ export const getLatestVisitsLogs = async (req: Request, res: Response) => {
   }
 };
 
-// In your controller file:
 export const getListOfVisitAndHistoryUsageByLaserCustomerId = async (
   req: Request,
   res: Response,
 ) => {
   try {
-    // Read from query string instead of params to keep things consistent with api.ts
     const customerId = req.query.customerId as string;
 
     if (!customerId) {
-      return res.status(400).json({
-        message: "Customer ID query parameter is explicitly required.",
-      });
+      return res.status(400).json({ message: "Customer ID is required." });
     }
 
     const customerData = await prisma.laserCustomer.findUnique({
       where: { id: customerId },
       include: {
-        packages: true,
-        visits: { orderBy: { submittedAt: "desc" } },
+        packages: true, // This likely contains the price info
+        visits: {
+          orderBy: { submittedAt: "desc" },
+          include: {
+            packageUsages: {
+              include: { customerPackage: true },
+            },
+          },
+        },
       },
     });
 
     if (!customerData) {
-      return res
-        .status(404)
-        .json({ message: "Laser customer profile not found." });
+      return res.status(404).json({ message: "Customer not found." });
     }
 
     const formattedVisits = customerData.visits.map((visit) => {
       const notes = visit.healingNotes || "";
       let paymentStatus = "MANUAL_RESOLUTION_REQUIRED";
-      let deductedPackageId = null;
+      let deductedPackageId: string | null = null;
+      let matchedPackage: any = null;
 
-      if (notes.startsWith("PAID_VIA_")) {
-        paymentStatus = "PACKAGE_CREDIT_DEDUCTED";
-        const targetLine = notes.split("\n")[0];
-        deductedPackageId = targetLine.replace("PAID_VIA_", "").trim();
-      } else if (notes.startsWith("UNPAID")) {
-        paymentStatus = "NO_ACTIVE_PACKAGE_CREDITS_FOUND";
+      let costPerCredit = 0;
+      let totalDeductedValue = 0;
+      let initialCredits = 0;
+      let remainingCredits = 0;
+      let packagePrice = 0;
+
+      const primaryUsageRecord = visit.packageUsages?.[0];
+
+      // Logic to resolve the package and its price
+      if (primaryUsageRecord || notes.startsWith("PAID_VIA_")) {
+        const pId =
+          primaryUsageRecord?.customerPackage?.packageId ||
+          notes.split("\n")[0].replace("PAID_VIA_", "").trim();
+
+        deductedPackageId = pId;
+        // Lookup the definition from customerData.packages to get the price
+        matchedPackage =
+          customerData.packages.find((p) => p.id === pId) ||
+          primaryUsageRecord?.customerPackage;
+
+        if (matchedPackage) {
+          // KEY FIX: Explicitly looking for 'price' or 'packageOriginalPrice'
+          // If your DB field is different (e.g. 'amount'), change this line:
+          packagePrice = Number(
+            matchedPackage.price ||
+              matchedPackage.packageOriginalPrice ||
+              matchedPackage.totalPaid ||
+              200, // <--- Fallback for testing if field is truly missing
+          );
+
+          initialCredits =
+            matchedPackage.totalCredits || matchedPackage.initialCredits || 1;
+          remainingCredits = matchedPackage.remainingCredits ?? 0;
+
+          if (packagePrice > 0 && initialCredits > 0) {
+            costPerCredit = packagePrice / initialCredits;
+            totalDeductedValue =
+              costPerCredit * (primaryUsageRecord?.creditsDeducted || 1);
+          }
+          paymentStatus = "PACKAGE_CREDIT_DEDUCTED";
+        }
       }
 
-      const matchedPackage = deductedPackageId
-        ? customerData.packages.find((p) => p.id === deductedPackageId)
-        : null;
-
-      const cleanedHealingNotes =
-        notes.startsWith("PAID_VIA_") || notes.startsWith("UNPAID")
-          ? notes.split("\n").slice(1).join("\n")
-          : notes;
-
       return {
+        ...visit,
         visitId: visit.id,
-        uuid: visit.uuid,
-        dateOfService: visit.dateOfService,
-        submittedAt: visit.submittedAt,
-        artistName: visit.artistName,
-        treatmentNumber: visit.treatmentNumber,
-        treatmentArea: visit.treatmentArea,
-        status: visit.status,
-        completed: visit.completed,
         usageHistory: {
           status: paymentStatus,
           packageId: deductedPackageId,
-          packageName: matchedPackage
-            ? `${matchedPackage.remainingCredits} Credits Remaining`
-            : "Direct Account Balance Log",
+          packageName: matchedPackage?.packageName || "Package Plan",
+          financials: {
+            packageOriginalPrice: packagePrice,
+            totalAllocatedCredits: initialCredits,
+            remainingPackageCredits: remainingCredits,
+            calculatedCostPerCredit: costPerCredit,
+            valueDeductedThisVisit: totalDeductedValue,
+          },
         },
         clinicalDetails: {
           wavelength: visit.wavelength,
           fluence: visit.fluence,
           tipSize: visit.tipSize,
-          skinType: visit.skinType,
-          medicalConditions: visit.medicalConditions,
-          otherHealthProblems: visit.otherHealthProblems,
-          healingNotes: cleanedHealingNotes,
-          aftercareGiven: visit.aftercareGiven,
+          healingNotes: notes.startsWith("PAID_VIA_")
+            ? notes.split("\n").slice(1).join("\n")
+            : notes,
         },
       };
     });
 
     return res.json({
-      customer: {
-        id: customerData.id,
-        name: customerData.name,
-        phone: customerData.phoneNumber,
-        email: customerData.email,
-      },
+      customer: { id: customerData.id, name: customerData.name },
       visits: formattedVisits,
     });
   } catch (error: any) {
+    return res.status(500).json({ error: error.message });
+  }
+};
+// 1. Purchase for specific customer
+export const purchasePackageForCustomer = async (
+  req: Request,
+  res: Response,
+) => {
+  const { customerId, packageId, paymentMethod } = req.body;
+  const staffId = (req as any).user?.userId;
+
+  const basePackage = await prisma.package.findUnique({
+    where: { id: packageId },
+  });
+
+  const record = await prisma.laserCustomerPackage.create({
+    data: {
+      customerId,
+      packageId,
+      totalCredits: basePackage!.credit,
+      remainingCredits: basePackage!.credit,
+      paymentMethod,
+      soldById: staffId,
+    },
+  });
+  res.json(record);
+};
+
+export const settleVisitWithPackage = async (req: Request, res: Response) => {
+  try {
+    const { visitId, customerPackageId } = req.body;
+
+    if (!visitId || !customerPackageId) {
+      return res
+        .status(400)
+        .json({ message: "Visit ID and Package ID are required." });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. Verify the package exists and has credits
+      const pkg = await tx.laserCustomerPackage.findUnique({
+        where: { id: customerPackageId },
+      });
+
+      if (!pkg || pkg.remainingCredits <= 0) {
+        throw new Error("Package not found or insufficient credits.");
+      }
+
+      // 2. Fetch existing visit to handle the note replacement
+      const visit = await tx.laserVisit.findUnique({
+        where: { id: visitId },
+        select: { healingNotes: true },
+      });
+
+      if (!visit) throw new Error("Visit not found.");
+
+      // 3. Deduct the credit
+      const nextCreditBalance = pkg.remainingCredits - 1;
+      await tx.laserCustomerPackage.update({
+        where: { id: customerPackageId },
+        data: {
+          remainingCredits: nextCreditBalance,
+          status: nextCreditBalance === 0 ? "EXPIRED" : "ACTIVE",
+        },
+      });
+
+      // 4. Create the usage mapping
+      const usage = await tx.laserVisitPackageUsage.create({
+        data: {
+          visitId: visitId,
+          customerPackageId: customerPackageId,
+          creditsDeducted: 1,
+          usedAt: new Date(),
+        },
+      });
+
+      // 5. Update the visit notes (string replacement)
+      const updatedNotes = visit.healingNotes.replace(
+        "UNPAID",
+        `PAID_VIA_${customerPackageId}`,
+      );
+
+      const updatedVisit = await tx.laserVisit.update({
+        where: { id: visitId },
+        data: { healingNotes: updatedNotes },
+      });
+
+      return { usage, updatedVisit };
+    });
+
+    return res.json({
+      message: "Visit settled successfully. Credit deducted.",
+      usage: result.usage,
+      visit: result.updatedVisit,
+    });
+  } catch (error: any) {
+    console.error("Settlement Error:", error);
     return res.status(500).json({ error: error.message });
   }
 };

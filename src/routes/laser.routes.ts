@@ -17,6 +17,8 @@ import {
   syncLaserVisitFromApp,
   getLatestVisitsLogs,
   getListOfVisitAndHistoryUsageByLaserCustomerId,
+  settleVisitWithPackage,
+  purchasePackageForCustomer,
 } from "../controllers/laser.controller";
 
 const router = Router();
@@ -47,5 +49,8 @@ router.get("/purchase-history", getOneHundredLatestHistoryOfPurchase);
 router.post("/sync-app-visit", syncLaserVisitFromApp);
 router.get("/latest-visits", getLatestVisitsLogs);
 router.get("/customer-history", getListOfVisitAndHistoryUsageByLaserCustomerId);
+router.post("/purchase-customer", purchasePackageForCustomer);
 
+// NEW: Settle a visit by deducting from an existing package (POST)
+router.post("/settle-visit", settleVisitWithPackage);
 export default router;
