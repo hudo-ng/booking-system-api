@@ -24,6 +24,8 @@ import {
 const router = Router();
 
 // Applying standard auth and device protections
+router.post("/sync-app-visit-customer", syncLaserVisitFromApp);
+
 router.use(authenticate, enforceDevice, authorize(["admin", "employee"]));
 
 // Laser Customer Profiles

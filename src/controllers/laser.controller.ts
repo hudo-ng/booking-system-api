@@ -989,7 +989,11 @@ export const syncLaserVisitFromApp = async (req: Request, res: Response) => {
       let fallbackUsageInfo = "UNPAID";
       let activePackageInstance = null;
 
-      if (customer.packages && customer.packages.length > 0) {
+      if (
+        customer.packages &&
+        customer.packages.length > 0 &&
+        payload.status === "done"
+      ) {
         activePackageInstance = customer.packages[0];
         const nextCreditBalance = activePackageInstance.remainingCredits - 1;
 
@@ -1130,18 +1134,18 @@ export const syncLaserVisitFromApp = async (req: Request, res: Response) => {
             payload.specialist_date || payload.specialistDate || "",
         },
       });
-
-      // Explicitly map usage mapping history relation to link LaserVisit with Package model
-      // Explicitly map usage mapping history relation to link LaserVisit with Package model
-      if (creditDeducted && activePackageInstance) {
-        await tx.laserVisitPackageUsage.create({
-          data: {
-            visitId: newVisit.id,
-            customerPackageId: activePackageInstance.id,
-            creditsDeducted: 1, // Changed from creditsUsed
-            usedAt: new Date(), // Changed from loggedAt (or you can omit this entirely since it defaults to now())
-          },
-        });
+      if (payload.status === "done") {
+        // Explicitly map usage mapping history relation to link LaserVisit with Package model
+        if (creditDeducted && activePackageInstance) {
+          await tx.laserVisitPackageUsage.create({
+            data: {
+              visitId: newVisit.id,
+              customerPackageId: activePackageInstance.id,
+              creditsDeducted: 1, // Changed from creditsUsed
+              usedAt: new Date(), // Changed from loggedAt (or you can omit this entirely since it defaults to now())
+            },
+          });
+        }
       }
 
       return {
