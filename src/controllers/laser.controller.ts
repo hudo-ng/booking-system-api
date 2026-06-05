@@ -1307,24 +1307,129 @@ export const purchasePackageForCustomer = async (
   req: Request,
   res: Response,
 ) => {
-  const { customerId, packageId, paymentMethod } = req.body;
-  const staffId = (req as any).user?.userId;
+  try {
+    const { customerId, packageId, paymentMethod, laserVisitId } = req.body;
+    const staffId = (req as any).user?.userId;
 
-  const basePackage = await prisma.package.findUnique({
-    where: { id: packageId },
-  });
+    // Guard: Enforce strict payment parameters up front
+    if (!paymentMethod || !staffId) {
+      return res.status(400).json({
+        message:
+          "Missing explicit payment method or authorized operational staff identity credentials.",
+      });
+    }
 
-  const record = await prisma.laserCustomerPackage.create({
-    data: {
-      customerId,
-      packageId,
-      totalCredits: basePackage!.credit,
-      remainingCredits: basePackage!.credit,
-      paymentMethod,
-      soldById: staffId,
-    },
-  });
-  res.json(record);
+    // Resolve base template allowances out of configuration definition metrics
+    const basePackage = await prisma.package.findUnique({
+      where: { id: packageId },
+    });
+
+    if (!basePackage) {
+      return res
+        .status(404)
+        .json({
+          message: "Core baseline template package configuration not found.",
+        });
+    }
+
+    // BASELINE ROUTE: No visit attachment targeted, process direct standard purchase order logs
+    if (!laserVisitId) {
+      const record = await prisma.laserCustomerPackage.create({
+        data: {
+          customerId,
+          packageId,
+          totalCredits: basePackage.credit,
+          remainingCredits: basePackage.credit,
+          paymentMethod,
+          soldById: staffId,
+          status: "ACTIVE",
+        },
+      });
+      return res.json(record);
+    }
+
+    // EXTENDED ROUTE: Run complex atomic schema transaction block chain
+    const transactionResult = await prisma.$transaction(async (tx) => {
+      // A. Verify targeting visit data profile logs exist first
+      const targetingVisit = await tx.laserVisit.findUnique({
+        where: { id: laserVisitId },
+      });
+
+      if (!targetingVisit) {
+        throw new Error(
+          `Targeting LaserVisit document log entry '${laserVisitId}' not found.`,
+        );
+      }
+
+      // Calculate balance math tracking parameters safely out of memory bounds
+      const initialCredits = basePackage.credit;
+      const optimizedRemainingCredits = initialCredits - 1;
+
+      // Keeping your data statuses consistent ("DEPLETED") across all workflow engines
+      const calculationStatus =
+        optimizedRemainingCredits <= 0 ? "DEPLETED" : "ACTIVE";
+
+      // B. Insert package purchase history entity row
+      const customerPackage = await tx.laserCustomerPackage.create({
+        data: {
+          customerId,
+          packageId,
+          totalCredits: initialCredits,
+          remainingCredits: optimizedRemainingCredits,
+          paymentMethod,
+          soldById: staffId,
+          status: calculationStatus,
+        },
+      });
+
+      // C. Safe String Replacement Logic for Notes
+      // Fallback to empty string if field value is missing to guarantee no crashes
+      const currentNotes = targetingVisit.healingNotes || "";
+      const updatedNotes = currentNotes.includes("UNPAID")
+        ? currentNotes.replace("UNPAID", `PAID_VIA_${customerPackage.id}`)
+        : currentNotes
+          ? `${currentNotes} | PAID_VIA_${customerPackage.id}`
+          : `PAID_VIA_${customerPackage.id}`;
+
+      // D. Update historical operational progress statuses and notes on parent visit sheet
+      const updatedVisit = await tx.laserVisit.update({
+        where: { id: laserVisitId },
+        data: {
+          status: "Completed",
+          completed: true,
+          healingNotes: updatedNotes,
+        },
+      });
+
+      // E. Generate connection linkage inside the LaserVisitPackageUsage junction ledger matrix
+      const packageUsageLinkage = await tx.laserVisitPackageUsage.create({
+        data: {
+          visitId: laserVisitId,
+          customerPackageId: customerPackage.id,
+          creditsDeducted: 1,
+          artistName: targetingVisit.artistName || null, // Bubble technician attribute index up cleanly for commissions
+        },
+      });
+
+      return { customerPackage, updatedVisit, packageUsageLinkage };
+    });
+
+    return res.status(201).json({
+      success: true,
+      message:
+        "Transactional matrix executed: package issued, visit fulfilled, and allocation tracking logs populated.",
+      data: transactionResult,
+    });
+  } catch (error: any) {
+    console.error(
+      "Critical processing breakdown inside transactional audit pipeline:",
+      error,
+    );
+    return res.status(500).json({
+      message: "Internal schema sync engine execution failure.",
+      error: error.message,
+    });
+  }
 };
 
 export const settleVisitWithPackage = async (req: Request, res: Response) => {
