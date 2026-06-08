@@ -642,73 +642,91 @@ export const getWorkSchedule = async (req: Request, res: Response) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    // Query the current user
+    // 1. Fetch current user context
     const currentUser = await prisma.user.findUnique({
       where: { id: userId },
     });
-    if (!currentUser) {
+    if (!currentUser || currentUser.deletedAt !== null) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Owner → get all users' schedules
+    const userSelectField = { select: { id: true, name: true, email: true } };
+
+    // --- OWNER FLOW (Bulk Processing Optimized) ---
     if (currentUser.isOwner) {
-      // Get all users
+      // Fetch only active, non-deleted users
       const allUsers = await prisma.user.findMany({
-        select: { id: true, name: true, email: true },
+        where: { deletedAt: null },
+        select: { id: true },
       });
 
-      // Collect all schedules for all users
-      let allSchedules: (typeof prisma.workSchedule.findMany extends Promise<
-        infer U
-      >
-        ? U
-        : any)[] = [];
+      // Fetch ALL existing schedules in a single operation
+      const flatSchedules = await prisma.workSchedule.findMany({
+        where: { userId: { in: allUsers.map((u) => u.id) } },
+        include: { user: userSelectField },
+        orderBy: { dayOfWeek: "asc" },
+      });
 
+      // Group existing schedules by userId for O(1) matching checks
+      const scheduleMap = flatSchedules.reduce(
+        (acc, sched) => {
+          if (!acc[sched.userId]) acc[sched.userId] = [];
+          acc[sched.userId].push(sched);
+          return acc;
+        },
+        {} as Record<string, typeof flatSchedules>,
+      );
+
+      const finalSchedulesList = [...flatSchedules];
+      const missingSchedulePromises: Promise<any>[] = [];
+
+      // Identify which users lack schedule structures completely
       for (const user of allUsers) {
-        let userSchedules = await prisma.workSchedule.findMany({
-          where: { userId: user.id },
-          include: { user: { select: { id: true, name: true, email: true } } },
-          orderBy: { dayOfWeek: "asc" },
-        });
-
-        // If no schedule found → create default 7 entries
-        if (userSchedules.length === 0) {
+        if (!scheduleMap[user.id] || scheduleMap[user.id].length === 0) {
+          // Push creation tasks to a execution array instead of awaiting inside the loop
           const defaultSchedules = Array.from({ length: 7 }, (_, idx) => ({
             userId: user.id,
             dayOfWeek: idx,
             startTime: dayjs().hour(9).minute(0).second(0).toDate(),
-            endTime: dayjs().hour(9).minute(0).second(0).toDate(),
+            endTime: dayjs().hour(17).minute(0).second(0).toDate(), // Standardized to typical close offset
           }));
 
-          userSchedules = await prisma.$transaction(
+          const createPromise = prisma.$transaction(
             defaultSchedules.map((s) =>
               prisma.workSchedule.create({
                 data: s,
-                include: {
-                  user: { select: { id: true, name: true, email: true } },
-                },
+                include: { user: userSelectField },
               }),
             ),
           );
+          missingSchedulePromises.push(createPromise);
         }
-
-        allSchedules.push(...userSchedules);
       }
 
-      return res.json(allSchedules);
+      // If new records need initial database seeds, run them concurrently
+      if (missingSchedulePromises.length > 0) {
+        const newlyCreatedBatches = await Promise.all(missingSchedulePromises);
+        newlyCreatedBatches.forEach((batch) =>
+          finalSchedulesList.push(...batch),
+        );
+      }
+
+      // Sort the complete combined list nicely by dayOfWeek index
+      finalSchedulesList.sort((a, b) => a.dayOfWeek - b.dayOfWeek);
+      return res.json(finalSchedulesList);
     }
 
-    // Normal user → get only their schedule
+    // --- STANDARD EMPLOYEE FLOW ---
     const schedule = await prisma.workSchedule.findMany({
       where: { userId },
-      include: { user: { select: { id: true, name: true, email: true } } },
+      include: { user: userSelectField },
       orderBy: { dayOfWeek: "asc" },
     });
 
-    res.json(schedule);
+    return res.json(schedule);
   } catch (error) {
-    console.error("Error fetching schedule:", error);
-    res.status(500).json({ message: "Internal server error" });
+    console.error("Error fetching schedule architecture pipeline:", error);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 interface ScheduleInput {
@@ -719,7 +737,8 @@ interface ScheduleInput {
   salary_type?: SalaryType;
   is_bonus_hourly?: boolean;
   is_content_bonus?: boolean;
-  max_hour_allow?: number; // <-- Added to typing interface
+  max_hour_allow?: number;
+  expected_work_hour: number;
 }
 
 export const setWorkScheduleByUserId = async (req: Request, res: Response) => {
@@ -773,10 +792,9 @@ export const setWorkScheduleByUserId = async (req: Request, res: Response) => {
             salary_type: s.salary_type || SalaryType.A,
             is_content_bonus: !!s.is_content_bonus,
             is_bonus_hourly: !!s.is_bonus_hourly,
-            // Map the field directly. If it can be empty or null in the database,
-            // you can use s.max_hour_allow ?? null (or provide a default number)
             max_hour_allow:
               s.max_hour_allow !== undefined ? s.max_hour_allow : 20,
+            expected_work_hour: s.expected_work_hour,
           },
         });
       });
@@ -790,7 +808,9 @@ export const setWorkScheduleByUserId = async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("Error updating schedule architecture setup:", error);
-    return res.status(500).json({ error: "Internal server processing error" });
+    return res
+      .status(500)
+      .json({ error: "Internal server error processing error" });
   }
 };
 

@@ -1783,20 +1783,28 @@ export const sendWeeklyReceptionPaystub = async (
       { userId: "6a0c3e58-d4e4-4f32-8585-9fbb81b08417", isFree15Hour: false },
       { userId: "bab24c5b-ec93-4386-bdfb-7b0e1f25eb7f", isFree15Hour: true },
       { userId: "317b8640-2920-4d1d-853f-c8552545e634", isFree15Hour: false },
+      { userId: "0ae16fcd-9ca3-4463-94f4-2aecb02f1745", isFree15Hour: false },
     ];
 
     const results = [];
-    const now = new Date();
-    const today = dayjs();
+
+    const today = dayjs().subtract(3, "day");
 
     const fromDate = today.startOf("week").subtract(1, "week").add(1, "day");
     const toDate = fromDate.add(6, "day");
 
     const format = (d: dayjs.Dayjs) => d.format("YYYY-MM-DD");
-    const formatDate = (date: Date) => dayjs(date).format("MMM DD, YYYY");
 
-    const startStr = fromDate.startOf("day").toISOString();
-    const endStr = toDate.endOf("day").toISOString();
+    // Pre-calculate the days in this specific pay week to minimize array recreations
+    const lastWeekDays: dayjs.Dayjs[] = [];
+    let currentDayCursor = fromDate.clone();
+    while (
+      currentDayCursor.isBefore(toDate) ||
+      currentDayCursor.isSame(toDate, "day")
+    ) {
+      lastWeekDays.push(currentDayCursor.clone());
+      currentDayCursor = currentDayCursor.add(1, "day");
+    }
 
     for (const artist of dataArtist) {
       const { userId, isFree15Hour } = artist;
@@ -1876,23 +1884,58 @@ export const sendWeeklyReceptionPaystub = async (
       const bookingCommission = totalBookingVolume * bookingCommRate;
 
       // ==========================================
-      // ADVANCED SPLIT & DEDUCTION HOUR MATRICES
+      // ADVANCED SPLIT & DEDUCTION HOUR MATRICES (DYNAMIC)
       // ==========================================
       const rawHrs = week.totalHours || 0;
       const totalWorkDays = week.totalWorkDays || 0;
-      const expectedHours = totalWorkDays * 8;
+
+      // DYNAMIC CHANGE: Compute expected hours strictly out of database templates for the dates hit
+      let expectedHours = 0;
+      const activeWorkedShiftsData: Array<{
+        dateStr: string;
+        displayDate: string;
+        template: any;
+      }> = [];
+
+      for (const calendarDay of lastWeekDays) {
+        const jsDayOfWeek = calendarDay.day();
+        const matchedTemplate = scheduleTemplates.find(
+          (t) => t.dayOfWeek === jsDayOfWeek,
+        );
+
+        if (matchedTemplate) {
+          // Track dynamic scheduled hours from the DB (falling back to 8 if field doesn't exist)
+          const dayExpectedHours =
+            matchedTemplate.expected_work_hour !== undefined
+              ? Number(matchedTemplate.expected_work_hour)
+              : 8;
+          expectedHours += dayExpectedHours;
+
+          if (
+            !activeWorkedShiftsData.some(
+              (s) => s.dateStr === calendarDay.format("YYYY-MM-DD"),
+            )
+          ) {
+            activeWorkedShiftsData.push({
+              dateStr: calendarDay.format("YYYY-MM-DD"),
+              displayDate: calendarDay.format("ddd, MMM DD"),
+              template: { ...matchedTemplate, computedHours: dayExpectedHours },
+            });
+          }
+        }
+      }
 
       // Calculate total billable capacity after pulling out training hours
       const deductionPoolSize = isFree15Hour ? 15 : 0;
       const totalBillableHours = Math.max(0, rawHrs - deductionPoolSize);
 
-      // Extra hours can ONLY exist if billable hours exceed the expected ceiling
+      // Extra hours can ONLY exist if billable hours exceed the dynamic expected ceiling
       const processedExtraHours = Math.max(
         0,
         totalBillableHours - expectedHours,
       );
 
-      // Regular hours to process represent the billable hours that fit under the expected cap
+      // Regular hours to process represent the billable hours that fit under the dynamic expected cap
       const totalRegularHoursToProcess = Math.min(
         totalBillableHours,
         expectedHours,
@@ -1906,74 +1949,47 @@ export const sendWeeklyReceptionPaystub = async (
       let hoursEligibleForBonusWage = 0;
       let calculatedBonusWagePay = 0;
 
-      const lastWeekDays: dayjs.Dayjs[] = [];
-      let currentDayCursor = fromDate.clone();
-      while (
-        currentDayCursor.isBefore(toDate) ||
-        currentDayCursor.isSame(toDate, "day")
-      ) {
-        lastWeekDays.push(currentDayCursor.clone());
-        currentDayCursor = currentDayCursor.add(1, "day");
-      }
-
-      const activeWorkedShiftsData: Array<{
-        dateStr: string;
-        displayDate: string;
-        template: any;
-      }> = [];
-
       // Step 1: Distribute billable regular hours into processed B and A pools day-by-day
       // We process B first to mimic the prioritization logic
       let remainingRegularToAllocate = totalRegularHoursToProcess;
 
       // First pass: Allocate to Type B shifts to prioritize them
-      for (const calendarDay of lastWeekDays) {
-        const jsDayOfWeek = calendarDay.day();
-        const matchedTemplate = scheduleTemplates.find(
-          (t) => t.dayOfWeek === jsDayOfWeek,
+      for (const shift of activeWorkedShiftsData) {
+        const matchedTemplate = shift.template;
+        const dayExpectedHours = matchedTemplate.computedHours;
+
+        if (
+          remainingRegularToAllocate <= 0 ||
+          matchedTemplate.salary_type !== "B"
+        ) {
+          continue;
+        }
+
+        const allocationForThisDay = Math.min(
+          remainingRegularToAllocate,
+          dayExpectedHours,
         );
+        remainingRegularToAllocate -= allocationForThisDay;
+        processedRegularHoursB += allocationForThisDay;
 
-        if (matchedTemplate) {
-          if (
-            !activeWorkedShiftsData.some(
-              (s) => s.dateStr === calendarDay.format("YYYY-MM-DD"),
-            )
-          ) {
-            activeWorkedShiftsData.push({
-              dateStr: calendarDay.format("YYYY-MM-DD"),
-              displayDate: calendarDay.format("ddd, MMM DD"),
-              template: matchedTemplate,
-            });
-          }
-
-          if (
-            remainingRegularToAllocate <= 0 ||
-            matchedTemplate.salary_type !== "B"
-          )
-            continue;
-
-          const allocationForThisDay = Math.min(remainingRegularToAllocate, 8);
-          remainingRegularToAllocate -= allocationForThisDay;
-          processedRegularHoursB += allocationForThisDay;
-
-          if (matchedTemplate.is_bonus_hourly) {
-            calculatedBonusWagePay += allocationForThisDay * dbBonusWage;
-            hoursEligibleForBonusWage += allocationForThisDay;
-          }
+        if (matchedTemplate.is_bonus_hourly) {
+          calculatedBonusWagePay += allocationForThisDay * dbBonusWage;
+          hoursEligibleForBonusWage += allocationForThisDay;
         }
       }
 
       // Second pass: Allocate remaining regular hours to Type A shifts
-      for (const calendarDay of lastWeekDays) {
-        const jsDayOfWeek = calendarDay.day();
-        const matchedTemplate = scheduleTemplates.find(
-          (t) => t.dayOfWeek === jsDayOfWeek,
-        );
+      for (const shift of activeWorkedShiftsData) {
+        const matchedTemplate = shift.template;
+        const dayExpectedHours = matchedTemplate.computedHours;
 
-        if (matchedTemplate && matchedTemplate.salary_type !== "B") {
+        if (matchedTemplate.salary_type !== "B") {
           if (remainingRegularToAllocate <= 0) continue;
 
-          const allocationForThisDay = Math.min(remainingRegularToAllocate, 8);
+          const allocationForThisDay = Math.min(
+            remainingRegularToAllocate,
+            dayExpectedHours,
+          );
           remainingRegularToAllocate -= allocationForThisDay;
           processedRegularHoursA += allocationForThisDay;
 
@@ -1990,19 +2006,17 @@ export const sendWeeklyReceptionPaystub = async (
       }
 
       // Calculate how many hours were actually deducted from each pool for the UI statement
-      // Total Regular Split before deduction would be:
       const rawRegularHoursToProcess = Math.min(rawHrs, expectedHours);
       let uiRawRegularA = 0;
       let uiRawRegularB = 0;
       let uiRemainingToSplit = rawRegularHoursToProcess;
 
-      for (const calendarDay of lastWeekDays) {
-        const jsDayOfWeek = calendarDay.day();
-        const matchedTemplate = scheduleTemplates.find(
-          (t) => t.dayOfWeek === jsDayOfWeek,
-        );
-        if (matchedTemplate && uiRemainingToSplit > 0) {
-          const alloc = Math.min(uiRemainingToSplit, 8);
+      for (const shift of activeWorkedShiftsData) {
+        const matchedTemplate = shift.template;
+        const dayExpectedHours = matchedTemplate.computedHours;
+
+        if (uiRemainingToSplit > 0) {
+          const alloc = Math.min(uiRemainingToSplit, dayExpectedHours);
           uiRemainingToSplit -= alloc;
           if (matchedTemplate.salary_type === "B") uiRawRegularB += alloc;
           else uiRawRegularA += alloc;
@@ -2024,25 +2038,23 @@ export const sendWeeklyReceptionPaystub = async (
 
       // Content Bonus Breakdown Calculation
       let totalContentBonusPay = 0;
-      const contentBonusBreakdownHtml = activeWorkedShiftsData
-        .map((shift) => {
-          const matchingBonus = dailyContentBonuses.find(
-            (b) => b.date === shift.dateStr,
-          );
-          const bonusAmount = matchingBonus?.content_bonus_amount || 0;
-          totalContentBonusPay += bonusAmount;
+      const contentBonusBreakdownHtml = activeWorkedShiftsData.map((shift) => {
+        const matchingBonus = dailyContentBonuses.find(
+          (b) => b.date === shift.dateStr,
+        );
+        const bonusAmount = matchingBonus?.content_bonus_amount || 0;
+        totalContentBonusPay += bonusAmount;
 
-          return bonusAmount > 0
-            ? `
+        return bonusAmount > 0
+          ? `
             <tr class="sub-row">
               <td>&nbsp;&nbsp;&bull; Content Bonus (${shift.displayDate})</td>
               <td>—</td>
               <td>Flat Award</td>
               <td style="text-align:right;">$${bonusAmount.toFixed(2)}</td>
             </tr>`
-            : "";
-        })
-        .join("");
+          : "";
+      });
 
       const gross =
         calculatedRegularPayA +
@@ -2087,7 +2099,7 @@ export const sendWeeklyReceptionPaystub = async (
             <div class="company-info">
               <h1>HYPER INKER STUDIO</h1>
               <p>8045 Callaghan Rd, San Antonio, TX 78230</p>
-              <p><strong>Pay Date:</strong> ${formatDate(now)}</p>
+              <p><strong>Pay Date:</strong> ${dayjs(today).format("MM/DD/YYYY")}</p>
             </div>
             <div class="stub-title">
               <h1>RECEPTION PAY STATEMENT</h1>
@@ -2233,7 +2245,6 @@ export const sendWeeklyReceptionPaystub = async (
         folder: "/paystubs",
       });
 
-      // 8. DB & Email
       await prisma.paystub.create({
         data: {
           userId: String(userId),
