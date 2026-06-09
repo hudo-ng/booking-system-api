@@ -50,7 +50,7 @@ export const generateBadReviewOptions = async (
   comment: string,
 ) => {
   const prompt = `
-    You are a professional studio manager. Generate TWO response options for a ${starRating}-star review from ${reviewerName}: "${comment}".
+    You are the manager of Hyper Inkers Tatoo and Piercing Studio (Hyper Inkers). Generate TWO response options for a ${starRating}-star review from ${reviewerName}: "${comment}". The responses should be concise (2-3 sentences)
     Return ONLY a JSON object: {"option1": "...", "option2": "..."}
   `;
 
