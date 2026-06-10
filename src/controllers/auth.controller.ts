@@ -1780,15 +1780,15 @@ export const sendWeeklyReceptionPaystub = async (
 ) => {
   try {
     const dataArtist = [
-      { userId: "6a0c3e58-d4e4-4f32-8585-9fbb81b08417", isFree15Hour: false },
       { userId: "bab24c5b-ec93-4386-bdfb-7b0e1f25eb7f", isFree15Hour: true },
+      { userId: "6a0c3e58-d4e4-4f32-8585-9fbb81b08417", isFree15Hour: false },
       { userId: "317b8640-2920-4d1d-853f-c8552545e634", isFree15Hour: false },
       { userId: "0ae16fcd-9ca3-4463-94f4-2aecb02f1745", isFree15Hour: false },
     ];
 
     const results = [];
 
-    const today = dayjs().subtract(3, "day");
+    const today = dayjs().subtract(4, "day");
 
     const fromDate = today.startOf("week").subtract(1, "week").add(1, "day");
     const toDate = fromDate.add(6, "day");
@@ -2245,31 +2245,31 @@ export const sendWeeklyReceptionPaystub = async (
         folder: "/paystubs",
       });
 
-      await prisma.paystub.create({
-        data: {
-          userId: String(userId),
-          name: week.user.name,
-          cash: 0,
-          card: 0,
-          total: totalBookingVolume,
-          imageUrl: uploadResponse.url,
-          startDate: fromDate.toDate(),
-          endDate: toDate.toDate(),
-          grossAmount: gross,
-        },
-      });
+      // await prisma.paystub.create({
+      //   data: {
+      //     userId: String(userId),
+      //     name: week.user.name,
+      //     cash: 0,
+      //     card: 0,
+      //     total: totalBookingVolume,
+      //     imageUrl: uploadResponse.url,
+      //     startDate: fromDate.toDate(),
+      //     endDate: toDate.toDate(),
+      //     grossAmount: gross,
+      //   },
+      // });
 
-      const mg = new Mailgun(FormData).client({
-        username: "api",
-        key: process.env.MAILGUN_API_KEY!,
-      });
-      await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
-        from: process.env.MAILGUN_FROM!,
-        to: week.user?.email ?? "canhducc@gmail.com",
-        subject: `Weekly Paystub (${fromDate.format("MMM DD")} - ${toDate.format("MMM DD")})`,
-        html: `<p>Your paystub is ready. <a href="${uploadResponse.url}">Click here to view online.</a></p>`,
-        attachment: [{ filename: "paystub.png", data: Buffer.from(image) }],
-      });
+      // const mg = new Mailgun(FormData).client({
+      //   username: "api",
+      //   key: process.env.MAILGUN_API_KEY!,
+      // });
+      // await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
+      //   from: process.env.MAILGUN_FROM!,
+      //   to: week.user?.email ?? "canhducc@gmail.com",
+      //   subject: `Weekly Paystub (${fromDate.format("MMM DD")} - ${toDate.format("MMM DD")})`,
+      //   html: `<p>Your paystub is ready. <a href="${uploadResponse.url}">Click here to view online.</a></p>`,
+      //   attachment: [{ filename: "paystub.png", data: Buffer.from(image) }],
+      // });
 
       results.push({ name: week.user.name, gross, url: uploadResponse.url });
     }

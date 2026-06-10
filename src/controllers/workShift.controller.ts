@@ -1082,7 +1082,6 @@ export const getAllContentBonuses = async (req: Request, res: Response) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    // Get current user status
     const currentUser = await prisma.user.findUnique({
       where: { id: userId },
       select: { isOwner: true, isAdmin: true },
@@ -1092,7 +1091,6 @@ export const getAllContentBonuses = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // 3. Graceful Guardian: If not an owner, return an empty data array instead of a 403 error
     if (!currentUser.isOwner) {
       return res.json({ success: true, data: [] });
     }
@@ -1108,10 +1106,16 @@ export const getAllContentBonuses = async (req: Request, res: Response) => {
       });
     }
 
-    // 2. Fetch all users whose position role matches "saleContent"
+    // 1. Updated query to fetch wage and new_wage fields from the database
     const salesStaff = await prisma.user.findMany({
       where: { role: "employee", position: "saleContent", deletedAt: null },
-      select: { id: true, name: true, email: true },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        wage: true, // Added
+        new_wage: true, // Added
+      },
     });
 
     if (salesStaff.length === 0) {
@@ -1120,7 +1124,6 @@ export const getAllContentBonuses = async (req: Request, res: Response) => {
 
     const staffIds = salesStaff.map((s) => s.id);
 
-    // 3. Concurrently pull shifts, database bonus records, and work schedules
     const [shifts, savedBonuses, workSchedules] = await Promise.all([
       prisma.workShift.findMany({
         where: {
@@ -1139,42 +1142,43 @@ export const getAllContentBonuses = async (req: Request, res: Response) => {
         },
       }),
       prisma.workSchedule.findMany({
-        where: {
-          userId: { in: staffIds },
-        },
+        where: { userId: { in: staffIds } },
         select: {
           userId: true,
           dayOfWeek: true,
           is_content_bonus: true,
+          salary_type: true,
         },
       }),
     ]);
 
-    // 4. Build lookup maps for fast, O(1) evaluation inside loops
-
-    // Map unique days worked: { userId: Set("2026-05-12") }
+    // Lookup structures
     const workDaysMap: Record<string, Set<string>> = {};
     shifts.forEach((shift) => {
-      if (!workDaysMap[shift.userId]) {
-        workDaysMap[shift.userId] = new Set();
-      }
+      if (!workDaysMap[shift.userId]) workDaysMap[shift.userId] = new Set();
       workDaysMap[shift.userId].add(dayjs(shift.clockIn).format("YYYY-MM-DD"));
     });
 
-    // Map manual DB bonus adjustments: { "userId_YYYY-MM-DD": amount }
-    const bonusLookup: Record<string, number> = {};
+    const bonusLookup: Record<string, { amount: number; salary_type: string }> =
+      {};
     savedBonuses.forEach((b) => {
-      bonusLookup[`${b.userId}_${b.date}`] = b.content_bonus_amount;
+      bonusLookup[`${b.userId}_${b.date}`] = {
+        amount: b.content_bonus_amount,
+        salary_type: b.salary_type ?? "A",
+      };
     });
 
-    // Map standard configurations by day of week: { "userId_dayIdx": true/false }
-    const scheduleBonusLookup: Record<string, boolean> = {};
+    const scheduleTemplateLookup: Record<
+      string,
+      { isEnabled: boolean; defaultSalaryType: string }
+    > = {};
     workSchedules.forEach((sched) => {
-      scheduleBonusLookup[`${sched.userId}_${sched.dayOfWeek}`] =
-        !!sched.is_content_bonus;
+      scheduleTemplateLookup[`${sched.userId}_${sched.dayOfWeek}`] = {
+        isEnabled: !!sched.is_content_bonus,
+        defaultSalaryType: sched.salary_type || "A",
+      };
     });
 
-    // 5. Generate matrix payload ignoring non-content-bonus days
     const startDay = dayjs(start_date);
     const endDay = dayjs(end_date);
     const totalDaysCount = endDay.diff(startDay, "day") + 1;
@@ -1186,44 +1190,53 @@ export const getAllContentBonuses = async (req: Request, res: Response) => {
 
       for (let i = 0; i < totalDaysCount; i++) {
         const currentDayInstance = startDay.add(i, "day");
-        const currentDayOfWeek = currentDayInstance.day(); // 0 (Sun) to 6 (Sat)
+        const currentDayOfWeek = currentDayInstance.day();
         const scheduleKey = `${employee.id}_${currentDayOfWeek}`;
 
-        // Rule: If the schedule says this day of the week is NOT a content bonus day, ignore entirely
-        const isScheduleBonusEnabled =
-          scheduleBonusLookup[scheduleKey] || false;
-        if (!isScheduleBonusEnabled) {
-          continue; // Skip directly to the next loop iteration, omitting this date
+        const templateConfig = scheduleTemplateLookup[scheduleKey];
+
+        if (!templateConfig?.isEnabled) {
+          continue;
         }
 
         const currentDateStr = currentDayInstance.format("YYYY-MM-DD");
         const lookupKey = `${employee.id}_${currentDateStr}`;
 
-        // Tracking actual shifts on valid content days
         const didWork = workDaysMap[employee.id]?.has(currentDateStr) || false;
         if (didWork) actualDaysWorked++;
 
-        // Determine payout value using override or 0 fallback
-        const bonusAmount =
-          lookupKey in bonusLookup ? bonusLookup[lookupKey] : 0;
+        let displaySalaryType = templateConfig.defaultSalaryType;
+        let bonusAmount = 0;
+
+        if (lookupKey in bonusLookup) {
+          bonusAmount = bonusLookup[lookupKey].amount;
+          if (bonusLookup[lookupKey].salary_type) {
+            displaySalaryType = bonusLookup[lookupKey].salary_type;
+          }
+        }
+
         calculatedTotalBonus += bonusAmount;
 
         dailyBreakdown.push({
           date: currentDateStr,
           didWork,
           content_bonus_amount: bonusAmount,
+          salary_type: displaySalaryType,
         });
       }
 
       return {
+        // 2. Transformed employee key response data structure
         employee: {
           id: employee.id,
           name: employee.name,
           email: employee.email,
+          wage: employee.wage ?? 0, // Added with safe default fallback
+          new_wage: employee.new_wage ?? 0, // Added with safe default fallback
         },
         totalWorkDays: actualDaysWorked,
         totalBonusPayout: calculatedTotalBonus,
-        dailyBreakdown, // Only contains dates where is_content_bonus was true
+        dailyBreakdown,
       };
     });
 
@@ -1239,11 +1252,12 @@ export const getAllContentBonuses = async (req: Request, res: Response) => {
 // =========================================================================
 export const saveDailyContentBonus = async (req: Request, res: Response) => {
   try {
-    const { userId, date, amount, tierKey } = req.body as {
+    const { userId, date, amount, tierKey, salaryType } = req.body as {
       userId: string;
       date: string;
       amount?: number;
       tierKey?: string;
+      salaryType?: "A" | "B";
     };
 
     if (!userId || !date) {
@@ -1252,9 +1266,9 @@ export const saveDailyContentBonus = async (req: Request, res: Response) => {
         .json({ error: "userId and date fields are required" });
     }
 
-    let finalAmount = amount ?? 0;
+    // 1. Determine the target bonus amount if changing payouts
+    let targetAmount: number | undefined = undefined;
 
-    // If an owner selects an explicit tier indicator shortcut (A, B, C) from the client view
     if (tierKey) {
       const tierConfig = await prisma.quickBonusSetting.findUnique({
         where: { tier: tierKey.toUpperCase().trim() },
@@ -1264,22 +1278,51 @@ export const saveDailyContentBonus = async (req: Request, res: Response) => {
           error: `Bonus setup rule for Tier '${tierKey}' was not found`,
         });
       }
-      finalAmount = tierConfig.amount;
+      targetAmount = tierConfig.amount;
+    } else if (amount !== undefined) {
+      targetAmount = amount;
     }
 
-    // Atomic update or create pattern via the compound unique index constraints
+    // 2. Look up the existing record to know what to preserve
+    const existingRecord = await prisma.contentBonus.findUnique({
+      where: {
+        userId_date: { userId, date },
+      },
+    });
+
+    // 3. Formulate the absolute fallbacks for a new record creation
+    let fallbackSalaryType = salaryType;
+    if (!fallbackSalaryType) {
+      const dayOfWeekIndex = dayjs(date).day();
+      const templateMatch = await prisma.workSchedule.findFirst({
+        where: {
+          userId: userId,
+          dayOfWeek: dayOfWeekIndex,
+        },
+        select: { salary_type: true },
+      });
+      fallbackSalaryType = (templateMatch?.salary_type as "A" | "B") || "A";
+    }
+
+    // 4. Fire the patch-style upsert execution safely
     const updatedRecord = await prisma.contentBonus.upsert({
       where: {
-        userId_date: {
-          userId,
-          date,
-        },
+        userId_date: { userId, date },
       },
-      update: { content_bonus_amount: finalAmount },
+      update: {
+        // If a property isn't passed, look to existing data first, then fall back
+        content_bonus_amount:
+          targetAmount !== undefined
+            ? targetAmount
+            : existingRecord?.content_bonus_amount,
+        salary_type:
+          salaryType !== undefined ? salaryType : existingRecord?.salary_type,
+      },
       create: {
         userId,
         date,
-        content_bonus_amount: finalAmount,
+        content_bonus_amount: targetAmount !== undefined ? targetAmount : 0,
+        salary_type: fallbackSalaryType,
       },
     });
 
