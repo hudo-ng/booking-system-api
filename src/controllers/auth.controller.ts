@@ -1789,13 +1789,11 @@ export const sendWeeklyReceptionPaystub = async (
     const results = [];
 
     const today = dayjs().subtract(4, "day");
-
     const fromDate = today.startOf("week").subtract(1, "week").add(1, "day");
     const toDate = fromDate.add(6, "day");
 
     const format = (d: dayjs.Dayjs) => d.format("YYYY-MM-DD");
 
-    // Pre-calculate the days in this specific pay week to minimize array recreations
     const lastWeekDays: dayjs.Dayjs[] = [];
     let currentDayCursor = fromDate.clone();
     while (
@@ -1823,6 +1821,7 @@ export const sendWeeklyReceptionPaystub = async (
       const dbBonusWage = userProfile.bonus_wage || 0;
       const dbExtraWage = userProfile.extra_hour_wage || 0;
 
+      // 1. Fetch DB records needed for calculation
       const scheduleTemplates = await prisma.workSchedule.findMany({
         where: {
           userId: String(userId),
@@ -1843,6 +1842,18 @@ export const sendWeeklyReceptionPaystub = async (
       });
       const bookedIds = bookedAppointments.map((a) => a.id);
 
+      // NEW: Fetch shifts for this week to verify actual days worked
+      const userWorkShifts = await prisma.workShift.findMany({
+        where: {
+          userId: String(userId),
+          clockIn: {
+            gte: fromDate.startOf("day").toDate(),
+            lte: toDate.endOf("day").toDate(),
+          },
+        },
+      });
+
+      // 2. Booking Commission Sync Logic
       const apiDataCache = new Map<string, any[]>();
       let fetchCursor = new Date(fromDate.toDate());
       while (fetchCursor <= toDate.toDate()) {
@@ -1889,7 +1900,6 @@ export const sendWeeklyReceptionPaystub = async (
       const rawHrs = week.totalHours || 0;
       const totalWorkDays = week.totalWorkDays || 0;
 
-      // DYNAMIC CHANGE: Compute expected hours strictly out of database templates for the dates hit
       let expectedHours = 0;
       const activeWorkedShiftsData: Array<{
         dateStr: string;
@@ -1904,14 +1914,22 @@ export const sendWeeklyReceptionPaystub = async (
         );
 
         if (matchedTemplate) {
-          // Track dynamic scheduled hours from the DB (falling back to 8 if field doesn't exist)
-          const dayExpectedHours =
-            matchedTemplate.expected_work_hour !== undefined
+          // NEW MATCH LOGIC: Validate that employee actually clocked in/out on this specific day
+          const hasAttendedDay = userWorkShifts.some((shift) =>
+            dayjs(shift.clockIn).isSame(calendarDay, "day"),
+          );
+
+          // If they didn't go to work on this scheduled day, expected hours for this day = 0
+          const dayExpectedHours = hasAttendedDay
+            ? matchedTemplate.expected_work_hour !== undefined
               ? Number(matchedTemplate.expected_work_hour)
-              : 8;
+              : 8
+            : 0;
+
           expectedHours += dayExpectedHours;
 
           if (
+            dayExpectedHours > 0 &&
             !activeWorkedShiftsData.some(
               (s) => s.dateStr === calendarDay.format("YYYY-MM-DD"),
             )
@@ -1925,23 +1943,20 @@ export const sendWeeklyReceptionPaystub = async (
         }
       }
 
-      // Calculate total billable capacity after pulling out training hours
+      // Calculations based on dynamic expected capacity hours
       const deductionPoolSize = isFree15Hour ? 15 : 0;
       const totalBillableHours = Math.max(0, rawHrs - deductionPoolSize);
 
-      // Extra hours can ONLY exist if billable hours exceed the dynamic expected ceiling
       const processedExtraHours = Math.max(
         0,
         totalBillableHours - expectedHours,
       );
 
-      // Regular hours to process represent the billable hours that fit under the dynamic expected cap
       const totalRegularHoursToProcess = Math.min(
         totalBillableHours,
         expectedHours,
       );
 
-      // Track raw calculations strictly for UI presentation display state
       const uiRawExtraHours = Math.max(0, rawHrs - expectedHours);
 
       let processedRegularHoursA = 0;
@@ -1949,11 +1964,9 @@ export const sendWeeklyReceptionPaystub = async (
       let hoursEligibleForBonusWage = 0;
       let calculatedBonusWagePay = 0;
 
-      // Step 1: Distribute billable regular hours into processed B and A pools day-by-day
-      // We process B first to mimic the prioritization logic
       let remainingRegularToAllocate = totalRegularHoursToProcess;
 
-      // First pass: Allocate to Type B shifts to prioritize them
+      // First pass: Type B prioritization strategy mapping
       for (const shift of activeWorkedShiftsData) {
         const matchedTemplate = shift.template;
         const dayExpectedHours = matchedTemplate.computedHours;
@@ -2000,12 +2013,11 @@ export const sendWeeklyReceptionPaystub = async (
         }
       }
 
-      // Safe fallback injection rule for unmapped hours
       if (remainingRegularToAllocate > 0) {
         processedRegularHoursA += remainingRegularToAllocate;
       }
 
-      // Calculate how many hours were actually deducted from each pool for the UI statement
+      // UI Display helper splits
       const rawRegularHoursToProcess = Math.min(rawHrs, expectedHours);
       let uiRawRegularA = 0;
       let uiRawRegularB = 0;
@@ -2024,19 +2036,10 @@ export const sendWeeklyReceptionPaystub = async (
       }
       if (uiRemainingToSplit > 0) uiRawRegularA += uiRemainingToSplit;
 
-      const apprenticeHoursDeductedFromB =
-        uiRawRegularB - processedRegularHoursB;
-      const apprenticeHoursDeductedFromA =
-        uiRawRegularA - processedRegularHoursA;
-      const apprenticeHoursDeductedFromExtra =
-        uiRawExtraHours - processedExtraHours;
-
-      // Final gross item computations
       const calculatedRegularPayA = processedRegularHoursA * dbWageA;
       const calculatedRegularPayB = processedRegularHoursB * dbWageB;
       const calculatedExtraPay = processedExtraHours * dbExtraWage;
 
-      // Content Bonus Breakdown Calculation
       let totalContentBonusPay = 0;
       const contentBonusBreakdownHtml = activeWorkedShiftsData.map((shift) => {
         const matchingBonus = dailyContentBonuses.find(
@@ -2105,7 +2108,7 @@ export const sendWeeklyReceptionPaystub = async (
               <h1>RECEPTION PAY STATEMENT</h1>
               <div class="summary-header">
                 <div class="summary-box"><small>PERIOD</small><span>7 Days</span></div>
-                <div class="summary-box"><small>GROWS PAY</small><span>$${gross.toFixed(2)}</span></div>
+                <div class="summary-box"><small>GROSS PAY</small><span>$${gross.toFixed(2)}</span></div>
               </div>
             </div>
           </div>
@@ -2207,7 +2210,7 @@ export const sendWeeklyReceptionPaystub = async (
                 <td>Daily Split</td>
                 <td style="text-align:right; font-weight:bold; color:#4F46E5;">$${totalContentBonusPay.toFixed(2)}</td>
               </tr>
-              ${contentBonusBreakdownHtml}
+              ${contentBonusBreakdownHtml.join("")}
               `
                   : ""
               }
@@ -2245,24 +2248,24 @@ export const sendWeeklyReceptionPaystub = async (
         folder: "/paystubs",
       });
 
-      // await prisma.paystub.create({
-      //   data: {
-      //     userId: String(userId),
-      //     name: week.user.name,
-      //     cash: 0,
-      //     card: 0,
-      //     total: totalBookingVolume,
-      //     imageUrl: uploadResponse.url,
-      //     startDate: fromDate.toDate(),
-      //     endDate: toDate.toDate(),
-      //     grossAmount: gross,
-      //   },
-      // });
+      await prisma.paystub.create({
+        data: {
+          userId: String(userId),
+          name: week.user.name,
+          cash: 0,
+          card: 0,
+          total: totalBookingVolume,
+          imageUrl: uploadResponse.url,
+          startDate: fromDate.toDate(),
+          endDate: toDate.toDate(),
+          grossAmount: gross,
+        },
+      });
 
-      // const mg = new Mailgun(FormData).client({
-      //   username: "api",
-      //   key: process.env.MAILGUN_API_KEY!,
-      // });
+      const mg = new Mailgun(FormData).client({
+        username: "api",
+        key: process.env.MAILGUN_API_KEY!,
+      });
       // await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
       //   from: process.env.MAILGUN_FROM!,
       //   to: week.user?.email ?? "canhducc@gmail.com",
@@ -2280,7 +2283,6 @@ export const sendWeeklyReceptionPaystub = async (
     return res.status(500).json({ message: error.message });
   }
 };
-
 const formatDate = (d: Date) => d.toISOString().split("T")[0];
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export const sendZoePaystub = async (req: Request, res: Response) => {
@@ -3180,7 +3182,7 @@ export const sendAllArtistPaystubs = async (req: Request, res: Response) => {
     const arrayArtistNeedToHavePaystub = [
       { name: "Pablo", commission: 0.55 },
       { name: "Navei", commission: 0.55 },
-      { name: "Jackie", commission: 0.55 },
+      // { name: "Jackie", commission: 0.55 },
       { name: "Tai", commission: 0.55 },
     ];
 

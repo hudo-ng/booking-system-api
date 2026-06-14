@@ -13,10 +13,12 @@ import {
   getAllNotificationByAppointmentId,
   getCleanSchedules,
   getListOfBookedAppointmentsByFormId,
+  getPaidPayments,
   getSignInCustomers,
   releaseSms,
   requestTattooArtistPaymentByUserId,
   updateMiniPhoto,
+  voidPaymentRequest,
 } from "../controllers/management.controller";
 import { enforceDevice } from "../middleware/enforceDevice";
 import {
@@ -48,4 +50,9 @@ router.post("/tattoo-artist", requestTattooArtistPaymentByUserId);
 router.post("/zoe-artist", generateZoePaystubData);
 router.post("/yen-artist", generateYenPaystubData);
 router.post("/nicole-artist", generateNicolePaystubData);
+// GET: Fetch successful transactions (statusCode "0000", Cash, CashApp) to build your management table
+router.get("/payments/paid", getPaidPayments);
+
+// POST: Process dynamic terminal selection (terminal_1 / terminal_2) voids or cash reversals
+router.post("/payments/void", voidPaymentRequest);
 export default router;

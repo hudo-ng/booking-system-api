@@ -422,7 +422,7 @@ export const updateMiniPhoto = async (req: Request, res: Response) => {
 export const getSignInCustomers = async (req: Request, res: Response) => {
   try {
     const { userId } = (req as any).user as { userId?: string };
-    const { start_date, end_date } = req.query;
+    const { start_date, end_date, is_customers } = req.query;
 
     if (!userId) {
       return res.status(401).json({ error: "Unauthorized" });
@@ -445,26 +445,37 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
       };
     }
 
+    // 1. Fetch initial data sets concurrently
     const [customers, formBookings] = await Promise.all([
       prisma.signInCustomer.findMany({
         where: whereClause,
         orderBy: { createdAt: "desc" },
       }),
-      prisma.formBookingRequest.findMany({
-        where: whereClause,
-        orderBy: { createdAt: "desc" },
-      }),
+      // If only customers are requested, skip loading booking records completely
+      is_customers === "true"
+        ? Promise.resolve([])
+        : prisma.formBookingRequest.findMany({
+            where: whereClause,
+            orderBy: { createdAt: "desc" },
+          }),
     ]);
 
-    if (formBookings.length === 0) {
+    // 2. STAGE EARLY ESCAPE: If only customer list is targeted or no forms exist
+    if (is_customers === "true" || formBookings.length === 0) {
       return res.json({
         success: true,
         data: customers,
         array_of_form_bookings: [],
-        summaryAnalytics: { totalBooked: 0, breakdowns: [] },
+        summaryAnalytics: {
+          totalBookedAppointments: 0,
+          totalFormBookingsProcessed: 0,
+          conversionRatePercentage: 0,
+          breakdowns: [],
+        },
       });
     }
 
+    // 3. Fall-through deep calculation logic (Executed only when is_customers != true)
     const emails = formBookings.map((b) => b.email).filter(Boolean);
     const rawPhones = formBookings.map((b) => b.phone).filter(Boolean);
     const names = formBookings.map((b) => b.name).filter(Boolean);
@@ -521,7 +532,6 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
       const bookingNameCleaned = normalizeName(booking.name);
 
       const matchingApp = prospectiveAppointments.find((app) => {
-        // Crucial: strict timeline evaluation rule (Appointment must happen after booking request)
         if (!app.createdAt || app.createdAt <= booking.createdAt) return false;
 
         const appEmail = app.email?.toLowerCase().trim() || "";
@@ -593,7 +603,7 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
         };
       })
       .sort((a, b) => b.count - a.count);
-    console.log("breakdowns: ", breakdowns);
+
     return res.json({
       success: true,
       data: customers,
@@ -1166,5 +1176,310 @@ export const addEmployee = async (req: Request, res: Response) => {
   } catch (error) {
     console.error("Error creating employee:", error);
     return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+/**
+ * Helper function to securely load terminal credentials based on explicit device selections.
+ */
+const getTerminalCredentials = (deviceNumber: string) => {
+  if (deviceNumber === "terminal_2") {
+    return {
+      Tpn: process.env.DEJAVOO_TPN_SECOND,
+      Authkey: process.env.DEJAVOO_AUTH_KEY_SECOND,
+      RegisterId: process.env.DEJAVOO_REGISTER_ID_SECOND,
+      MerchantNumber: process.env.DEJAVOO_MERCHANT_NUMBER!,
+    };
+  }
+  // Default fallback or explicit terminal_1 routing
+  return {
+    Tpn: process.env.DEJAVOO_TPN,
+    Authkey: process.env.DEJAVOO_AUTH_KEY,
+    RegisterId: process.env.DEJAVOO_REGISTER_ID,
+    MerchantNumber: process.env.DEJAVOO_MERCHANT_NUMBER!,
+  };
+};
+
+export const getPaidPayments = async (req: Request, res: Response) => {
+  try {
+    const { userId } = (req as any).user as { userId?: string };
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const currentUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!currentUser) return res.status(404).json({ error: "User not found" });
+
+    // STRICT OWNER CHECK
+    if (currentUser.isOwner !== true) {
+      return res.status(403).json({ error: "Access denied. Owners only." });
+    }
+
+    // Extract query parameters from request
+    const { search_key } = req.query;
+
+    // Define baseline filtering rules: Must be terminal-approved OR a cash variant
+    const baseWhereClause: any = {
+      OR: [{ statusCode: "0000" }],
+    };
+
+    // Advanced search logic capturing both standard data and sensitive identifiers
+    if (
+      search_key &&
+      typeof search_key === "string" &&
+      search_key.trim() !== ""
+    ) {
+      const parsedSearch = search_key.trim();
+
+      baseWhereClause.AND = [
+        {
+          OR: [
+            // Standard customer identifier search
+            { customer_name: { contains: parsedSearch, mode: "insensitive" } },
+          ],
+        },
+      ];
+    }
+
+    // Execute query with a safety cap returning only the latest 200 items
+    const paidPayments = await prisma.trackingPayment.findMany({
+      where: baseWhereClause,
+      orderBy: { createdAt: "desc" },
+      take: 200, // Forces performance optimization limit
+    });
+
+    return res.json({ success: true, data: paidPayments });
+  } catch (err: any) {
+    console.error("Error fetching paid payments:", err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+export const voidPaymentRequest = async (req: Request, res: Response) => {
+  try {
+    const { userId } = (req as any).user as { userId?: string };
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const currentUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!currentUser) return res.status(404).json({ error: "User not found" });
+
+    if (currentUser.isOwner !== true) {
+      return res
+        .status(403)
+        .json({ error: "Access denied. Only owners can void transactions." });
+    }
+
+    const { tracking_payment_id, device_number, extra_data } = req.body;
+    if (!tracking_payment_id) {
+      return res
+        .status(400)
+        .json({ success: false, error: "tracking_payment_id is required." });
+    }
+
+    const originalPayment = await prisma.trackingPayment.findUnique({
+      where: { id: tracking_payment_id },
+    });
+
+    if (!originalPayment) {
+      return res
+        .status(404)
+        .json({ success: false, error: "Payment record not found." });
+    }
+
+    if (originalPayment.voided) {
+      return res
+        .status(400)
+        .json({ success: false, error: "This transaction is already voided." });
+    }
+
+    // --- CASH/CASHAPP BYPASS ---
+    if (
+      originalPayment.paymentType === "Cash" ||
+      originalPayment.paymentType === "CashApp"
+    ) {
+      const updatedCashRecord = await prisma.trackingPayment.update({
+        where: { id: tracking_payment_id },
+        data: { voided: true, transactionType: "VoidedPayment" },
+      });
+      await reverseExternalFormPayment(originalPayment, extra_data);
+      return res.json({
+        success: true,
+        message: "Cash voided internally.",
+        record: updatedCashRecord,
+      });
+    }
+
+    // --- CARD VOID OPERATION ---
+    const targetDevice =
+      device_number || originalPayment.device_number || "terminal_1";
+    const { Tpn, Authkey, RegisterId } = getTerminalCredentials(targetDevice);
+
+    if (!Tpn || !Authkey) {
+      return res.status(500).json({
+        success: false,
+        error: `Missing essential terminal config (Tpn/Authkey) for identifier: ${targetDevice}`,
+      });
+    }
+
+    // ==========================================
+    // CRITICAL DEJAVOO ID ALIGNMENT DEBUGS
+    // ==========================================
+    console.log("=== [DEJAVOO DEEP TELEMETRY START] ===");
+    console.log("[DB VALUES FOUND]:", {
+      pnReferenceId: originalPayment.pnReferenceId, // Primary Dejavoo Transaction ID
+      transactionNumber: originalPayment.transactionNumber, // Sequential identifier in batch
+      referenceId: originalPayment.referenceId, // App POS unique reference
+      totalAmount: originalPayment.totalAmount, // Amount + Surcharge processing fee
+      amount: originalPayment.amount, // Pure base price
+    });
+
+    const payload = {
+      Tpn: Tpn.trim(),
+      Authkey: Authkey.trim(),
+      RegisterId: RegisterId ? RegisterId.trim() : "",
+      MerchantNumber: null,
+      PaymentType: "Credit",
+
+      // FIX 1: Omit your custom application reference string ("V_028") so Dejavoo's
+      // routing router doesn't pull a false match on fallback digits.
+      ReferenceId: originalPayment.referenceId,
+
+      // FIX 2: Explicitly target the immutable gateway payment reference token
+      PNReferenceId: originalPayment.pnReferenceId || undefined,
+      TransactionNumber: originalPayment.transactionNumber || undefined,
+
+      // Match the exact processing authorization amount string ($1.03)
+      Amount: originalPayment.totalAmount || originalPayment.amount,
+
+      PrintReceipt: "No",
+      GetReceipt: "No",
+      CaptureSignature: false,
+      GetExtendedData: true,
+      IsReadyForIS: false,
+    };
+
+    console.log(
+      "[OUTBOUND PAYLOAD TO SPINPOS]:",
+      JSON.stringify(payload, null, 2),
+    );
+    console.log("=== [DEJAVOO DEEP TELEMETRY END] ===");
+
+    const response = await axios.post(
+      "https://spinpos.net/v2/Payment/Void",
+      payload,
+      { headers: { "Content-Type": "application/json" }, timeout: 240000 },
+    );
+
+    const dejavooResult = response.data;
+
+    console.log(
+      "[RAW INBOUND API RESPONSE]:",
+      JSON.stringify(dejavooResult, null, 2),
+    );
+
+    if (dejavooResult?.GeneralResponse?.StatusCode !== "0000") {
+      return res.status(422).json({
+        success: false,
+        error:
+          dejavooResult?.GeneralResponse?.Message ||
+          "Terminal rejected void execution.",
+        detailedMessage: dejavooResult?.GeneralResponse?.DetailedMessage,
+        dejavoo: dejavooResult,
+      });
+    }
+
+    const updatedCardRecord = await prisma.trackingPayment.update({
+      where: { id: tracking_payment_id },
+      data: {
+        voided: true,
+        transactionType: dejavooResult?.TransactionType ?? "VoidedCardPayment",
+        statusCode: dejavooResult?.GeneralResponse?.StatusCode,
+        message: dejavooResult?.GeneralResponse?.Message,
+        detailedMessage: dejavooResult?.GeneralResponse?.DetailedMessage,
+        device_number: targetDevice,
+      },
+    });
+
+    await reverseExternalFormPayment(originalPayment, extra_data);
+
+    return res.json({
+      success: true,
+      message: "Card transaction voided successfully.",
+      dejavoo: dejavooResult,
+      cardRecord: updatedCardRecord,
+    });
+  } catch (err: any) {
+    console.error("=== [VOID EXCEPTION TELEMETRY] ===");
+    if (err.response) {
+      console.error("Status Code Received:", err.response.status);
+      console.error(
+        "Payload Trace Body:",
+        JSON.stringify(err.response.data, null, 2),
+      );
+    } else {
+      console.error("System Runtime Error Message:", err.message);
+    }
+    return res
+      .status(500)
+      .json({ success: false, error: err.response?.data || err.message });
+  }
+};
+/**
+ * Secondary downstream webhook helper synchronization module
+ */
+export const reverseExternalFormPayment = async (
+  originalPayment: any,
+  extra_data: any,
+) => {
+  try {
+    // 1. Identify the structural parameters
+    const documentId = extra_data?.documentId || originalPayment.document_id;
+    const realtimeDbId = extra_data?.id || originalPayment.document_id;
+    const collectionId =
+      extra_data?.collectionId || originalPayment.item_service;
+
+    // 2. Determine if it's a piercing or tattoo based on the artist
+    const piercingArtists = ["nicole", "yen", "zoe", "others"];
+    const artistName = (originalPayment.artist || "").toLowerCase().trim();
+
+    const isPiercing =
+      piercingArtists.includes(artistName) || collectionId === "piercing";
+
+    // 3. Dynamic endpoint routing selector
+    const segment = isPiercing ? "piercing" : "tattoo";
+    const webhookUrl = `https://hyperinkersform.com/api/${segment}/payment`;
+
+    if (!documentId || !collectionId || !realtimeDbId) {
+      console.error("[WEBHOOK ERROR] Blocked: Missing critical identifiers.", {
+        documentId,
+        collectionId,
+        realtimeDbId,
+      });
+      return;
+    }
+
+    const payload = {
+      tracking_payment_id: originalPayment.id,
+      status: "voided", // Telling Next.js this transaction is getting canceled
+      paid_money: 0,
+      documentId,
+      collectionId,
+      id: realtimeDbId,
+    };
+
+    console.log(
+      `[WEBHOOK SYNC] Routing data reversal to [${segment.toUpperCase()}] target: ${webhookUrl}`,
+    );
+
+    const response = await axios.patch(webhookUrl, payload, {
+      headers: { "Content-Type": "application/json" },
+    });
+
+    console.log("[WEBHOOK SYNC SUCCESS]:", response.data);
+    return response.data;
+  } catch (err: any) {
+    console.error(
+      "Failed downstream webhook data sync reversal:",
+      err.response?.data || err.message,
+    );
+    throw err;
   }
 };
