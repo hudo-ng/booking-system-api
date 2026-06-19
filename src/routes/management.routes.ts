@@ -17,6 +17,7 @@ import {
   getSignInCustomers,
   releaseSms,
   requestTattooArtistPaymentByUserId,
+  returnPaymentRequest,
   updateMiniPhoto,
   voidPaymentRequest,
 } from "../controllers/management.controller";
@@ -55,4 +56,5 @@ router.get("/payments/paid", getPaidPayments);
 
 // POST: Process dynamic terminal selection (terminal_1 / terminal_2) voids or cash reversals
 router.post("/payments/void", voidPaymentRequest);
+router.post("/payments/return", returnPaymentRequest);
 export default router;

@@ -1781,7 +1781,7 @@ export const sendWeeklyReceptionPaystub = async (
   try {
     const dataArtist = [
       { userId: "bab24c5b-ec93-4386-bdfb-7b0e1f25eb7f", isFree15Hour: true },
-      { userId: "6a0c3e58-d4e4-4f32-8585-9fbb81b08417", isFree15Hour: false },
+      // { userId: "6a0c3e58-d4e4-4f32-8585-9fbb81b08417", isFree15Hour: false },
       { userId: "317b8640-2920-4d1d-853f-c8552545e634", isFree15Hour: false },
       { userId: "0ae16fcd-9ca3-4463-94f4-2aecb02f1745", isFree15Hour: false },
     ];
@@ -2266,13 +2266,13 @@ export const sendWeeklyReceptionPaystub = async (
         username: "api",
         key: process.env.MAILGUN_API_KEY!,
       });
-      // await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
-      //   from: process.env.MAILGUN_FROM!,
-      //   to: week.user?.email ?? "canhducc@gmail.com",
-      //   subject: `Weekly Paystub (${fromDate.format("MMM DD")} - ${toDate.format("MMM DD")})`,
-      //   html: `<p>Your paystub is ready. <a href="${uploadResponse.url}">Click here to view online.</a></p>`,
-      //   attachment: [{ filename: "paystub.png", data: Buffer.from(image) }],
-      // });
+      await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
+        from: process.env.MAILGUN_FROM!,
+        to: week.user?.email ?? "canhducc@gmail.com",
+        subject: `Weekly Paystub (${fromDate.format("MMM DD")} - ${toDate.format("MMM DD")})`,
+        html: `<p>Your paystub is ready. <a href="${uploadResponse.url}">Click here to view online.</a></p>`,
+        attachment: [{ filename: "paystub.png", data: Buffer.from(image) }],
+      });
 
       results.push({ name: week.user.name, gross, url: uploadResponse.url });
     }

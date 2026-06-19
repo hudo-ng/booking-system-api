@@ -1213,11 +1213,33 @@ export const getPaidPayments = async (req: Request, res: Response) => {
       return res.status(403).json({ error: "Access denied. Owners only." });
     }
 
-    // Extract query parameters from request
-    const { search_key } = req.query;
+    // Extract optional query parameters from request
+    const { search_key, selected_date } = req.query;
 
-    // Define baseline filtering rules: Must be terminal-approved OR a cash variant
+    // Define the business location timezone anchor
+    const texasTimezone = "America/Chicago";
+
+    // Establish dynamic date boundaries
+    let targetDay = dayjs().tz(texasTimezone);
+
+    if (
+      selected_date &&
+      typeof selected_date === "string" &&
+      selected_date.trim() !== ""
+    ) {
+      targetDay = dayjs.tz(selected_date.trim(), texasTimezone);
+    }
+
+    // Capture the 24-hour absolute block limits converted safely to JS Date instances for Prisma
+    const startOfDayTx = targetDay.startOf("day").toDate();
+    const endOfDayTx = targetDay.endOf("day").toDate();
+
+    // Define baseline filtering rules: Must be approved/cash AND fall within the dynamic daily timestamp window
     const baseWhereClause: any = {
+      createdAt: {
+        gte: startOfDayTx,
+        lte: endOfDayTx,
+      },
       OR: [{ statusCode: "0000" }],
     };
 
@@ -1234,6 +1256,8 @@ export const getPaidPayments = async (req: Request, res: Response) => {
           OR: [
             // Standard customer identifier search
             { customer_name: { contains: parsedSearch, mode: "insensitive" } },
+            { artist: { contains: parsedSearch, mode: "insensitive" } },
+            { referenceId: { contains: parsedSearch, mode: "insensitive" } },
           ],
         },
       ];
@@ -1481,5 +1505,199 @@ export const reverseExternalFormPayment = async (
       err.response?.data || err.message,
     );
     throw err;
+  }
+};
+
+export const returnPaymentRequest = async (req: Request, res: Response) => {
+  try {
+    // --- AUTH & OWNER VALIDATION ---
+    const { userId } = (req as any).user as { userId?: string };
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+
+    const currentUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!currentUser) return res.status(404).json({ error: "User not found" });
+
+    if (currentUser.isOwner !== true) {
+      return res
+        .status(403)
+        .json({ error: "Access denied. Only owners can process returns." });
+    }
+
+    const { tracking_payment_id, device_number, amount_override, extra_data } =
+      req.body;
+    if (!tracking_payment_id) {
+      return res
+        .status(400)
+        .json({ success: false, error: "tracking_payment_id is required." });
+    }
+
+    const originalPayment = await prisma.trackingPayment.findUnique({
+      where: { id: tracking_payment_id },
+    });
+
+    if (!originalPayment) {
+      return res
+        .status(404)
+        .json({ success: false, error: "Original payment record not found." });
+    }
+
+    if (originalPayment.voided) {
+      return res.status(400).json({
+        success: false,
+        error: "Cannot process a return on a voided transaction.",
+      });
+    }
+
+    // Determine return value: prioritize a custom partial refund amount, fallback to total processing volume
+    const returnAmount =
+      amount_override !== undefined
+        ? Number(amount_override)
+        : originalPayment.totalAmount || originalPayment.amount;
+
+    // --- CASH/CASHAPP BYPASS RUNTIMES ---
+    if (
+      originalPayment.paymentType === "Cash" ||
+      originalPayment.paymentType === "CashApp"
+    ) {
+      const updatedCashRecord = await prisma.trackingPayment.update({
+        where: { id: tracking_payment_id },
+        data: {
+          transactionType: "ReturnedPayment",
+          // If doing full refunds, you can flag an internal column or log details inside extra_data
+        },
+      });
+
+      // Execute standard commission or database rollback mechanisms
+      await reverseExternalFormPayment(originalPayment, extra_data);
+
+      return res.json({
+        success: true,
+        message: "Cash payment return logged internally.",
+        record: updatedCashRecord,
+        refundedAmount: returnAmount,
+      });
+    }
+
+    // --- CARD RETURN OPERATION ---
+    const targetDevice =
+      device_number || originalPayment.device_number || "terminal_1";
+    const { Tpn, Authkey, RegisterId } = getTerminalCredentials(targetDevice);
+
+    if (!Tpn || !Authkey) {
+      return res.status(500).json({
+        success: false,
+        error: `Missing essential terminal config (Tpn/Authkey) for identifier: ${targetDevice}`,
+      });
+    }
+
+    // ==========================================
+    // DEJAVOO RETURN TELEMETRY ALIGNMENT
+    // ==========================================
+    console.log("=== [DEJAVOO RETURN TELEMETRY START] ===");
+    console.log("[DB TARGET VALUES]:", {
+      pnReferenceId: originalPayment.pnReferenceId,
+      transactionNumber: originalPayment.transactionNumber,
+      referenceId: originalPayment.referenceId,
+      targetReturnAmount: returnAmount,
+    });
+
+    const payload = {
+      Tpn: Tpn.trim(),
+      Authkey: Authkey.trim(),
+      RegisterId: RegisterId ? RegisterId.trim() : "",
+      MerchantNumber: null,
+      PaymentType: "Credit",
+
+      // Pass the original unique cross-reference tag or append a return suffix if required
+      ReferenceId: originalPayment.referenceId,
+
+      // Fix: Ensure Amount is string-serialized (usually 2 decimal places matching financial strings)
+      Amount: returnAmount?.toFixed(2),
+
+      // Optional mapping additions standard to Dejavoo reference schemas
+      PNReferenceId: originalPayment.pnReferenceId || undefined,
+      TransactionNumber: originalPayment.transactionNumber || undefined,
+
+      PrintReceipt: "No",
+      GetReceipt: "No",
+      CaptureSignature: false,
+      GetExtendedData: true,
+      IsReadyForIS: false,
+      CallbackInfo: { Url: "" },
+
+      // 🌟 FIX: Omit empty tracking keys entirely so they don't break string min-length validations
+      ReconId: undefined,
+      IsvId: undefined,
+      CustomFields: {},
+    };
+
+    console.log(
+      "[OUTBOUND RETURN PAYLOAD TO SPINPOS]:",
+      JSON.stringify(payload, null, 2),
+    );
+    console.log("=== [DEJAVOO RETURN TELEMETRY END] ===");
+
+    // Post to standard production SpinPOS endpoint matrix matching your application setup
+    const response = await axios.post(
+      "https://spinpos.net/v2/Payment/Return",
+      payload,
+      { headers: { "Content-Type": "application/json" }, timeout: 240000 },
+    );
+
+    const dejavooResult = response.data;
+
+    console.log(
+      "[RAW INBOUND RETURN API RESPONSE]:",
+      JSON.stringify(dejavooResult, null, 2),
+    );
+
+    if (dejavooResult?.GeneralResponse?.StatusCode !== "0000") {
+      return res.status(422).json({
+        success: false,
+        error:
+          dejavooResult?.GeneralResponse?.Message ||
+          "Terminal rejected return deployment.",
+        detailedMessage: dejavooResult?.GeneralResponse?.DetailedMessage,
+        dejavoo: dejavooResult,
+      });
+    }
+
+    // Update database logging status patterns to keep balance ledgers clean
+    const updatedCardRecord = await prisma.trackingPayment.update({
+      where: { id: tracking_payment_id },
+      data: {
+        transactionType:
+          dejavooResult?.TransactionType ?? "ReturnedCardPayment",
+        statusCode: dejavooResult?.GeneralResponse?.StatusCode,
+        message: dejavooResult?.GeneralResponse?.Message,
+        detailedMessage: dejavooResult?.GeneralResponse?.DetailedMessage,
+        device_number: targetDevice,
+      },
+    });
+
+    // Strip commission calculations or update order invoice amounts down
+    await reverseExternalFormPayment(originalPayment, extra_data);
+
+    return res.json({
+      success: true,
+      message: "Card transaction processed for return successfully.",
+      dejavoo: dejavooResult,
+      cardRecord: updatedCardRecord,
+      refundedAmount: returnAmount,
+    });
+  } catch (err: any) {
+    console.error("=== [RETURN TRANSACTION EXCEPTION TELEMETRY] ===");
+    if (err.response) {
+      console.error("Status Code Received:", err.response.status);
+      console.error(
+        "Payload Trace Body:",
+        JSON.stringify(err.response.data, null, 2),
+      );
+    } else {
+      console.error("System Runtime Error Message:", err.message);
+    }
+    return res
+      .status(500)
+      .json({ success: false, error: err.response?.data || err.message });
   }
 };
