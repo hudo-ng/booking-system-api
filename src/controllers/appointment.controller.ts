@@ -1187,6 +1187,7 @@ export const updateAppointment = async (req: Request, res: Response) => {
       status: "accepted",
       startTime: { lt: newEnd },
       endTime: { gt: newStart },
+      deletedAt: null, // Ensure we only check against non-deleted appointments
     },
   });
 
