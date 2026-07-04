@@ -3663,8 +3663,8 @@ export const sendAllArtistPaystubs = async (req: Request, res: Response) => {
 export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
   try {
     const targetEmail = (req.query.email as string) || "nicole@example.com";
-    const studioFee1Amount = 65.0;
-    const studioFee2Amount = 50.0;
+    const studioFee1Amount = 69.0;
+    const studioFee2Amount = 75.0;
 
     const now = new Date();
     now.setDate(now.getDate() - 2);
@@ -3932,7 +3932,7 @@ export const generateNicolePaystubData = async (
     const artistName = "Nicole";
 
     // Fee Structures
-    const studioFeeOneAmount = 65.0;
+    const studioFeeOneAmount = 75.0;
     const feeChangeDate = dayjs("2026-05-10");
 
     const fromDate = dayjs(start_date).toDate();
@@ -4029,7 +4029,7 @@ export const generateNicolePaystubData = async (
           // Fee 2 logic: Active only on or after May 10, 2026
           studioFeeTwo = currentCursorDayjs.isBefore(feeChangeDate, "day")
             ? 0.0
-            : 50.0;
+            : 69.0;
         }
       } catch (err) {
         console.error(`Fetch failed for ${formatted}`);
