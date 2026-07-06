@@ -2160,7 +2160,7 @@ export const sendWeeklyReceptionPaystub = async (
                 calculatedBonusWagePay > 0
                   ? `
               <tr>
-                <td><strong>Bonus Hours</strong></td>
+                <td><strong>Bonus</strong></td>
                 <td>${hoursEligibleForBonusWage.toFixed(1)} hrs</td>
                 <td>$${dbBonusWage.toFixed(2)}</td>
                 <td style="text-align:right; font-weight:bold;">$${calculatedBonusWagePay.toFixed(2)}</td>
@@ -3663,8 +3663,8 @@ export const sendAllArtistPaystubs = async (req: Request, res: Response) => {
 export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
   try {
     const targetEmail = (req.query.email as string) || "nicole@example.com";
-    const studioFee1Amount = 69.0;
-    const studioFee2Amount = 75.0;
+    const studioFee1Amount = 65.0;
+    const studioFee2Amount = 50.0;
 
     const now = new Date();
     now.setDate(now.getDate() - 2);
@@ -3931,9 +3931,9 @@ export const generateNicolePaystubData = async (
     const { start_date, end_date } = req.body;
     const artistName = "Nicole";
 
-    // Fee Structures
-    const studioFeeOneAmount = 75.0;
-    const feeChangeDate = dayjs("2026-05-10");
+    // Fee Effective Dates
+    const feeChangeDateMay = dayjs("2026-05-10");
+    const feeChangeDateJune = dayjs("2026-06-26");
 
     const fromDate = dayjs(start_date).toDate();
     const toDate = dayjs(end_date).toDate();
@@ -4024,12 +4024,19 @@ export const generateNicolePaystubData = async (
 
         // Apply Studio Fees only if there was piercing activity
         if (totalPiercingForFee > 0) {
-          studioFeeOne = studioFeeOneAmount;
+          // Fee 1: Adjusts to 75 starting June 26, 2026. Otherwise, it's 65.
+          studioFeeOne = currentCursorDayjs.isBefore(feeChangeDateJune, "day")
+            ? 65.0
+            : 75.0;
 
-          // Fee 2 logic: Active only on or after May 10, 2026
-          studioFeeTwo = currentCursorDayjs.isBefore(feeChangeDate, "day")
-            ? 0.0
-            : 69.0;
+          // Fee 2: 0 before May 10, 50 between May 10 and June 25, 69 starting June 26.
+          if (currentCursorDayjs.isBefore(feeChangeDateMay, "day")) {
+            studioFeeTwo = 0.0;
+          } else if (currentCursorDayjs.isBefore(feeChangeDateJune, "day")) {
+            studioFeeTwo = 50.0;
+          } else {
+            studioFeeTwo = 69.0;
+          }
         }
       } catch (err) {
         console.error(`Fetch failed for ${formatted}`);
@@ -4103,6 +4110,7 @@ export const generateNicolePaystubData = async (
     return res.status(500).json({ error: error.message });
   }
 };
+
 export const fixMissingTattooSpending = async (req: Request, res: Response) => {
   try {
     // 1. Find all Tattoo customers with 0 or null spending_amount
