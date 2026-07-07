@@ -24,6 +24,7 @@ import {
   verifyAdminPaymentRequest,
   createBookingRequest,
   adminLoginWithoutDevice,
+  markDepositHasBeenUsed,
 } from "../controllers/auth.controller";
 import { getAllMiniPhoto } from "../controllers/management.controller";
 
@@ -35,6 +36,7 @@ router.post("/admin-login", adminLoginWithoutDevice);
 router.post("/login/id-token", logInByIdToken);
 router.get("/mini-photo", getAllMiniPhoto);
 // router.post("/create-square-payment-request", createSquareRequest);
+router.post("/mark-check-deposit", markDepositHasBeenUsed);
 router.post("/create-payment-request", createPaymentRequest);
 router.post("/create-payment-request/admin", createAdminPaymentRequest);
 router.post("/verify-payment-request/admin", verifyAdminPaymentRequest);

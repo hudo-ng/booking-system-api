@@ -584,6 +584,82 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
   }
 };
 
+export const markDepositHasBeenUsed = async (req: Request, res: Response) => {
+  // Extract id from query parameters instead of params (e.g., /appointments/mark-deposit?id=xyz)
+  const { id } = req.query;
+
+  if (!id || typeof id !== "string") {
+    return res
+      .status(400)
+      .json({ message: "Appointment ID query parameter is required." });
+  }
+
+  try {
+    // 1. Fetch the targeted appointment record
+    const appointment = await prisma.appointment.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        deposit_amount: true,
+        deposit_has_been_used: true,
+        deposit_status: true,
+        deposit_category: true,
+      },
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ message: "Appointment not found." });
+    }
+
+    // 2. Validate deposit amount constraints (null or 0)
+    if (!appointment.deposit_amount || appointment.deposit_amount === 0) {
+      return res.status(400).json({
+        message:
+          "Action rejected. This appointment has no associated deposit value.",
+      });
+    }
+
+    // 3. Verify if the deposit was already processed previously
+    if (appointment.deposit_has_been_used === true) {
+      return res.status(400).json({
+        message:
+          "Action rejected. The deposit for this appointment has already been used.",
+      });
+    }
+
+    // 4. Ensure deposit record tracking is in an 'accepted' status
+    if (appointment.deposit_status !== "accepted") {
+      return res.status(400).json({
+        message: `Action rejected. Only accepted deposits can be used (Current status: ${appointment.deposit_status}).`,
+      });
+    }
+
+    // 5. Restrict use if deposit category falls under transfer rules
+    if (appointment.deposit_category === "Has been moved") {
+      return res.status(400).json({
+        message:
+          "Action rejected. This deposit cannot be used because it has been moved to another appointment.",
+      });
+    }
+
+    // 6. Update document flag state if all guardrails pass successfully
+    const updatedAppointment = await prisma.appointment.update({
+      where: { id },
+      data: { deposit_has_been_used: true },
+    });
+
+    return res.json({
+      message: "Deposit successfully marked as used.",
+      appointment: updatedAppointment,
+    });
+  } catch (err) {
+    console.error("Failed to mark deposit as used:", err);
+    return res
+      .status(500)
+      .json({ message: "Failed to process deposit update." });
+  }
+};
+
 export const createAdminPaymentRequest = async (
   req: Request,
   res: Response,
