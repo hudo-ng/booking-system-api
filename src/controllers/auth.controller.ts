@@ -615,15 +615,7 @@ export const markDepositHasBeenUsed = async (req: Request, res: Response) => {
     if (!appointment.deposit_amount || appointment.deposit_amount === 0) {
       return res.status(400).json({
         message:
-          "Action rejected. This appointment has no associated deposit value.",
-      });
-    }
-
-    // 3. Verify if the deposit was already processed previously
-    if (appointment.deposit_has_been_used === true) {
-      return res.status(400).json({
-        message:
-          "Action rejected. The deposit for this appointment has already been used.",
+          "Action rejected. This appointment has no associated deposit value. Remove mark of use of deposit.",
       });
     }
 
