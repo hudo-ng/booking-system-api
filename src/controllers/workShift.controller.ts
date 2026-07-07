@@ -174,67 +174,6 @@ export const clockIn = async (req: Request, res: Response) => {
     },
   });
 
-  // 4. Auto Clock-Out Scheduler (Fire and Forget Background Routine)
-  // Only trigger the auto clock-out execution loop if maxHourAllow is strictly less than 18
-  if (maxHourAllow < 18) {
-    (async () => {
-      try {
-        setTimeout(async () => {
-          try {
-            // Check if this specific shift is still active and has not been manually closed
-            const currentShiftState = await prisma.workShift.findUnique({
-              where: { id: shift.id },
-            });
-
-            if (currentShiftState && !currentShiftState.clockOut) {
-              const autoClockOutTime = new Date();
-
-              // Execute forced clock-out update
-              await prisma.workShift.update({
-                where: { id: shift.id },
-                data: { clockOut: autoClockOutTime },
-              });
-
-              console.log(
-                `Shift ${shift.id} has been automatically clocked out due to daily max hour limit reach (${maxHourAllow}h).`,
-              );
-
-              // Retrieve registered device notification push targets
-              const tokens = (
-                await prisma.deviceToken.findMany({
-                  where: { userId: userId, enabled: true },
-                  select: { token: true },
-                })
-              ).map((d) => d.token);
-
-              if (tokens.length) {
-                await sendPushAsync(tokens, {
-                  title: "Shift Auto Clock-Out ⚠️",
-                  body: `You have been clocked out automatically because you reached your max limit of ${maxHourAllow} hours today.`,
-                  data: { type: "SHIFT_AUTO_CO", status: "auto_clocked_out" },
-                });
-              }
-            }
-          } catch (innerErr) {
-            console.error(
-              "Error executing automated background shift clock-out routine:",
-              innerErr,
-            );
-          }
-        }, msRemaining);
-      } catch (timeoutSetupErr) {
-        console.error(
-          "Failed to initialize system auto clock-out scheduler thread:",
-          timeoutSetupErr,
-        );
-      }
-    })();
-  } else {
-    console.log(
-      `Skipping background auto-clockout timer rule for user ${userId}. (maxHourAllow: ${maxHourAllow} >= 18)`,
-    );
-  }
-
   return res.json({
     message: "Clocked in successfully",
     shift,
