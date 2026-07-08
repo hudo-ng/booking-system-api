@@ -3,6 +3,7 @@ import { runDailyReminder } from "../jobs/reminders";
 import { runCleaningReminder } from "../jobs/cleanning-reminders";
 import { runPendingAppointmentReminder } from "../jobs/pendingAppointmentReminder";
 import { testSync } from "../jobs/updateGGReviews";
+import { runOwnerDailySummaryCron } from "../jobs/ownerSummaryCron";
 
 const router = Router();
 
@@ -56,6 +57,19 @@ router.post("/google-reviews-update", async (req, res) => {
     res.json({ message: "Google reviews updated", result });
   } catch (e: any) {
     console.error("/google-reviews-update error:", e);
+    return res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+router.post("/owner-daily-summary", async (req, res) => {
+  if (req.headers["x-cron-secret"] !== process.env.CRON_SECRET) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  try {
+    const result = await runOwnerDailySummaryCron();
+    res.json({ message: "Owner daily summary processed successfully", result });
+  } catch (e: any) {
+    console.error("/owner-daily-summary error:", e);
     return res.status(500).json({ ok: false, error: String(e) });
   }
 });
