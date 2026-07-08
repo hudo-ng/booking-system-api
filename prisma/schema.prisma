@@ -713,3 +713,17 @@ model LaserVisitPackageUsage {
   visit             LaserVisit           @relation(fields: [visitId], references: [id])
   customerPackage   LaserCustomerPackage @relation(fields: [customerPackageId], references: [id])
 }
+
+model DailyReportForm {
+  id          String      @id @default(uuid())
+  artist      String
+  paidMoney   Float       @default(0)
+  formPaid    Int         @default(0)
+  formNotPaid Int         @default(0)
+  totalForm   Int         @default(0)
+  date        DateTime    
+  service     String
+  createdAt   DateTime    @default(now())
+
+  @@unique([artist, date, service]) // Prevents accidental duplicate rows if the cron runs twice
+}
