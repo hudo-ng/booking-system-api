@@ -93,7 +93,7 @@ model Appointment {
   status                 AppointmentStatus       @default(pending)
   startTime              DateTime?
   endTime                DateTime?
-  createdAt              DateTime?               @default(now())
+  createdAt              DateTime               @default(now())
   address                String?
   deposit_amount         Float?
   deposit_category       String?

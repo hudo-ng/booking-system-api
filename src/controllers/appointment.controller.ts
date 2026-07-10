@@ -1191,7 +1191,7 @@ export const updateAppointment = async (req: Request, res: Response) => {
     },
   });
 
-  if (conflict) {
+  if (conflict && status === "accepted") {
     return res.status(400).json({
       message: "This time overlaps with another accepted appointment.",
     });

@@ -419,25 +419,63 @@ export const updateMiniPhoto = async (req: Request, res: Response) => {
   }
 };
 
+const getCustomerType = (
+  visitCount: number,
+  latestVisit?: Date,
+): "new" | "normal" | "regular" | "vip" | "risk" => {
+  const fourMonthsAgo = new Date();
+  fourMonthsAgo.setMonth(fourMonthsAgo.getMonth() - 4);
+
+  if (visitCount >= 10) return "vip";
+
+  if (visitCount >= 3) return "regular";
+
+  if (visitCount === 2) return "normal";
+
+  if (visitCount === 1) {
+    if (latestVisit && latestVisit >= fourMonthsAgo) {
+      return "new";
+    }
+
+    return "risk";
+  }
+
+  return "new";
+};
+
 export const getSignInCustomers = async (req: Request, res: Response) => {
   try {
-    const { userId } = (req as any).user as { userId?: string };
+    const { userId } = (req as any).user as {
+      userId?: string;
+    };
+
     const { start_date, end_date, is_customers } = req.query;
 
     if (!userId) {
-      return res.status(401).json({ error: "Unauthorized" });
+      return res.status(401).json({
+        error: "Unauthorized",
+      });
     }
 
     const currentUser = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { isOwner: true },
+      where: {
+        id: userId,
+      },
+      select: {
+        isOwner: true,
+      },
     });
 
-    if (!currentUser || !currentUser.isOwner) {
-      return res.json({ success: true, data: [], array_of_form_bookings: [] });
+    if (!currentUser?.isOwner) {
+      return res.json({
+        success: true,
+        data: [],
+        array_of_form_bookings: [],
+      });
     }
 
-    let whereClause: any = {};
+    const whereClause: any = {};
+
     if (start_date && end_date) {
       whereClause.createdAt = {
         gte: new Date(start_date as string),
@@ -445,39 +483,125 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
       };
     }
 
-    // 1. Fetch initial data sets concurrently
-    const [customers, formBookings] = await Promise.all([
+    const [signInCustomers, formBookings] = await Promise.all([
       prisma.signInCustomer.findMany({
         where: whereClause,
-        orderBy: { createdAt: "desc" },
+        orderBy: {
+          createdAt: "desc",
+        },
       }),
-      // If only customers are requested, skip loading booking records completely
+
       is_customers === "true"
         ? Promise.resolve([])
         : prisma.formBookingRequest.findMany({
             where: whereClause,
-            orderBy: { createdAt: "desc" },
+            orderBy: {
+              createdAt: "desc",
+            },
           }),
     ]);
 
     // 2. STAGE EARLY ESCAPE: If only customer list is targeted or no forms exist
+
+    const groupedCustomers = new Map<string, any>();
+
+    for (const visit of signInCustomers) {
+      const email = visit.email?.toLowerCase().trim() || "";
+
+      const phone = normalizePhone(visit.phone);
+
+      const key = email || phone || visit.id;
+
+      if (!key) continue;
+
+      let customer = groupedCustomers.get(key);
+
+      if (!customer) {
+        customer = {
+          id: visit.id,
+
+          name: visit.name,
+
+          email: visit.email,
+
+          phone: visit.phone,
+
+          dob: visit.dob,
+
+          service: visit.service,
+
+          visits: [],
+
+          visitCount: 0,
+
+          totalSpent: 0,
+
+          latestVisit: null,
+        };
+
+        groupedCustomers.set(key, customer);
+      }
+
+      customer.visits.push(visit);
+
+      customer.visitCount++;
+
+      customer.totalSpent += visit.spending_amount || 0;
+
+      if (
+        !customer.latestVisit ||
+        visit.createdAt > customer.latestVisit.createdAt
+      ) {
+        customer.latestVisit = visit;
+      }
+    }
+    const customers = Array.from(groupedCustomers.values())
+      .map((customer) => {
+        customer.visits.sort(
+          (a: any, b: any) => b.createdAt.getTime() - a.createdAt.getTime(),
+        );
+
+        return {
+          ...customer,
+          type_of_customer: getCustomerType(
+            customer.visitCount,
+            customer.latestVisit?.createdAt,
+          ),
+        };
+      })
+      .sort(
+        (a, b) =>
+          b.latestVisit.createdAt.getTime() - a.latestVisit.createdAt.getTime(),
+      );
     if (is_customers === "true" || formBookings.length === 0) {
       return res.json({
         success: true,
+
         data: customers,
+
         array_of_form_bookings: [],
+
         summaryAnalytics: {
           totalBookedAppointments: 0,
+
           totalFormBookingsProcessed: 0,
+
           conversionRatePercentage: 0,
+
           breakdowns: [],
         },
       });
     }
+    // ----------------------------------------------------------
+    // Booking Conversion Analytics
+    // ----------------------------------------------------------
 
-    // 3. Fall-through deep calculation logic (Executed only when is_customers != true)
-    const emails = formBookings.map((b) => b.email).filter(Boolean);
+    const emails = formBookings
+      .map((b) => b.email?.toLowerCase().trim())
+      .filter(Boolean);
+
     const rawPhones = formBookings.map((b) => b.phone).filter(Boolean);
+
     const names = formBookings.map((b) => b.name).filter(Boolean);
 
     const earliestFormDate = formBookings.reduce(
@@ -485,14 +609,35 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
       formBookings[0].createdAt,
     );
 
-    const matchConditions: any[] = [
-      { email: { in: emails } },
-      { phone: { in: rawPhones } },
-      { customerName: { in: names } },
-    ];
+    const matchConditions: any[] = [];
+
+    if (emails.length) {
+      matchConditions.push({
+        email: {
+          in: emails,
+        },
+      });
+    }
+
+    if (rawPhones.length) {
+      matchConditions.push({
+        phone: {
+          in: rawPhones,
+        },
+      });
+    }
+
+    if (names.length) {
+      matchConditions.push({
+        customerName: {
+          in: names,
+        },
+      });
+    }
 
     names.forEach((name) => {
       const cleanName = normalizeName(name);
+
       if (cleanName && cleanName.length >= 3) {
         matchConditions.push({
           email: {
@@ -505,15 +650,20 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
 
     const prospectiveAppointments = await prisma.appointment.findMany({
       where: {
-        createdAt: { gte: earliestFormDate },
+        createdAt: {
+          gte: earliestFormDate,
+        },
+
         OR: matchConditions,
       },
+
       select: {
         id: true,
         email: true,
         phone: true,
         customerName: true,
         createdAt: true,
+
         assignedBy: {
           select: {
             id: true,
@@ -527,102 +677,137 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
     const bookedAppointmentsTracked: any[] = [];
 
     const array_of_form_bookings = formBookings.map((booking) => {
-      const bookingEmail = booking.email.toLowerCase().trim();
-      const bookingPhoneCleaned = normalizePhone(booking.phone);
-      const bookingNameCleaned = normalizeName(booking.name);
+      const bookingEmail = booking.email?.toLowerCase().trim() || "";
 
-      const matchingApp = prospectiveAppointments.find((app) => {
-        if (!app.createdAt || app.createdAt <= booking.createdAt) return false;
+      const bookingPhone = normalizePhone(booking.phone);
+
+      const bookingName = normalizeName(booking.name);
+
+      const matchingAppointment = prospectiveAppointments.find((app) => {
+        if (!app.createdAt || app.createdAt <= booking.createdAt) {
+          return false;
+        }
 
         const appEmail = app.email?.toLowerCase().trim() || "";
-        const appPhoneCleaned = normalizePhone(app.phone);
-        const appNameCleaned = normalizeName(app.customerName);
 
-        const emailMatch = bookingEmail && appEmail === bookingEmail;
-        const phoneMatch =
-          bookingPhoneCleaned && appPhoneCleaned === bookingPhoneCleaned;
-        const exactNameMatch =
-          bookingNameCleaned && appNameCleaned === bookingNameCleaned;
-        const nameInsideEmailMatch =
-          bookingNameCleaned.length >= 3 &&
-          appEmail.includes(bookingNameCleaned);
+        const appPhone = normalizePhone(app.phone);
+
+        const appName = normalizeName(app.customerName);
 
         return (
-          emailMatch || phoneMatch || exactNameMatch || nameInsideEmailMatch
+          appEmail === bookingEmail ||
+          appPhone === bookingPhone ||
+          appName === bookingName ||
+          (bookingName.length >= 3 && appEmail.includes(bookingName))
         );
       });
 
-      if (matchingApp) {
-        bookedAppointmentsTracked.push(matchingApp);
+      if (matchingAppointment) {
+        bookedAppointmentsTracked.push(matchingAppointment);
       }
 
       return {
         ...booking,
-        hasAppointment: !!matchingApp,
-        bookedBy: matchingApp?.assignedBy
+
+        hasAppointment: !!matchingAppointment,
+
+        bookedBy: matchingAppointment?.assignedBy
           ? {
-              id: matchingApp.assignedBy.id,
-              name: matchingApp.assignedBy.name,
-              colour: matchingApp.assignedBy.colour,
+              id: matchingAppointment.assignedBy.id,
+              name: matchingAppointment.assignedBy.name,
+              colour: matchingAppointment.assignedBy.colour,
             }
-          : matchingApp
-            ? { name: "System/Unknown" }
+          : matchingAppointment
+            ? {
+                name: "System/Unknown",
+              }
             : null,
       };
     });
 
-    const totalBookedCount = bookedAppointmentsTracked.length;
-    const assigneeMap: {
-      [key: string]: { count: number; name: string; colour: string | null };
-    } = {};
+    // ----------------------------------------------------------
+    // Breakdown
+    // ----------------------------------------------------------
 
-    bookedAppointmentsTracked.forEach((app) => {
-      const id = app.assignedBy?.id || "unassigned_or_system";
-      const name = app.assignedBy?.name || "Online Booking";
-      const colour = app.assignedBy?.colour || null;
+    const totalBookedAppointments = bookedAppointmentsTracked.length;
+
+    const assigneeMap: Record<
+      string,
+      {
+        count: number;
+        name: string;
+        colour: string | null;
+      }
+    > = {};
+
+    bookedAppointmentsTracked.forEach((appointment) => {
+      const id = appointment.assignedBy?.id || "system";
+
+      const name = appointment.assignedBy?.name || "Online Booking";
+
+      const colour = appointment.assignedBy?.colour || null;
 
       if (!assigneeMap[id]) {
-        assigneeMap[id] = { count: 0, name, colour };
+        assigneeMap[id] = {
+          count: 0,
+          name,
+          colour,
+        };
       }
-      assigneeMap[id].count += 1;
+
+      assigneeMap[id].count++;
     });
 
     const breakdowns = Object.entries(assigneeMap)
-      .map(([id, data]) => {
-        const percentage =
-          totalBookedCount > 0
-            ? parseFloat(((data.count / totalBookedCount) * 100).toFixed(2))
-            : 0;
+      .map(([id, value]) => ({
+        userId: id === "system" ? null : id,
 
-        return {
-          userId: id === "unassigned_or_system" ? null : id,
-          userName: data.name,
-          userColour: data.colour,
-          count: data.count,
-          percentage: percentage,
-        };
-      })
+        userName: value.name,
+
+        userColour: value.colour,
+
+        count: value.count,
+
+        percentage:
+          totalBookedAppointments > 0
+            ? Number(((value.count / totalBookedAppointments) * 100).toFixed(2))
+            : 0,
+      }))
       .sort((a, b) => b.count - a.count);
+
+    // ----------------------------------------------------------
+    // Final Response
+    // ----------------------------------------------------------
 
     return res.json({
       success: true,
+
       data: customers,
+
       array_of_form_bookings,
+
       summaryAnalytics: {
-        totalBookedAppointments: totalBookedCount,
+        totalBookedAppointments,
+
         totalFormBookingsProcessed: formBookings.length,
-        conversionRatePercentage:
-          formBookings.length > 0
-            ? parseFloat(
-                ((totalBookedCount / formBookings.length) * 100).toFixed(2),
-              )
-            : 0,
+
+        conversionRatePercentage: formBookings.length
+          ? Number(
+              ((totalBookedAppointments / formBookings.length) * 100).toFixed(
+                2,
+              ),
+            )
+          : 0,
+
         breakdowns,
       },
     });
   } catch (error: any) {
     console.error("Get SignInCustomers error:", error);
-    return res.status(500).json({ error: "Internal server error" });
+
+    return res.status(500).json({
+      error: "Internal server error",
+    });
   }
 };
 
