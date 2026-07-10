@@ -12,29 +12,21 @@ const prisma = new PrismaClient();
 const ZONE = "America/Chicago";
 
 interface ServiceMetrics {
-  paidMoney: number;
+  card: number;
+  cash: number;
   formPaid: number;
   formNotPaid: number;
 }
 
-/**
- * Independent Cron Task:
- * Runs nightly on Render to pull operational records from 29 hours ago,
- * stores the metrics inside the database, and pushes a dense notification to owners.
- */
 export async function runOwnerDailySummaryCron() {
   try {
     console.log("🚀 Starting independent Owner Daily Summary task...");
 
-    // 1. Target the correct historical snapshot window (Current time minus 29 hours)
     const targetDate = dayjs().tz(ZONE).subtract(12, "hour");
     const formattedDate = targetDate.format("MMDDYYYY");
     const displayDate = targetDate.format("MM/DD");
-
-    // Normalize date to midnight for consistent relational database queries
     const dbDate = targetDate.startOf("day").toDate();
 
-    // 2. Query data logs from the external API
     const response = await axios.post(
       "https://hyperinkersform.com/api/fetching",
       {
@@ -52,61 +44,67 @@ export async function runOwnerDailySummaryCron() {
 
     const totalFormsCount = items.length;
 
-    // 3. Accumulate data rows into mapping structure: reportMap[artistName][serviceString]
+    // Global trackers for the compact push notification layout
+    let globalCardTotal = 0;
+    let globalCashTotal = 0;
+    let cardTattoo = 0;
+    let cardPiercing = 0;
+
     const reportMap: Record<string, Record<string, ServiceMetrics>> = {};
 
     items.forEach((item) => {
       const artistName = item.artist?.trim() || "Unknown";
-      const paymentValue = parseFloat(item.paid_money) || 0;
-
-      // Categorize basic service types using string matching rules
       const service = item.color === "piercing" ? "piercing" : "tattoo";
 
-      // Compute workflow completion status indicators
-      const status = item.status?.toLowerCase();
-      const isPaid = ["done", "paid"].includes(status) || paymentValue > 0;
+      const cardValue = parseFloat(item.card) || 0;
+      const cashValue = parseFloat(item.cash) || 0;
+      const combinedTotal = cardValue + cashValue;
 
-      if (!reportMap[artistName]) {
-        reportMap[artistName] = {};
-      }
+      const status = item.status?.toLowerCase();
+      const isPaid = ["done", "paid"].includes(status) || combinedTotal > 0;
+
+      // Accumulate global statistics
+      globalCardTotal += cardValue;
+      globalCashTotal += cashValue;
+      if (service === "tattoo") cardTattoo += cardValue;
+      if (service === "piercing") cardPiercing += cardValue;
+
+      if (!reportMap[artistName]) reportMap[artistName] = {};
       if (!reportMap[artistName][service]) {
         reportMap[artistName][service] = {
-          paidMoney: 0,
+          card: 0,
+          cash: 0,
           formPaid: 0,
           formNotPaid: 0,
         };
       }
 
       const metrics = reportMap[artistName][service];
-      metrics.paidMoney += paymentValue;
-      if (isPaid) {
-        metrics.formPaid += 1;
-      } else {
-        metrics.formNotPaid += 1;
-      }
+      metrics.card += cardValue;
+      metrics.cash += cashValue;
+
+      if (isPaid) metrics.formPaid += 1;
+      else metrics.formNotPaid += 1;
     });
 
-    let breakdownLines: string[] = [];
+    let artistLines: string[] = [];
+    let piercerLines: string[] = [];
 
-    // 4. Update the DB tables and string format the notification layout concurrently
+    // 🔄 Sync cleanly to Database and separate notification list items
     for (const [artist, services] of Object.entries(reportMap)) {
+      let isPiercerOnly = true;
       let segmentsText: string[] = [];
 
       for (const [service, data] of Object.entries(services)) {
         const totalForm = data.formPaid + data.formNotPaid;
         if (totalForm === 0) continue;
+        if (service !== "piercing") isPiercerOnly = false;
 
-        // Persist records securely into the DailyReportForm DB Table
         await prisma.dailyReportForm.upsert({
-          where: {
-            artist_date_service: {
-              artist,
-              date: dbDate,
-              service,
-            },
-          },
+          where: { artist_date_service: { artist, date: dbDate, service } },
           update: {
-            paidMoney: data.paidMoney,
+            card: data.card,
+            cash: data.cash,
             formPaid: data.formPaid,
             formNotPaid: data.formNotPaid,
             totalForm,
@@ -115,66 +113,62 @@ export async function runOwnerDailySummaryCron() {
             artist,
             date: dbDate,
             service,
-            paidMoney: data.paidMoney,
+            card: data.card,
+            cash: data.cash,
             formPaid: data.formPaid,
             formNotPaid: data.formNotPaid,
             totalForm,
           },
         });
 
+        const totalCombinedArtistRevenue = data.card + data.cash;
         const icon = service === "tattoo" ? "🎨" : "💎";
         segmentsText.push(
-          `${icon}${totalForm}($${Math.round(data.paidMoney)})`,
+          `${icon}${totalForm}($${Math.round(totalCombinedArtistRevenue)})`,
         );
       }
 
       if (segmentsText.length > 0) {
-        breakdownLines.push(`${artist}: ${segmentsText.join(" | ")}`);
+        const line = `• ${artist}: ${segmentsText.join(" | ")}`;
+        if (isPiercerOnly) piercerLines.push(line);
+        else artistLines.push(line);
       }
     }
 
-    // 5. Query active system owners holding functional device tokens
+    // 📱 Layout dense text bubble block for notification dispatch
+    const pushBody = [
+      `💳 Card: $${Math.round(globalCardTotal)} | 💵 Cash: $${Math.round(globalCashTotal)}`,
+      `💳 Card Tatt: $${Math.round(cardTattoo)} | Card Pierc: $${Math.round(cardPiercing)}`,
+      `Artists:\n${artistLines.join("\n") || "None"}`,
+      `Piercers:\n${piercerLines.join("\n") || "None"}`,
+    ].join("\n");
+
     const ownersWithTokens = await prisma.user.findMany({
       where: { isOwner: true, deletedAt: null },
       select: {
-        DeviceToken: {
-          where: { enabled: true },
-          select: { token: true },
-        },
+        DeviceToken: { where: { enabled: true }, select: { token: true } },
       },
     });
 
     const ownerTokens = ownersWithTokens.flatMap((owner) =>
       owner.DeviceToken.map((t) => t.token),
     );
+    if (!ownerTokens.length) return { status: "saved_no_push" };
 
-    if (!ownerTokens.length) {
-      console.log(
-        "⚠️ Database records logged successfully, but no active owner push tokens were found.",
-      );
-      return { status: "saved_no_push", date: targetDate.format("YYYY-MM-DD") };
-    }
-
-    // 6. Push the compact payload out to mobile devices
-    const pushBody = breakdownLines.join("\n");
     await sendPushAsync(ownerTokens, {
       title: `📊 Summary ${displayDate} (${totalFormsCount} Forms)`,
       body: pushBody,
       data: {
         type: "ownerDailySummary",
         date: targetDate.format("YYYY-MM-DD"),
+        screen: "DailyReportDetails",
+        params: { date: targetDate.format("YYYY-MM-DD") },
       },
     });
 
-    console.log(
-      `✅ Daily metrics sync completed successfully for ${displayDate}.`,
-    );
     return { status: "success", formsTracked: totalFormsCount };
   } catch (error: any) {
-    console.error(
-      "❌ Critical exception encountered during owner daily report cron:",
-      error.message,
-    );
+    console.error("❌ Exception during report cron:", error.message);
     throw error;
   }
 }

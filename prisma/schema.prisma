@@ -715,15 +715,16 @@ model LaserVisitPackageUsage {
 }
 
 model DailyReportForm {
-  id          String      @id @default(uuid())
+  id          String   @id @default(uuid())
   artist      String
-  paidMoney   Float       @default(0)
-  formPaid    Int         @default(0)
-  formNotPaid Int         @default(0)
-  totalForm   Int         @default(0)
+  card        Float    @default(0)  // 🔥 Simple card tracking
+  cash        Float    @default(0)  // 🔥 Simple cash tracking
+  formPaid    Int      @default(0)
+  formNotPaid Int      @default(0)
+  totalForm   Int      @default(0)
   date        DateTime    
-  service     String
-  createdAt   DateTime    @default(now())
+  service     String   // "tattoo" or "piercing"
+  createdAt   DateTime @default(now())
 
-  @@unique([artist, date, service]) // Prevents accidental duplicate rows if the cron runs twice
+  @@unique([artist, date, service])
 }
