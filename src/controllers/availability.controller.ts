@@ -49,6 +49,7 @@ export const getAvailability = async (req: Request, res: Response) => {
       },
     }),
   ]);
+
   const appts = await prisma.appointment.findMany({
     where: {
       employeeId,
@@ -57,6 +58,8 @@ export const getAvailability = async (req: Request, res: Response) => {
       endTime: { gt: startOfDayUtc },
     },
   });
+
+  // --- FIX: IF OVERRIDE IS ON, BYPASS ALL APPOINTMENT CONFLICT FILTERS ---
   if (workOn) {
     const availableSlots: { start: string; end: string }[] = [];
 
@@ -72,14 +75,9 @@ export const getAvailability = async (req: Request, res: Response) => {
       const slotStartUtc = slotStartLocal.utc();
       const slotEndUtc = slotEndLocal.utc();
 
-      const hasConflict = appts.some((a) => {
-        const apptStart = dayjs(a.startTime).utc();
-        const apptEnd = dayjs(a.endTime).utc();
+      // REMOVED: The hasConflict matching filter block here entirely.
 
-        return slotStartUtc.isBefore(apptEnd) && apptStart.isBefore(slotEndUtc);
-      });
-
-      if (slotStartUtc.isAfter(dayjs.utc()) && !hasConflict) {
+      if (slotStartUtc.isAfter(dayjs.utc())) {
         availableSlots.push({
           start: slotStartUtc.toISOString(),
           end: slotEndUtc.toISOString(),
@@ -91,6 +89,7 @@ export const getAvailability = async (req: Request, res: Response) => {
 
     return res.json(availableSlots);
   }
+
   if (isOff) return res.json([]);
 
   const hours = await prisma.workingHours.findMany({
@@ -110,15 +109,6 @@ export const getAvailability = async (req: Request, res: Response) => {
   }
 
   const availableSlots: { start: string; end: string }[] = [];
-
-  function overlaps(
-    aStart: dayjs.Dayjs,
-    aEnd: dayjs.Dayjs,
-    bStart: dayjs.Dayjs,
-    bEnd: dayjs.Dayjs,
-  ) {
-    return aStart.isBefore(bEnd) && bStart.isBefore(aEnd);
-  }
 
   for (const interval of hours) {
     const { type } = interval;
@@ -243,18 +233,12 @@ export const getMonthlyAvailability = async (req: Request, res: Response) => {
     const weekday = day.day();
     const dayStartUtc = day.startOf("day").utc().toDate();
     const dayEndUtc = day.endOf("day").utc().toDate();
+
     const hasWorkOn = timeWorkOns.some(
       (w) => w.date >= dayStartUtc && w.date < dayEndUtc,
     );
-    if (hasWorkOn) {
-      const apptsForDay = appointments.filter(
-        (a) =>
-          a.startTime &&
-          a.endTime &&
-          a.startTime < dayEndUtc &&
-          a.endTime > dayStartUtc,
-      );
 
+    if (hasWorkOn) {
       let totalSlots = 0;
       let availableSlots = 0;
 
@@ -265,13 +249,9 @@ export const getMonthlyAvailability = async (req: Request, res: Response) => {
         totalSlots++;
 
         const s = cur.utc();
-        const e = cur.add(2, "hour").utc();
 
-        const conflict = apptsForDay.some(
-          (a) => s.isBefore(dayjs(a.endTime)) && dayjs(a.startTime).isBefore(e),
-        );
-
-        if (!conflict && s.isAfter(dayjs.utc())) {
+        // --- FIX: Removed appointment conflict checks entirely for forced days ---
+        if (s.isAfter(dayjs.utc())) {
           availableSlots++;
         }
 
@@ -287,6 +267,7 @@ export const getMonthlyAvailability = async (req: Request, res: Response) => {
       day = day.add(1, "day");
       continue;
     }
+
     const isOff = timeOffs.some(
       (t) => t.date >= dayStartUtc && t.date < dayEndUtc,
     );
@@ -429,15 +410,6 @@ export const getShopAvailabilityByDay = async (req: Request, res: Response) => {
       const appts = allAppts.filter((a) => a.employeeId === employee.id);
       const availableSlots: { start: string; end: string }[] = [];
       const occupied = new Set<string>();
-
-      for (const a of appts) {
-        let cur = dayjs(a.startTime).utc();
-        const end = dayjs(a.endTime).utc();
-        while (cur.isBefore(end)) {
-          occupied.add(cur.toISOString());
-          cur = cur.add(1, "hour");
-        }
-      }
       const isTimeWorkOn = !!workOn;
       if (workOn) {
         let curLocal = dayjs.tz(`${date} 12:00`, ZONE);
@@ -454,13 +426,7 @@ export const getShopAvailabilityByDay = async (req: Request, res: Response) => {
           const sUtc = slotStart.utc();
           const eUtc = slotEnd.utc();
 
-          const hasConflict = appts.some(
-            (a) =>
-              sUtc.isBefore(dayjs(a.endTime)) &&
-              dayjs(a.startTime).isBefore(eUtc),
-          );
-
-          if (sUtc.isAfter(nowUtc) && !hasConflict) {
+          if (sUtc.isAfter(nowUtc)) {
             availableSlots.push({
               start: sUtc.toISOString(),
               end: eUtc.toISOString(),
@@ -480,6 +446,15 @@ export const getShopAvailabilityByDay = async (req: Request, res: Response) => {
 
         continue;
       }
+      for (const a of appts) {
+        let cur = dayjs(a.startTime).utc();
+        const end = dayjs(a.endTime).utc();
+        while (cur.isBefore(end)) {
+          occupied.add(cur.toISOString());
+          cur = cur.add(1, "hour");
+        }
+      }
+
       if (isOffRecord || !hours.length) {
         results.push({
           id: employee.id,
