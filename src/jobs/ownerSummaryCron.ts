@@ -161,7 +161,7 @@ export async function runOwnerDailySummaryCron() {
       data: {
         type: "ownerDailySummary",
         date: targetDate.format("YYYY-MM-DD"),
-        screen: "DailyReportDetails",
+        screen: "/DailyReportDetails",
         params: { date: targetDate.format("YYYY-MM-DD") },
       },
     });

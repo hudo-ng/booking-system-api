@@ -1886,3 +1886,97 @@ export const returnPaymentRequest = async (req: Request, res: Response) => {
       .json({ success: false, error: err.response?.data || err.message });
   }
 };
+
+const ZONE = "America/Chicago";
+export const getDailyReportFormBySelectedMonthYear = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const { userId } = (req as any).user as { userId?: string };
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!currentUser?.isOwner) {
+      return res.status(403).json({ error: "You do not have permission" });
+    }
+
+    const { month, year } = req.query as { month?: string; year?: string };
+
+    if (!month || !year) {
+      return res.status(400).json({
+        message: "Missing required query parameters: month and year.",
+      });
+    }
+
+    const monthNum = parseInt(month, 10);
+    const yearNum = parseInt(year, 10);
+
+    if (isNaN(monthNum) || monthNum < 1 || monthNum > 12 || isNaN(yearNum)) {
+      return res
+        .status(400)
+        .json({ message: "Invalid month or year values supplied." });
+    }
+
+    // 🗓️ Compute timezone safe start and end points for database lookup
+    const paddedMonth = monthNum.toString().padStart(2, "0");
+    const startOfMonth = dayjs
+      .tz(`${yearNum}-${paddedMonth}-01`, ZONE)
+      .startOf("month");
+    const endOfMonth = startOfMonth.endOf("month");
+
+    // Pull report items matching the time window
+    const reports = await prisma.dailyReportForm.findMany({
+      where: {
+        date: {
+          gte: startOfMonth.utc().toDate(),
+          lte: endOfMonth.utc().toDate(),
+        },
+      },
+      orderBy: [{ date: "asc" }, { artist: "asc" }],
+    });
+
+    // 📊 Group results by calendar dates for scannable UI rendering arrays
+    const groupedByDate: Record<string, any[]> = {};
+
+    reports.forEach((report) => {
+      // Re-localize DB UTC date stamp back to store display string
+      const dateKey = dayjs(report.date).tz(ZONE).format("YYYY-MM-DD");
+
+      if (!groupedByDate[dateKey]) {
+        groupedByDate[dateKey] = [];
+      }
+
+      groupedByDate[dateKey].push({
+        id: report.id,
+        artist: report.artist,
+        service: report.service,
+        card: report.card,
+        cash: report.cash,
+        totalRevenue: report.card + report.cash,
+        formPaid: report.formPaid,
+        formNotPaid: report.formNotPaid,
+        totalForm: report.totalForm,
+      });
+    });
+
+    return res.status(200).json({
+      meta: {
+        year: yearNum,
+        month: monthNum,
+        recordCount: reports.length,
+      },
+      data: groupedByDate,
+    });
+  } catch (error: any) {
+    console.error("❌ Error fetching monthly report summary:", error.message);
+    return res.status(500).json({
+      message: "Internal server error reading monthly metrics summaries.",
+    });
+  }
+};

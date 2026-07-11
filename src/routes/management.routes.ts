@@ -12,6 +12,7 @@ import {
   getAllNotification,
   getAllNotificationByAppointmentId,
   getCleanSchedules,
+  getDailyReportFormBySelectedMonthYear,
   getListOfBookedAppointmentsByFormId,
   getPaidPayments,
   getSignInCustomers,
@@ -46,6 +47,10 @@ router.get("/mini-photo", getAllMiniPhoto);
 router.put("/mini-photo", updateMiniPhoto);
 router.get("/sign-in-customers", getSignInCustomers);
 router.get("/booked-appointments", getListOfBookedAppointmentsByFormId);
+router.get(
+  "/daily-report/monthly-summary",
+  getDailyReportFormBySelectedMonthYear,
+);
 router.post("/tattoo-artist", requestTattooArtistPaymentByUserId);
 
 router.post("/zoe-artist", generateZoePaystubData);
