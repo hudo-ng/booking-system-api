@@ -97,23 +97,23 @@ export const requestBooking = async (req: Request, res: Response) => {
 
   const dayStartLocal = dayjs.tz(date, "YYYY-MM-DD", ZONE).startOf("day");
   const dayEndLocal = dayStartLocal.add(1, "day");
-  const dayStartUTC = dayStartLocal.utc();
-  const dayEndUTC = dayEndLocal.utc();
+  // const dayStartUTC = dayStartLocal.utc();
+  // const dayEndUTC = dayEndLocal.utc();
 
-  const off = await prisma.timeOff.findFirst({
-    where: {
-      employeeId,
-      date: {
-        gte: dayStartUTC.toDate(),
-        lt: dayEndUTC.toDate(),
-      },
-    },
-  });
+  // const off = await prisma.timeOff.findFirst({
+  //   where: {
+  //     employeeId,
+  //     date: {
+  //       gte: dayStartUTC.toDate(),
+  //       lt: dayEndUTC.toDate(),
+  //     },
+  //   },
+  // });
 
-  if (off) {
-    console.log(off);
-    return res.status(400).json({ message: "Employee is off on that day" });
-  }
+  // if (off) {
+  //   console.log(off);
+  //   return res.status(400).json({ message: "Employee is off on that day" });
+  // }
 
   // const conflict = await prisma.appointment.findFirst({
   //   where: {
@@ -123,24 +123,24 @@ export const requestBooking = async (req: Request, res: Response) => {
   //     endTime: { gt: start.toDate() },
   //   },
   // });
-  const conflict = await prisma.appointment.findFirst({
-    where: {
-      employeeId,
-      status: "accepted",
-      startTime: { lte: start.toDate() },
-      endTime: { gt: start.toDate() },
-    },
-  });
-  if (conflict)
-    return res.status(400).json({ message: "Time slot already booked!" });
+  // const conflict = await prisma.appointment.findFirst({
+  //   where: {
+  //     employeeId,
+  //     status: "accepted",
+  //     startTime: { lte: start.toDate() },
+  //     endTime: { gt: start.toDate() },
+  //   },
+  // });
+  // if (conflict)
+  //   return res.status(400).json({ message: "Time slot already booked!" });
 
-  const MAX_DURATION_MINUTES = 8 * 60;
+  // const MAX_DURATION_MINUTES = 8 * 60;
 
-  if (end.diff(start, "minute") > MAX_DURATION_MINUTES) {
-    return res.status(400).json({
-      message: "Booking duration exceeds maximum allowed time.",
-    });
-  }
+  // if (end.diff(start, "minute") > MAX_DURATION_MINUTES) {
+  //   return res.status(400).json({
+  //     message: "Booking duration exceeds maximum allowed time.",
+  //   });
+  // }
 
   let dobDate: Date | null = null;
   if (dob) {
@@ -329,22 +329,22 @@ export const bookWithPayment = async (req: Request, res: Response) => {
 
   const dayStartLocal = dayjs.tz(date, "YYYY-MM-DD", ZONE).startOf("day");
   const dayEndLocal = dayStartLocal.add(1, "day");
-  const dayStartUTC = dayStartLocal.utc();
-  const dayEndUTC = dayEndLocal.utc();
+  // const dayStartUTC = dayStartLocal.utc();
+  // const dayEndUTC = dayEndLocal.utc();
 
-  const off = await prisma.timeOff.findFirst({
-    where: {
-      employeeId,
-      date: {
-        gte: dayStartUTC.toDate(),
-        lt: dayEndUTC.toDate(),
-      },
-    },
-  });
+  // const off = await prisma.timeOff.findFirst({
+  //   where: {
+  //     employeeId,
+  //     date: {
+  //       gte: dayStartUTC.toDate(),
+  //       lt: dayEndUTC.toDate(),
+  //     },
+  //   },
+  // });
 
-  if (off) {
-    return res.status(400).json({ message: "Employee is off on that day" });
-  }
+  // if (off) {
+  //   return res.status(400).json({ message: "Employee is off on that day" });
+  // }
 
   // const conflict = await prisma.appointment.findFirst({
   //   where: {
@@ -354,26 +354,26 @@ export const bookWithPayment = async (req: Request, res: Response) => {
   //     endTime: { gt: start.toDate() },
   //   },
   // });
-  const conflict = await prisma.appointment.findFirst({
-    where: {
-      employeeId,
-      status: "accepted",
-      startTime: { lte: start.toDate() },
-      endTime: { gt: start.toDate() },
-    },
-  });
+  // const conflict = await prisma.appointment.findFirst({
+  //   where: {
+  //     employeeId,
+  //     status: "accepted",
+  //     startTime: { lte: start.toDate() },
+  //     endTime: { gt: start.toDate() },
+  //   },
+  // });
 
-  if (conflict) {
-    return res.status(400).json({ message: "Time slot already booked!" });
-  }
+  // if (conflict) {
+  //   return res.status(400).json({ message: "Time slot already booked!" });
+  // }
 
-  const MAX_DURATION_MINUTES = 8 * 60;
+  // const MAX_DURATION_MINUTES = 8 * 60;
 
-  if (end.diff(start, "minute") > MAX_DURATION_MINUTES) {
-    return res.status(400).json({
-      message: "Booking duration exceeds maximum allowed time.",
-    });
-  }
+  // if (end.diff(start, "minute") > MAX_DURATION_MINUTES) {
+  //   return res.status(400).json({
+  //     message: "Booking duration exceeds maximum allowed time.",
+  //   });
+  // }
 
   let dobDate: Date | null = null;
   if (dob) {

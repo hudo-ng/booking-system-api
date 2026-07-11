@@ -1,5 +1,13 @@
 import { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
+import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
+export const ZONE = "America/Chicago";
 
 const prisma = new PrismaClient();
 
@@ -146,5 +154,98 @@ export const getAllWorkingHours = async (req: Request, res: Response) => {
   } catch (err) {
     console.error("Error loading all working hours:", err);
     res.status(500).json({ message: "Failed to load working hours." });
+  }
+};
+
+export const createTimeWorkOn = async (req: Request, res: Response) => {
+  try {
+    const { userId, date } = req.body;
+
+    if (!userId || !date) {
+      return res.status(400).json({
+        message: "userId and date are required",
+      });
+    }
+
+    const target = dayjs.tz(date, ZONE);
+
+    if (!target.isValid()) {
+      return res.status(400).json({
+        message: "Invalid date",
+      });
+    }
+
+    const startUtc = target.startOf("day").utc().toDate();
+
+    const existing = await prisma.timeWorkOn.findUnique({
+      where: {
+        userId_date: {
+          userId,
+          date: startUtc,
+        },
+      },
+    });
+
+    if (existing) {
+      return res.status(400).json({
+        message: "Already exists",
+      });
+    }
+
+    const record = await prisma.timeWorkOn.create({
+      data: {
+        userId,
+        date: startUtc,
+      },
+    });
+
+    return res.json(record);
+  } catch (error) {
+    console.error("Create TimeWorkOn error:", error);
+
+    return res.status(500).json({
+      message: "Internal server error",
+    });
+  }
+};
+
+export const deleteTimeWorkOn = async (req: Request, res: Response) => {
+  try {
+    const { userId, date } = req.body;
+
+    if (!userId || !date) {
+      return res.status(400).json({
+        message: "userId and date are required",
+      });
+    }
+
+    const target = dayjs.tz(date, ZONE);
+
+    if (!target.isValid()) {
+      return res.status(400).json({
+        message: "Invalid date",
+      });
+    }
+
+    const startUtc = target.startOf("day").utc().toDate();
+
+    await prisma.timeWorkOn.delete({
+      where: {
+        userId_date: {
+          userId,
+          date: startUtc,
+        },
+      },
+    });
+
+    return res.json({
+      message: "Removed successfully",
+    });
+  } catch (error) {
+    console.error("Delete TimeWorkOn error:", error);
+
+    return res.status(500).json({
+      message: "Internal server error",
+    });
   }
 };

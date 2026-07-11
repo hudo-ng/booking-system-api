@@ -28,20 +28,27 @@ export const getAvailability = async (req: Request, res: Response) => {
   const startOfDayUtc = target.startOf("day").utc().toDate();
   const endOfDayUtc = target.endOf("day").utc().toDate();
 
-  const isOff = await prisma.timeOff.findFirst({
-    where: {
-      employeeId,
-      date: { gte: startOfDayUtc, lt: endOfDayUtc },
-      status: "APPROVED",
-    },
-  });
-  if (isOff) return res.json([]);
-
-  const hours = await prisma.workingHours.findMany({
-    where: { employeeId, weekday },
-  });
-  if (!hours.length) return res.json([]);
-
+  const [workOn, isOff] = await Promise.all([
+    prisma.timeWorkOn.findFirst({
+      where: {
+        userId: employeeId,
+        date: {
+          gte: startOfDayUtc,
+          lt: endOfDayUtc,
+        },
+      },
+    }),
+    prisma.timeOff.findFirst({
+      where: {
+        employeeId,
+        date: {
+          gte: startOfDayUtc,
+          lt: endOfDayUtc,
+        },
+        status: "APPROVED",
+      },
+    }),
+  ]);
   const appts = await prisma.appointment.findMany({
     where: {
       employeeId,
@@ -50,6 +57,47 @@ export const getAvailability = async (req: Request, res: Response) => {
       endTime: { gt: startOfDayUtc },
     },
   });
+  if (workOn) {
+    const availableSlots: { start: string; end: string }[] = [];
+
+    let curLocal = dayjs.tz(`${date} 12:00`, ZONE);
+    const endLocal = dayjs.tz(`${date} 23:00`, ZONE);
+
+    while (curLocal.isBefore(endLocal)) {
+      const slotStartLocal = curLocal;
+      const slotEndLocal = curLocal.add(2, "hour");
+
+      if (slotEndLocal.isAfter(endLocal)) break;
+
+      const slotStartUtc = slotStartLocal.utc();
+      const slotEndUtc = slotEndLocal.utc();
+
+      const hasConflict = appts.some((a) => {
+        const apptStart = dayjs(a.startTime).utc();
+        const apptEnd = dayjs(a.endTime).utc();
+
+        return slotStartUtc.isBefore(apptEnd) && apptStart.isBefore(slotEndUtc);
+      });
+
+      if (slotStartUtc.isAfter(dayjs.utc()) && !hasConflict) {
+        availableSlots.push({
+          start: slotStartUtc.toISOString(),
+          end: slotEndUtc.toISOString(),
+        });
+      }
+
+      curLocal = curLocal.add(2, "hour");
+    }
+
+    return res.json(availableSlots);
+  }
+  if (isOff) return res.json([]);
+
+  const hours = await prisma.workingHours.findMany({
+    where: { employeeId, weekday },
+  });
+
+  if (!hours.length) return res.json([]);
 
   const occupied = new Set<string>();
   for (const a of appts) {
@@ -140,27 +188,40 @@ export const getMonthlyAvailability = async (req: Request, res: Response) => {
   const monthEnd = monthStart.endOf("month");
   const nowZ = dayjs.tz(undefined, ZONE);
 
-  const [timeOffs, workingHours, appointments] = await Promise.all([
-    prisma.timeOff.findMany({
-      where: {
-        employeeId,
-        status: "APPROVED",
-        date: {
-          gte: monthStart.utc().toDate(),
-          lte: monthEnd.utc().toDate(),
+  const [timeWorkOns, timeOffs, workingHours, appointments] = await Promise.all(
+    [
+      prisma.timeWorkOn.findMany({
+        where: {
+          userId: employeeId,
+          date: {
+            gte: monthStart.utc().toDate(),
+            lte: monthEnd.utc().toDate(),
+          },
         },
-      },
-    }),
-    prisma.workingHours.findMany({ where: { employeeId } }),
-    prisma.appointment.findMany({
-      where: {
-        employeeId,
-        status: "accepted",
-        startTime: { lt: monthEnd.utc().toDate() },
-        endTime: { gt: monthStart.utc().toDate() },
-      },
-    }),
-  ]);
+      }),
+      prisma.timeOff.findMany({
+        where: {
+          employeeId,
+          status: "APPROVED",
+          date: {
+            gte: monthStart.utc().toDate(),
+            lte: monthEnd.utc().toDate(),
+          },
+        },
+      }),
+      prisma.workingHours.findMany({
+        where: { employeeId },
+      }),
+      prisma.appointment.findMany({
+        where: {
+          employeeId,
+          status: "accepted",
+          startTime: { lt: monthEnd.utc().toDate() },
+          endTime: { gt: monthStart.utc().toDate() },
+        },
+      }),
+    ],
+  );
 
   const results: {
     date: string;
@@ -182,7 +243,50 @@ export const getMonthlyAvailability = async (req: Request, res: Response) => {
     const weekday = day.day();
     const dayStartUtc = day.startOf("day").utc().toDate();
     const dayEndUtc = day.endOf("day").utc().toDate();
+    const hasWorkOn = timeWorkOns.some(
+      (w) => w.date >= dayStartUtc && w.date < dayEndUtc,
+    );
+    if (hasWorkOn) {
+      const apptsForDay = appointments.filter(
+        (a) =>
+          a.startTime &&
+          a.endTime &&
+          a.startTime < dayEndUtc &&
+          a.endTime > dayStartUtc,
+      );
 
+      let totalSlots = 0;
+      let availableSlots = 0;
+
+      let cur = dayjs.tz(`${dateStr} 12:00`, ZONE);
+      const end = dayjs.tz(`${dateStr} 23:00`, ZONE);
+
+      while (cur.add(2, "hour").isSameOrBefore(end)) {
+        totalSlots++;
+
+        const s = cur.utc();
+        const e = cur.add(2, "hour").utc();
+
+        const conflict = apptsForDay.some(
+          (a) => s.isBefore(dayjs(a.endTime)) && dayjs(a.startTime).isBefore(e),
+        );
+
+        if (!conflict && s.isAfter(dayjs.utc())) {
+          availableSlots++;
+        }
+
+        cur = cur.add(2, "hour");
+      }
+
+      results.push({
+        date: dateStr,
+        totalSlots,
+        availableSlots,
+      });
+
+      day = day.add(1, "day");
+      continue;
+    }
     const isOff = timeOffs.some(
       (t) => t.date >= dayStartUtc && t.date < dayEndUtc,
     );
@@ -283,45 +387,46 @@ export const getShopAvailabilityByDay = async (req: Request, res: Response) => {
 
     const employeeIds = employees.map((e) => e.id);
 
-    const [allTimeOffs, allWorkingHours, allAppts] = await Promise.all([
-      prisma.timeOff.findMany({
-        where: {
-          employeeId: { in: employeeIds },
-          date: { gte: startOfDayUtc, lt: endOfDayUtc },
-          status: "APPROVED",
-        },
-      }),
-      prisma.workingHours.findMany({
-        where: { employeeId: { in: employeeIds }, weekday },
-      }),
-      prisma.appointment.findMany({
-        where: {
-          employeeId: { in: employeeIds },
-          status: "accepted",
-          startTime: { lt: endOfDayUtc },
-          endTime: { gt: startOfDayUtc },
-        },
-      }),
-    ]);
+    const [allTimeWorkOns, allTimeOffs, allWorkingHours, allAppts] =
+      await Promise.all([
+        prisma.timeWorkOn.findMany({
+          where: {
+            userId: { in: employeeIds },
+            date: {
+              gte: startOfDayUtc,
+              lt: endOfDayUtc,
+            },
+          },
+        }),
+        prisma.timeOff.findMany({
+          where: {
+            employeeId: { in: employeeIds },
+            date: { gte: startOfDayUtc, lt: endOfDayUtc },
+            status: "APPROVED",
+          },
+        }),
+        prisma.workingHours.findMany({
+          where: { employeeId: { in: employeeIds }, weekday },
+        }),
+        prisma.appointment.findMany({
+          where: {
+            employeeId: { in: employeeIds },
+            status: "accepted",
+            startTime: { lt: endOfDayUtc },
+            endTime: { gt: startOfDayUtc },
+          },
+        }),
+      ]);
 
     const results = [];
 
     for (const employee of employees) {
+      const workOn = allTimeWorkOns.find((w) => w.userId === employee.id);
+
       const isOffRecord = allTimeOffs.find((t) => t.employeeId === employee.id);
 
       const hours = allWorkingHours.filter((h) => h.employeeId === employee.id);
       const appts = allAppts.filter((a) => a.employeeId === employee.id);
-
-      if (isOffRecord || !hours.length) {
-        results.push({
-          id: employee.id,
-          name: employee.name,
-          is_day_off: true,
-          slots: [],
-        });
-        continue;
-      }
-
       const availableSlots: { start: string; end: string }[] = [];
       const occupied = new Set<string>();
 
@@ -332,6 +437,58 @@ export const getShopAvailabilityByDay = async (req: Request, res: Response) => {
           occupied.add(cur.toISOString());
           cur = cur.add(1, "hour");
         }
+      }
+      const isTimeWorkOn = !!workOn;
+      if (workOn) {
+        let curLocal = dayjs.tz(`${date} 12:00`, ZONE);
+        const endLocal = dayjs.tz(`${date} 23:00`, ZONE);
+
+        while (curLocal.isBefore(endLocal)) {
+          const slotStart = curLocal;
+          const slotEnd = curLocal.add(2, "hour");
+
+          if (slotEnd.isAfter(endLocal)) {
+            break;
+          }
+
+          const sUtc = slotStart.utc();
+          const eUtc = slotEnd.utc();
+
+          const hasConflict = appts.some(
+            (a) =>
+              sUtc.isBefore(dayjs(a.endTime)) &&
+              dayjs(a.startTime).isBefore(eUtc),
+          );
+
+          if (sUtc.isAfter(nowUtc) && !hasConflict) {
+            availableSlots.push({
+              start: sUtc.toISOString(),
+              end: eUtc.toISOString(),
+            });
+          }
+
+          curLocal = curLocal.add(2, "hour");
+        }
+
+        results.push({
+          id: employee.id,
+          name: employee.name,
+          is_day_off: false,
+          slots: availableSlots,
+          is_time_work_on: isTimeWorkOn,
+        });
+
+        continue;
+      }
+      if (isOffRecord || !hours.length) {
+        results.push({
+          id: employee.id,
+          name: employee.name,
+          is_day_off: true,
+          slots: [],
+          is_time_work_on: isTimeWorkOn,
+        });
+        continue;
       }
 
       for (const interval of hours) {
@@ -385,6 +542,7 @@ export const getShopAvailabilityByDay = async (req: Request, res: Response) => {
         name: employee.name,
         is_day_off: false,
         slots: availableSlots,
+        is_time_work_on: isTimeWorkOn,
       });
     }
 

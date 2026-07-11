@@ -50,6 +50,7 @@ model User {
   workingHours             WorkingHours[]
   Notification             Notification[]
   ContentBonus             ContentBonus[]
+  timeWorkOn               TimeWorkOn[]
 }
 
 model ContentBonus {
@@ -727,4 +728,16 @@ model DailyReportForm {
   createdAt   DateTime @default(now())
 
   @@unique([artist, date, service])
+}
+
+model TimeWorkOn {
+  id        String   @id @default(uuid())
+  userId    String
+  date      DateTime
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, date])
+  @@index([userId, date])
 }
