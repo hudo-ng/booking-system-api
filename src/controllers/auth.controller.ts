@@ -525,6 +525,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
             collectionId: extra_data?.collectionId,
             paid_money: (Cash ?? 0) + (Card ?? 0),
             deposit_has_been_used: deposit_has_been_used,
+            terminal: "terminal_1",
           },
         );
         if (
@@ -991,6 +992,7 @@ export const createAdminPaymentRequest = async (
             collectionId: extra_data?.collectionId,
             paid_money: (Cash ?? 0) + (Card ?? 0),
             deposit_has_been_used: deposit_has_been_used,
+            terminal: "terminal_2",
           },
         );
         if (
@@ -3252,6 +3254,10 @@ export const sendAllArtistPaystubs = async (req: Request, res: Response) => {
       { name: "Navei", commission: 0.55 },
       // { name: "Jackie", commission: 0.55 },
       { name: "Tai", commission: 0.55 },
+      { name: "Christian", commission: 0.5 },
+      { name: "Eriq R Martinez", commission: 0.55 },
+      { name: "Tom", commission: 0.5 },
+      { name: "Genesis", commission: 0.5 },
     ];
 
     // 1. Get IDs of appointments booked by the specific receptionists
