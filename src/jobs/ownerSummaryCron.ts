@@ -13,6 +13,8 @@ const ZONE = "America/Chicago";
 
 interface ServiceMetrics {
   card: number;
+  card_terminal_1: number; // 🆕 Added
+  card_terminal_2: number; // 🆕 Added
   cash: number;
   formPaid: number;
   formNotPaid: number;
@@ -46,6 +48,8 @@ export async function runOwnerDailySummaryCron() {
 
     // Global trackers for the compact push notification layout
     let globalCardTotal = 0;
+    let globalCardTerminal1 = 0; // 🆕 Tracker
+    let globalCardTerminal2 = 0; // 🆕 Tracker
     let globalCashTotal = 0;
     let cardTattoo = 0;
     let cardPiercing = 0;
@@ -60,12 +64,23 @@ export async function runOwnerDailySummaryCron() {
       const cashValue = parseFloat(item.cash) || 0;
       const combinedTotal = cardValue + cashValue;
 
+      // Identify terminal assignment
+      const terminalRaw = item.terminal?.trim().toLowerCase();
+      const isTerminal1 = terminalRaw === "terminal_1";
+      const isTerminal2 = terminalRaw === "terminal_2";
+
+      const valTerminal1 = isTerminal1 ? cardValue : 0;
+      const valTerminal2 = isTerminal2 ? cardValue : 0;
+
       const status = item.status?.toLowerCase();
       const isPaid = ["done", "paid"].includes(status) || combinedTotal > 0;
 
       // Accumulate global statistics
       globalCardTotal += cardValue;
+      globalCardTerminal1 += valTerminal1;
+      globalCardTerminal2 += valTerminal2;
       globalCashTotal += cashValue;
+
       if (service === "tattoo") cardTattoo += cardValue;
       if (service === "piercing") cardPiercing += cardValue;
 
@@ -73,6 +88,8 @@ export async function runOwnerDailySummaryCron() {
       if (!reportMap[artistName][service]) {
         reportMap[artistName][service] = {
           card: 0,
+          card_terminal_1: 0, // 🆕 Initialize
+          card_terminal_2: 0, // 🆕 Initialize
           cash: 0,
           formPaid: 0,
           formNotPaid: 0,
@@ -81,6 +98,8 @@ export async function runOwnerDailySummaryCron() {
 
       const metrics = reportMap[artistName][service];
       metrics.card += cardValue;
+      metrics.card_terminal_1 += valTerminal1; // 🆕 Add terminal specific values
+      metrics.card_terminal_2 += valTerminal2; // 🆕 Add terminal specific values
       metrics.cash += cashValue;
 
       if (isPaid) metrics.formPaid += 1;
@@ -104,6 +123,8 @@ export async function runOwnerDailySummaryCron() {
           where: { artist_date_service: { artist, date: dbDate, service } },
           update: {
             card: data.card,
+            card_terminal_1: data.card_terminal_1, // 🆕 Database update
+            card_terminal_2: data.card_terminal_2, // 🆕 Database update
             cash: data.cash,
             formPaid: data.formPaid,
             formNotPaid: data.formNotPaid,
@@ -114,6 +135,8 @@ export async function runOwnerDailySummaryCron() {
             date: dbDate,
             service,
             card: data.card,
+            card_terminal_1: data.card_terminal_1, // 🆕 Database create
+            card_terminal_2: data.card_terminal_2, // 🆕 Database create
             cash: data.cash,
             formPaid: data.formPaid,
             formNotPaid: data.formNotPaid,
@@ -135,9 +158,9 @@ export async function runOwnerDailySummaryCron() {
       }
     }
 
-    // 📱 Layout dense text bubble block for notification dispatch
+    // 📱 Updated layout featuring terminal split insights
     const pushBody = [
-      `💳 Card: $${Math.round(globalCardTotal)} | 💵 Cash: $${Math.round(globalCashTotal)}`,
+      `💳 Card: $${Math.round(globalCardTotal)} (T1: $${Math.round(globalCardTerminal1)} | T2: $${Math.round(globalCardTerminal2)}) | 💵 Cash: $${Math.round(globalCashTotal)}`,
       `💳 Card Tatt: $${Math.round(cardTattoo)} | Card Pierc: $${Math.round(cardPiercing)}`,
       `Artists:\n${artistLines.join("\n") || "None"}`,
       `Piercers:\n${piercerLines.join("\n") || "None"}`,

@@ -726,6 +726,8 @@ model DailyReportForm {
   date        DateTime    
   service     String   // "tattoo" or "piercing"
   createdAt   DateTime @default(now())
+  card_terminal_1 Float    @default(0)  // 🆕 Track card on Terminal 1
+  card_terminal_2 Float    @default(0)  // 🆕 Track card on Terminal 2
 
   @@unique([artist, date, service])
 }
