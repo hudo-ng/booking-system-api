@@ -64,8 +64,8 @@ export async function runOwnerDailySummaryCron() {
       const cashValue = parseFloat(item.cash) || 0;
       const combinedTotal = cardValue + cashValue;
 
-      // Identify terminal assignment
-      const terminalRaw = item.terminal?.trim().toLowerCase();
+      // Identify terminal assignment - default to "terminal_1" if empty or missing
+      const terminalRaw = item.terminal?.trim().toLowerCase() || "terminal_1";
       const isTerminal1 = terminalRaw === "terminal_1";
       const isTerminal2 = terminalRaw === "terminal_2";
 
