@@ -968,26 +968,36 @@ export const deleteAppointment = async (req: Request, res: Response) => {
     return res.status(400).json({ message: "Appointment ID required" });
 
   try {
-    // 1️⃣ Fetch the appointment first to check existence and get details for SMS/Notifications
+    // 1️⃣ Fetch the appointment first to check existence and deletion state
     const appointment = await prisma.appointment.findUnique({
       where: { id: appointmentId },
       include: { employee: { select: { id: true, name: true } } },
     });
 
-    if (!appointment || appointment.deletedAt) {
-      return res
-        .status(404)
-        .json({ message: "Appointment not found or already deleted" });
+    if (!appointment) {
+      return res.status(404).json({ message: "Appointment not found" });
     }
 
-    // 2️⃣ Perform Soft Delete by updating the deletedAt timestamp
+    // 2️⃣ HARD DELETE if appointment has already been soft-deleted
+    if (appointment.deletedAt) {
+      await prisma.appointment.delete({
+        where: { id: appointmentId },
+      });
+
+      return res.status(200).json({
+        message: "Appointment permanently hard-deleted",
+        appointmentId,
+      });
+    }
+
+    // 3️⃣ SOFT DELETE if deletedAt is null
     const deletedAppointment = await prisma.appointment.update({
       where: { id: appointmentId },
       data: { deletedAt: new Date() },
       include: { employee: { select: { id: true, name: true } } },
     });
 
-    // 3️⃣ Optional SMS Notification
+    // 4️⃣ Optional SMS Notification (only triggered on soft delete)
     if (is_sms_released) {
       const chicagoTime = dayjs(deletedAppointment.startTime)
         .tz("America/Chicago")
@@ -997,7 +1007,7 @@ Text (210) 997-9737 or your artist to reschedule when you’re ready`;
       await sendSMS(deletedAppointment.phone, customerBody);
     }
 
-    // 4️⃣ Log deletion activity in notifications
+    // 5️⃣ Log soft deletion activity in notifications
     await prisma.notification.create({
       data: {
         created_by: userId,
@@ -1014,13 +1024,13 @@ Text (210) 997-9737 or your artist to reschedule when you’re ready`;
       },
     });
 
-    res.status(200).json({
+    return res.status(200).json({
       message: "Appointment successfully soft-deleted",
       appointment: deletedAppointment,
     });
   } catch (error) {
-    console.error("Failed to soft-delete appointment", error);
-    res.status(500).json({ message: "Failed to delete appointment" });
+    console.error("Failed to delete appointment", error);
+    return res.status(500).json({ message: "Failed to delete appointment" });
   }
 };
 
