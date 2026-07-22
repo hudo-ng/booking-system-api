@@ -480,6 +480,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
         });
       }
       let deposit_has_been_used = false;
+      let deposit_amount = 0;
       // Check if appointment_id is provided in extra_data and update the appointment
       if (
         extra_data?.appointment_id &&
@@ -489,9 +490,11 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
         // Fetch the current appointment to check the current value of deposit_has_been_used
         const currentAppointment = await prisma.appointment.findUnique({
           where: { id: extra_data.appointment_id },
-          select: { deposit_has_been_used: true },
+          select: { deposit_has_been_used: true, deposit_amount: true },
         });
-
+        deposit_has_been_used =
+          currentAppointment?.deposit_has_been_used || false;
+        deposit_amount = currentAppointment?.deposit_amount || 0;
         // Only update if the current deposit_has_been_used is false
         if (currentAppointment?.deposit_has_been_used === false) {
           await prisma.appointment.update({
@@ -525,6 +528,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
             collectionId: extra_data?.collectionId,
             paid_money: (Cash ?? 0) + (Card ?? 0),
             deposit_has_been_used: deposit_has_been_used,
+            deposit_amount: deposit_amount,
             terminal: "terminal_1",
           },
         );
@@ -650,6 +654,43 @@ export const markDepositHasBeenUsed = async (req: Request, res: Response) => {
     return res
       .status(500)
       .json({ message: "Failed to process deposit update." });
+  }
+};
+
+export const trackToSeeDepositHasbeenused = async (
+  req: Request,
+  res: Response,
+) => {
+  const { id } = req.body;
+
+  if (!id || typeof id !== "string") {
+    return res
+      .status(400)
+      .json({ message: "Appointment ID in request body is required." });
+  }
+
+  try {
+    const appointment = await prisma.appointment.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        deposit_has_been_used: true,
+      },
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ message: "Appointment not found." });
+    }
+
+    return res.json({
+      id: appointment.id,
+      deposit_has_been_used: Boolean(appointment.deposit_has_been_used),
+    });
+  } catch (err) {
+    console.error("Failed to check deposit status:", err);
+    return res
+      .status(500)
+      .json({ message: "Failed to process deposit tracking check." });
   }
 };
 
