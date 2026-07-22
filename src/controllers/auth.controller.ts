@@ -528,7 +528,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
             collectionId: extra_data?.collectionId,
             paid_money: (Cash ?? 0) + (Card ?? 0),
             deposit_has_been_used: deposit_has_been_used,
-            deposit_amount: deposit_amount,
+            deposit: deposit_amount,
             terminal: "terminal_1",
           },
         );
