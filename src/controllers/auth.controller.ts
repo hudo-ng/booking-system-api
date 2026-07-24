@@ -490,11 +490,18 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
         // Fetch the current appointment to check the current value of deposit_has_been_used
         const currentAppointment = await prisma.appointment.findUnique({
           where: { id: extra_data.appointment_id },
-          select: { deposit_has_been_used: true, deposit_amount: true },
+          select: {
+            deposit_has_been_used: true,
+            deposit_amount: true,
+            deposit_status: true,
+          },
         });
         deposit_has_been_used =
           currentAppointment?.deposit_has_been_used || false;
-        deposit_amount = currentAppointment?.deposit_amount || 0;
+        deposit_amount =
+          currentAppointment?.deposit_status === "accepted"
+            ? currentAppointment?.deposit_amount || 0
+            : 0;
         // Only update if the current deposit_has_been_used is false
         if (currentAppointment?.deposit_has_been_used === false) {
           await prisma.appointment.update({

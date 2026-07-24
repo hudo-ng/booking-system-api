@@ -1952,13 +1952,21 @@ export const getDailyReportFormBySelectedMonthYear = async (
         groupedByDate[dateKey] = [];
       }
 
+      // Safe fallbacks in case DB fields are nullable
+      const card = report.card || 0;
+      const cash = report.cash || 0;
+      const term1 = report.card_terminal_1 || 0;
+      const term2 = report.card_terminal_2 || 0;
+
       groupedByDate[dateKey].push({
         id: report.id,
         artist: report.artist,
         service: report.service,
-        card: report.card,
-        cash: report.cash,
-        totalRevenue: report.card + report.cash,
+        card,
+        cash,
+        card_terminal_1: term1,
+        card_terminal_2: term2,
+        totalRevenue: card + cash + term1 + term2,
         formPaid: report.formPaid,
         formNotPaid: report.formNotPaid,
         totalForm: report.totalForm,
@@ -1977,6 +1985,127 @@ export const getDailyReportFormBySelectedMonthYear = async (
     console.error("❌ Error fetching monthly report summary:", error.message);
     return res.status(500).json({
       message: "Internal server error reading monthly metrics summaries.",
+    });
+  }
+};
+
+export const getDailyReportBySelectedDate = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const { userId } = (req as any).user as { userId?: string };
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!currentUser?.isOwner) {
+      return res.status(403).json({ error: "You do not have permission" });
+    }
+
+    const { date } = req.query as { date?: string };
+
+    if (!date) {
+      return res.status(400).json({
+        message: "Missing required query parameter: date (YYYY-MM-DD).",
+      });
+    }
+
+    // Parse and validate date strictly using timezone boundary
+    const targetDate = dayjs.tz(date, ZONE);
+    if (!targetDate.isValid()) {
+      return res.status(400).json({
+        message: "Invalid date format provided. Expected YYYY-MM-DD.",
+      });
+    }
+
+    const startOfTargetDay = targetDate.startOf("day");
+    const endOfTargetDay = targetDate.endOf("day");
+
+    // Pull records strictly within the 24-hour window of that target date
+    const reports = await prisma.dailyReportForm.findMany({
+      where: {
+        date: {
+          gte: startOfTargetDay.utc().toDate(),
+          lte: endOfTargetDay.utc().toDate(),
+        },
+      },
+      orderBy: [{ service: "asc" }, { artist: "asc" }],
+    });
+
+    // Compute aggregated daily stats (including new terminals & calculated card total)
+    const totals = reports.reduce(
+      (acc, report) => {
+        const terminalSum =
+          (report.card_terminal_1 || 0) + (report.card_terminal_2 || 0);
+        // Total card is direct card field + both terminal amounts
+        const totalCardAmount = (report.card || 0) + terminalSum;
+
+        acc.card += report.card || 0;
+        acc.cash += report.cash || 0;
+        acc.terminal1 += report.card_terminal_1 || 0;
+        acc.terminal2 += report.card_terminal_2 || 0;
+        acc.totalTerminal += terminalSum;
+        acc.totalRevenue += totalCardAmount + (report.cash || 0);
+        acc.formPaid += report.formPaid || 0;
+        acc.formNotPaid += report.formNotPaid || 0;
+        acc.totalForm += report.totalForm || 0;
+        return acc;
+      },
+      {
+        card: 0,
+        cash: 0,
+        terminal1: 0,
+        terminal2: 0,
+        totalTerminal: 0,
+        totalRevenue: 0,
+        formPaid: 0,
+        formNotPaid: 0,
+        totalForm: 0,
+      },
+    );
+
+    // Map response records to include individual item calculations
+    const formattedRecords = reports.map((report) => {
+      const terminalSum =
+        (report.card_terminal_1 || 0) + (report.card_terminal_2 || 0);
+      const computedCardTotal = (report.card || 0) + terminalSum;
+
+      return {
+        id: report.id,
+        artist: report.artist,
+        service: report.service,
+        card: report.card,
+        cash: report.cash,
+        card_terminal_1: report.card_terminal_1,
+        card_terminal_2: report.card_terminal_2,
+        terminal: terminalSum,
+        totalRevenue: computedCardTotal + report.cash,
+        formPaid: report.formPaid,
+        formNotPaid: report.formNotPaid,
+        totalForm: report.totalForm,
+      };
+    });
+
+    return res.status(200).json({
+      meta: {
+        date: targetDate.format("YYYY-MM-DD"),
+        recordCount: reports.length,
+      },
+      totals,
+      data: formattedRecords,
+    });
+  } catch (error: any) {
+    console.error(
+      "❌ Error fetching single day report summary:",
+      error.message,
+    );
+    return res.status(500).json({
+      message: "Internal server error reading daily metrics summary.",
     });
   }
 };
