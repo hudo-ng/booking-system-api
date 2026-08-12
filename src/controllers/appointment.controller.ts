@@ -243,10 +243,17 @@ export const duplicateAppointment = async (req: Request, res: Response) => {
       });
 
       if (!currentAppointment) {
-        throw new Error("Original appointment not found");
+        throw new Error("NOT_FOUND: Original appointment not found");
       }
 
       const currentDeposit = currentAppointment.DepositAppointment?.[0];
+
+      // 🔴 VALIDATION: Check if deposit has already been used before allowing transfer
+      if (transfer_deposit && currentAppointment?.deposit_has_been_used) {
+        throw new Error(
+          "DEPOSIT_USED: Cannot transfer deposit because it has already been used.",
+        );
+      }
 
       // 2️⃣ Decide deposit values for NEW appointment
       const newDepositAmount = transfer_deposit
@@ -330,7 +337,13 @@ export const duplicateAppointment = async (req: Request, res: Response) => {
           data: {
             created_by: userId,
             title: "deposit transfer out",
-            description: `This appointment's deposit of $${(currentAppointment.deposit_amount ?? 0).toFixed(2)} has been moved to a new duplicated appointment (ID: ${newAppointment.id}) for Customer "${customerName ?? "No name provided"}" scheduled on ${formattedNewTime}.`,
+            description: `This appointment's deposit of $${(
+              currentAppointment.deposit_amount ?? 0
+            ).toFixed(2)} has been moved to a new duplicated appointment (ID: ${
+              newAppointment.id
+            }) for Customer "${
+              customerName ?? "No name provided"
+            }" scheduled on ${formattedNewTime}.`,
             customer_name:
               currentAppointment.customerName ?? "No name provided",
             quote_amount: currentAppointment?.quote_amount || 0,
@@ -386,8 +399,22 @@ export const duplicateAppointment = async (req: Request, res: Response) => {
     }
 
     return res.status(201).json(result);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Failed to duplicate appointment", error);
+
+    // Handle specific custom errors thrown inside the transaction
+    if (error.message?.startsWith("DEPOSIT_USED:")) {
+      return res.status(400).json({
+        message: "Cannot transfer deposit because it has already been used.",
+      });
+    }
+
+    if (error.message?.startsWith("NOT_FOUND:")) {
+      return res.status(404).json({
+        message: "Original appointment not found",
+      });
+    }
+
     return res.status(500).json({
       message: "Failed to duplicate appointment",
     });
