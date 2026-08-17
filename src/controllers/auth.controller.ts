@@ -535,7 +535,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
             collectionId: extra_data?.collectionId,
             paid_money: (Cash ?? 0) + (Card ?? 0),
             deposit_has_been_used: deposit_has_been_used,
-           ...(deposit_amount > 0 && { deposit: deposit_amount }),
+            ...(deposit_amount > 0 && { deposit: deposit_amount }),
             terminal: "terminal_1",
           },
         );
@@ -1899,9 +1899,9 @@ export const sendWeeklyReceptionPaystub = async (
   try {
     const dataArtist = [
       { userId: "bab24c5b-ec93-4386-bdfb-7b0e1f25eb7f", isFree15Hour: true },
-      // { userId: "6a0c3e58-d4e4-4f32-8585-9fbb81b08417", isFree15Hour: false },
       { userId: "317b8640-2920-4d1d-853f-c8552545e634", isFree15Hour: false },
       { userId: "0ae16fcd-9ca3-4463-94f4-2aecb02f1745", isFree15Hour: false },
+      { userId: "8502391d-7aa2-475c-b719-03107497b396", isFree15Hour: false },
     ];
 
     const results = [];
@@ -3298,7 +3298,7 @@ export const generateYenPaystubData = async (req: Request, res: Response) => {
 export const sendAllArtistPaystubs = async (req: Request, res: Response) => {
   try {
     const arrayArtistNeedToHavePaystub = [
-      { name: "Pablo", commission: 0.55 },
+      // { name: "Pablo", commission: 0.55 },
       { name: "Navei", commission: 0.55 },
       // { name: "Jackie", commission: 0.55 },
       { name: "Tai", commission: 0.55 },
