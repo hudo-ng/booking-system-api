@@ -109,19 +109,35 @@ export const deleteDeviceToken = async (req: Request, res: Response) => {
 
 export const getAllNotification = async (req: Request, res: Response) => {
   try {
+    const { userId } = (req as any).user as { userId?: string };
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    // Fetch the requesting user to check permissions
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!currentUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    const { user_id } = req.query;
     const notifications = await prisma.notification.findMany({
+      where: user_id ? { created_by: String(user_id) } : {},
       orderBy: { created_at: "desc" },
-      take: 30, // limit to 30 results
+      ...(user_id ? {} : { take: 30 }),
       include: {
         createdBy: {
           select: { id: true, name: true },
         },
       },
     });
-    res.json(notifications);
+
+    return res.json(notifications);
   } catch (err) {
     console.error("Error fetching notifications:", err);
-    res.status(500).json({ message: "Failed to fetch notifications" });
+    return res.status(500).json({ message: "Failed to fetch notifications" });
   }
 };
 
@@ -471,6 +487,13 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
         success: true,
         data: [],
         array_of_form_bookings: [],
+        customerTypeCounts: {
+          new: 0,
+          normal: 0,
+          regular: 0,
+          vip: 0,
+          risk: 0,
+        },
       });
     }
 
@@ -555,29 +578,47 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
         customer.latestVisit = visit;
       }
     }
+
+    // Initialize counts object
+    const customerTypeCounts = {
+      new: 0,
+      normal: 0,
+      regular: 0,
+      vip: 0,
+      risk: 0,
+    };
+
     const customers = Array.from(groupedCustomers.values())
       .map((customer) => {
         customer.visits.sort(
           (a: any, b: any) => b.createdAt.getTime() - a.createdAt.getTime(),
         );
 
+        const type_of_customer = getCustomerType(
+          customer.visitCount,
+          customer.latestVisit?.createdAt,
+        );
+
+        // Increment respective customer type count
+        customerTypeCounts[type_of_customer]++;
+
         return {
           ...customer,
-          type_of_customer: getCustomerType(
-            customer.visitCount,
-            customer.latestVisit?.createdAt,
-          ),
+          type_of_customer,
         };
       })
       .sort(
         (a, b) =>
           b.latestVisit.createdAt.getTime() - a.latestVisit.createdAt.getTime(),
       );
+
     if (is_customers === "true" || formBookings.length === 0) {
       return res.json({
         success: true,
 
         data: customers,
+
+        customerTypeCounts,
 
         array_of_form_bookings: [],
 
@@ -592,6 +633,7 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
         },
       });
     }
+
     // ----------------------------------------------------------
     // Booking Conversion Analytics
     // ----------------------------------------------------------
@@ -783,6 +825,8 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
       success: true,
 
       data: customers,
+
+      customerTypeCounts,
 
       array_of_form_bookings,
 
