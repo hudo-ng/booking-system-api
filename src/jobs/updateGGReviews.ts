@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
-import { syncAllArtistReviews, syncAllArtistReviews1 } from "../controllers/sync.controller";
+import { syncAllArtistReviews1 } from "../controllers/sync.controller";
+
 
 const prisma = new PrismaClient();
 

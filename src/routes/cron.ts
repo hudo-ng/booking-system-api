@@ -4,6 +4,13 @@ import { runCleaningReminder } from "../jobs/cleanning-reminders";
 import { runPendingAppointmentReminder } from "../jobs/pendingAppointmentReminder";
 import { testSync } from "../jobs/updateGGReviews";
 import { runOwnerDailySummaryCron } from "../jobs/ownerSummaryCron";
+import {
+  sendWeeklyReceptionPaystubJob,
+  sendZoePaystubJob,
+  sendArtistPaystubJob,
+  sendAllArtistPaystubsJob,
+  sendPaystubArtistNicoleJob,
+} from "../jobs/payStubs";
 
 const router = Router();
 
@@ -70,6 +77,78 @@ router.post("/owner-daily-summary", async (req, res) => {
     res.json({ message: "Owner daily summary processed successfully", result });
   } catch (e: any) {
     console.error("/owner-daily-summary error:", e);
+    return res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+router.post("/paystub/weekly-reception", async (req, res) => {
+  if (req.headers["x-cron-secret"] !== process.env.CRON_SECRET) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  try {
+    await sendWeeklyReceptionPaystubJob();
+    return res.json({
+      message: "Weekly reception paystub processed successfully",
+    });
+  } catch (e: any) {
+    console.error("/paystub/weekly-reception error:", e);
+    return res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+router.post("/paystub/zoe", async (req, res) => {
+  if (req.headers["x-cron-secret"] !== process.env.CRON_SECRET) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  try {
+    await sendZoePaystubJob();
+    return res.json({ message: "Zoe paystub processed successfully" });
+  } catch (e: any) {
+    console.error("/paystub/zoe error:", e);
+    return res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+router.post("/paystub/artist", async (req, res) => {
+  if (req.headers["x-cron-secret"] !== process.env.CRON_SECRET) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  try {
+    await sendArtistPaystubJob();
+    return res.json({ message: "Artist paystub processed successfully" });
+  } catch (e: any) {
+    console.error("/paystub/artist error:", e);
+    return res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+router.post("/paystub/all-artists", async (req, res) => {
+  if (req.headers["x-cron-secret"] !== process.env.CRON_SECRET) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  try {
+    await sendAllArtistPaystubsJob();
+    return res.json({ message: "All artist paystubs processed successfully" });
+  } catch (e: any) {
+    console.error("/paystub/all-artists error:", e);
+    return res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+router.post("/paystub/nicole", async (req, res) => {
+  if (req.headers["x-cron-secret"] !== process.env.CRON_SECRET) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  try {
+    await sendPaystubArtistNicoleJob();
+    return res.json({ message: "Nicole paystub processed successfully" });
+  } catch (e: any) {
+    console.error("/paystub/nicole error:", e);
     return res.status(500).json({ ok: false, error: String(e) });
   }
 });
