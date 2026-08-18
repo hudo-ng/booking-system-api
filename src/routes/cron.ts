@@ -14,6 +14,16 @@ import {
 
 const router = Router();
 
+const isBiWeeklyRun = () => {
+  const now = new Date();
+  const start = new Date("2025-01-01T00:00:00Z");
+  const diffWeeks = Math.floor(
+    (now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24 * 7),
+  );
+
+  return diffWeeks % 2 === 0;
+};
+
 router.post("/daily-reminders", async (req, res) => {
   const secret = req.header("x-cron-secret");
   if (!secret || secret !== process.env.CRON_SECRET) {
@@ -102,6 +112,10 @@ router.post("/paystub/zoe", async (req, res) => {
     return res.status(401).json({ message: "Unauthorized" });
   }
 
+  if (!isBiWeeklyRun()) {
+    return res.json({ message: "Skipped: Zoe paystub is scheduled bi-weekly." });
+  }
+
   try {
     await sendZoePaystubJob();
     return res.json({ message: "Zoe paystub processed successfully" });
@@ -114,6 +128,12 @@ router.post("/paystub/zoe", async (req, res) => {
 router.post("/paystub/artist", async (req, res) => {
   if (req.headers["x-cron-secret"] !== process.env.CRON_SECRET) {
     return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  if (!isBiWeeklyRun()) {
+    return res.json({
+      message: "Skipped: artist paystub is scheduled bi-weekly.",
+    });
   }
 
   try {
@@ -130,6 +150,12 @@ router.post("/paystub/all-artists", async (req, res) => {
     return res.status(401).json({ message: "Unauthorized" });
   }
 
+  if (!isBiWeeklyRun()) {
+    return res.json({
+      message: "Skipped: all artist paystubs are scheduled bi-weekly.",
+    });
+  }
+
   try {
     await sendAllArtistPaystubsJob();
     return res.json({ message: "All artist paystubs processed successfully" });
@@ -142,6 +168,10 @@ router.post("/paystub/all-artists", async (req, res) => {
 router.post("/paystub/nicole", async (req, res) => {
   if (req.headers["x-cron-secret"] !== process.env.CRON_SECRET) {
     return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  if (!isBiWeeklyRun()) {
+    return res.json({ message: "Skipped: Nicole paystub is scheduled bi-weekly." });
   }
 
   try {
