@@ -2220,7 +2220,7 @@ export const sendWeeklyReceptionPaystub = async (
             <div class="company-info">
               <h1>HYPER INKER STUDIO</h1>
               <p>8045 Callaghan Rd, San Antonio, TX 78230</p>
-              <p><strong>Pay Date:</strong> ${dayjs(today).format("MM/DD/YYYY")}</p>
+              <p><strong>Date:</strong> ${dayjs(today).format("MM/DD/YYYY")}</p>
             </div>
             <div class="stub-title">
               <h1>RECEPTION PAY STATEMENT</h1>
@@ -2552,7 +2552,7 @@ export const sendZoePaystub = async (req: Request, res: Response) => {
           <div class="company-info">
             <h1>HYPER INKER STUDIO</h1>
             <p>8045 Callaghan Rd, San Antonio, TX 78230</p>
-            <p><strong>Pay Date:</strong> ${dayjs().format("MMM DD, YYYY")}</p>
+            <p><strong>Date:</strong> ${dayjs().format("MMM DD, YYYY")}</p>
           </div>
           <div class="summary-box"><small>Gross Payout</small><span>$${netPay.toFixed(2)}</span></div>
         </div>
@@ -2985,7 +2985,7 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
           <div class="company-info">
             <h1>HYPER INKER STUDIO</h1>
             <p>8045 Callaghan Rd, San Antonio, TX 78230</p>
-            <p><strong>Pay Date:</strong> ${dayjs().format("MMM DD, YYYY")}</p>
+            <p><strong>Date:</strong> ${dayjs().format("MMM DD, YYYY")}</p>
           </div>
           <div class="summary-box"><small>Gross Payout</small><span>$${netPay.toFixed(2)}</span></div>
         </div>
@@ -3610,7 +3610,7 @@ export const sendAllArtistPaystubs = async (req: Request, res: Response) => {
         <div class="company-info">
           <h1>HYPER INKER STUDIO</h1>
           <p>8045 Callaghan Rd, San Antonio, TX 78230</p>
-          <p><strong>Pay Date:</strong> ${formatDate(now)}</p>
+          <p><strong>Date:</strong> ${formatDate(now)}</p>
         </div>
       </div>
 

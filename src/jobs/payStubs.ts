@@ -45,10 +45,10 @@ export async function sendZoePaystubJob() {
 export async function sendArtistPaystubJob() {
   try {
     const req = createMockReq({
-      artist_name: "Zoe",
+      artist_name: "Yen",
       is_hourly_paid: "false",
-      hourly_rate: "35",
       email: "canhducc@gmail.com",
+      userId: "c6afc934-2614-4ca5-b8a2-ef1df37f2134",
     });
     const res = createMockRes();
 
@@ -84,5 +84,3 @@ export async function sendPaystubArtistNicoleJob() {
     console.error("❌ Error in Nicole paystub job:", error);
   }
 }
-
-
