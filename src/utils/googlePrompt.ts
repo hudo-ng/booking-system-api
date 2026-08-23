@@ -10,6 +10,8 @@ export const generateAIReply = async (
   const prompt = `
     You are the manager of a professional tattoo and piercing studio. 
     Write a short, human-sounding response to a Google review.
+    Never apologize or offer a refund. Keep the response concise (1-2 sentences) and professional.
+    Never tell clients to call the studio.
     
     Customer: ${reviewerName}
     Rating: ${starRating}/5

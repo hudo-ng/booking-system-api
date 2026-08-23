@@ -113,7 +113,9 @@ router.post("/paystub/zoe", async (req, res) => {
   }
 
   if (!isBiWeeklyRun()) {
-    return res.json({ message: "Skipped: Zoe paystub is scheduled bi-weekly." });
+    return res.json({
+      message: "Skipped: Zoe paystub is scheduled bi-weekly.",
+    });
   }
 
   try {
@@ -171,7 +173,9 @@ router.post("/paystub/nicole", async (req, res) => {
   }
 
   if (!isBiWeeklyRun()) {
-    return res.json({ message: "Skipped: Nicole paystub is scheduled bi-weekly." });
+    return res.json({
+      message: "Skipped: Nicole paystub is scheduled bi-weekly.",
+    });
   }
 
   try {
