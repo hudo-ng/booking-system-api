@@ -2380,7 +2380,9 @@ export const sendWeeklyReceptionPaystub = async (
           grossAmount: gross,
         },
       });
-
+      console.log(
+        `Paystub generated for ${week.user.name} (${userId}) - Gross: $${gross.toFixed(2)} - URL: ${uploadResponse.url}`,
+      );
       const mg = new Mailgun(FormData).client({
         username: "api",
         key: process.env.MAILGUN_API_KEY!,
