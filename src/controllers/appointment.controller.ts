@@ -1007,9 +1007,16 @@ export const deleteAppointment = async (req: Request, res: Response) => {
 
     // 2️⃣ HARD DELETE if appointment has already been soft-deleted
     if (appointment.deletedAt) {
-      await prisma.appointment.delete({
-        where: { id: appointmentId },
-      });
+      await prisma.$transaction([
+        // Delete dependent attachments first to avoid P2003 FK constraint errors
+        prisma.appointmentAttachment.deleteMany({
+          where: { appointmentId },
+        }),
+        // Now delete the parent appointment
+        prisma.appointment.delete({
+          where: { id: appointmentId },
+        }),
+      ]);
 
       return res.status(200).json({
         message: "Appointment permanently hard-deleted",
@@ -1620,28 +1627,59 @@ export const deleteRecurringAppointments = async (
       return res.status(404).json({ message: "Series not found" });
     }
 
-    // ✅ Soft delete only upcoming appointments (not past)
-    await prisma.$transaction(async (tx) => {
-      await tx.appointment.updateMany({
-        where: {
-          seriesId,
-          startTime: { gt: dayjs().toDate() }, // only target future appointments
-          deletedAt: null, // target only active ones that haven't been deleted yet
-        },
-        data: {
-          deletedAt: new Date(),
-        },
-      });
+    const now = dayjs().toDate();
 
-      await tx.recurringSeries.update({
-        where: { id: seriesId },
-        data: { isActive: false },
-      });
+    // ✅ Check if any future appointments in this series are already soft-deleted
+    const existingSoftDeletedCount = await prisma.appointment.count({
+      where: {
+        seriesId,
+        startTime: { gt: now },
+        deletedAt: { not: null },
+      },
+    });
+
+    const isSecondDelete = existingSoftDeletedCount > 0;
+
+    await prisma.$transaction(async (tx) => {
+      if (isSecondDelete) {
+        // 🔥 HARD DELETE: Remove future appointments and the series record
+        await tx.appointment.deleteMany({
+          where: {
+            seriesId,
+            startTime: { gt: now },
+          },
+        });
+
+        // Delete the parent series record permanently
+        await tx.recurringSeries.delete({
+          where: { id: seriesId },
+        });
+      } else {
+        // 🧹 SOFT DELETE: Mark future active appointments as deleted & deactivate series
+        await tx.appointment.updateMany({
+          where: {
+            seriesId,
+            startTime: { gt: now },
+            deletedAt: null,
+          },
+          data: {
+            deletedAt: new Date(),
+          },
+        });
+
+        await tx.recurringSeries.update({
+          where: { id: seriesId },
+          data: { isActive: false },
+        });
+      }
     });
 
     return res.json({
-      message: "Future appointments soft-deleted and series deactivated",
+      message: isSecondDelete
+        ? "Future appointments and series permanently deleted"
+        : "Future appointments soft-deleted and series deactivated",
       seriesId,
+      isHardDelete: isSecondDelete,
     });
   } catch (error) {
     console.error("❌ deleteRecurringAppointments error:", error);

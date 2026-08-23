@@ -23,8 +23,16 @@ export async function sendWeeklyReceptionPaystubJob() {
     const req = createMockReq();
     const res = createMockRes();
 
+    // 1. Await the controller function
     await sendWeeklyReceptionPaystub(req, res);
-    console.log("✅ Weekly reception paystub job completed successfully.");
+
+    // 2. Await the actual response resolution
+    const responseData = await res.done;
+
+    console.log(
+      "✅ Weekly reception paystub job completed successfully with response:",
+      responseData,
+    );
   } catch (error) {
     console.error("❌ Error in weekly reception paystub job:", error);
   }

@@ -1897,6 +1897,7 @@ export const sendWeeklyReceptionPaystub = async (
   res: Response,
 ) => {
   try {
+    console.log("Starting weekly reception paystub generation...");
     const dataArtist = [
       { userId: "bab24c5b-ec93-4386-bdfb-7b0e1f25eb7f", isFree15Hour: true },
       { userId: "317b8640-2920-4d1d-853f-c8552545e634", isFree15Hour: false },
