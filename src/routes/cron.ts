@@ -97,9 +97,10 @@ router.post("/paystub/weekly-reception", async (req, res) => {
   }
 
   try {
-    await sendWeeklyReceptionPaystubJob();
+    const result = await sendWeeklyReceptionPaystubJob();
     return res.json({
       message: "Weekly reception paystub processed successfully",
+      result,
     });
   } catch (e: any) {
     console.error("/paystub/weekly-reception error:", e);

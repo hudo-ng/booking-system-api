@@ -18,24 +18,53 @@ const createMockRes = () =>
 
 const createMockReq = (query: Record<string, any> = {}) => ({ query }) as any;
 
+// export async function sendWeeklyReceptionPaystubJob() {
+//   try {
+//     const req = createMockReq();
+//     const res = createMockRes();
+
+//     // 1. Await the controller function
+//     await sendWeeklyReceptionPaystub(req, res);
+
+//     // 2. Await the actual response resolution
+//     const responseData = await res.done;
+
+//     console.log(
+//       "✅ Weekly reception paystub job completed successfully with response:",
+//       responseData,
+//     );
+//   } catch (error) {
+//     console.error("❌ Error in weekly reception paystub job:", error);
+//   }
+// }
+
 export async function sendWeeklyReceptionPaystubJob() {
-  try {
-    const req = createMockReq();
-    const res = createMockRes();
+  let captured: any;
+  let statusCode = 200;
 
-    // 1. Await the controller function
-    await sendWeeklyReceptionPaystub(req, res);
+  const res = {
+    status(code: number) {
+      statusCode = code;
+      return this;
+    },
+    json(body: unknown) {
+      captured = body;
+      return body;
+    },
+    send(body: unknown) {
+      captured = body;
+      return body;
+    },
+  } as any;
 
-    // 2. Await the actual response resolution
-    const responseData = await res.done;
+  await sendWeeklyReceptionPaystub(createMockReq(), res);
 
-    console.log(
-      "✅ Weekly reception paystub job completed successfully with response:",
-      responseData,
+  if (statusCode >= 400) {
+    throw new Error(
+      `Weekly reception paystub failed: ${JSON.stringify(captured)}`,
     );
-  } catch (error) {
-    console.error("❌ Error in weekly reception paystub job:", error);
   }
+  return captured;
 }
 
 export async function sendZoePaystubJob() {
