@@ -537,6 +537,7 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
             deposit_has_been_used: deposit_has_been_used,
             ...(deposit_amount > 0 && { deposit: deposit_amount }),
             terminal: "terminal_1",
+            tip_cash: extra_data?.tip_cash ?? 0,
           },
         );
         if (
