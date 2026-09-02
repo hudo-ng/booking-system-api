@@ -223,6 +223,8 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
           gte: startOfTodayUTC,
           lte: endOfTodayUTC,
         },
+
+        device_number: "terminal_1",
       },
       orderBy: {
         createdAt: "desc",
@@ -737,7 +739,8 @@ export const createAdminPaymentRequest = async (
           gte: startOfTodayUTC,
           lte: endOfTodayUTC,
         },
-        terminal: "terminal_2",
+
+        device_number: "terminal_2",
       },
       orderBy: {
         createdAt: "desc",
