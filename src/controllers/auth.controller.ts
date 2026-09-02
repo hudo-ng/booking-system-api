@@ -737,6 +737,7 @@ export const createAdminPaymentRequest = async (
           gte: startOfTodayUTC,
           lte: endOfTodayUTC,
         },
+        terminal: "terminal_2",
       },
       orderBy: {
         createdAt: "desc",
@@ -1206,19 +1207,6 @@ export const verifyAdminPaymentRequest = async (
         error: `Transaction not found on ${targetTerminal} (Range: ${startSearchIndex}-${endSearchIndex}).`,
       });
     }
-
-    // 5. Final safety check: Ensure we haven't already synced this PNReferenceId
-    // const alreadyExists = await prisma.trackingPayment.findFirst({
-    //   where: { pnReferenceId: match.PNReferenceId },
-    // });
-
-    // if (alreadyExists) {
-    //   return res.json({
-    //     success: true,
-    //     message: "Payment was already synced previously.",
-    //     record: alreadyExists,
-    //   });
-    // }
 
     // 6. Sync to Prisma
     const syncedRecord = await prisma.trackingPayment.create({
