@@ -230,7 +230,11 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
         createdAt: "desc",
       },
     });
-
+    console.log(
+      "lastPaymentToday?.referenceId:",
+      lastPaymentToday?.referenceId,
+    );
+    console.log("lastPaymentToday?.id:", lastPaymentToday?.id);
     const nextReferenceId = lastPaymentToday
       ? (parseInt(lastPaymentToday.referenceId, 10) + 1)
           .toString()
