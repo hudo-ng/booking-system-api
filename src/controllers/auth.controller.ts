@@ -1129,15 +1129,6 @@ export const verifyAdminPaymentRequest = async (
 
     const targetTerminal = device_number || "terminal_2";
 
-    // 1. Find the last successful payment ON THIS SPECIFIC TERMINAL
-    // before the crash time to establish a search anchor.
-
-    // 1. Get the local time of the crash
-    const localTime = dayjs(requested_at).tz(ST_TIMEZONE);
-
-    // 2. Define a strict lookback (e.g., 4 hours) OR the start of day
-    // If you want it to be null for these two specific times,
-    // a 4-hour window would work:
     const lookbackLimit = dayjs(requested_at).subtract(4, "hour").toDate();
 
     const lastPaymentBeforeCrash = await prisma.trackingPayment.findFirst({
@@ -1240,7 +1231,6 @@ export const verifyAdminPaymentRequest = async (
         device_number: targetTerminal,
         document_id: extra_data?.documentId ?? "",
         customer_name: extra_data?.customer_name ?? "",
-        createdAt: new Date(requested_at),
       },
     });
 
