@@ -208,13 +208,13 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
     const startOfTodayUTC = dayjs()
       .tz("America/Chicago")
       .startOf("day")
-      .utc()
+
       .toDate();
 
     const endOfTodayUTC = dayjs()
       .tz("America/Chicago")
       .endOf("day")
-      .utc()
+
       .toDate();
 
     const lastPaymentToday = await prisma.trackingPayment.findFirst({
@@ -724,13 +724,13 @@ export const createAdminPaymentRequest = async (
     const startOfTodayUTC = dayjs()
       .tz("America/Chicago")
       .startOf("day")
-      .utc()
+
       .toDate();
 
     const endOfTodayUTC = dayjs()
       .tz("America/Chicago")
       .endOf("day")
-      .utc()
+
       .toDate();
 
     const lastPaymentToday = await prisma.trackingPayment.findFirst({
