@@ -525,6 +525,37 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       }
       console.log("is_failed:", is_failed);
       if (!is_failed) {
+        if (
+          item_service === "tattoo" ||
+          extra_data?.item_service === "tattoo"
+        ) {
+          const newPaymentAmount = (Cash ?? 0) + (Card ?? 0);
+          try {
+            const existingCustomer = await prisma.signInCustomer.findUnique({
+              where: { document_id: extra_data?.documentId },
+              select: { spending_amount: true },
+            });
+
+            if (existingCustomer) {
+              await prisma.signInCustomer.update({
+                where: { document_id: extra_data?.documentId },
+                data: {
+                  spending_amount:
+                    existingCustomer.spending_amount === null
+                      ? newPaymentAmount
+                      : { increment: newPaymentAmount },
+                  spending_artist: artist,
+
+                  ...(extra_data?.appointment_id && {
+                    appointment_id: extra_data.appointment_id,
+                  }),
+                },
+              });
+            }
+          } catch (error) {
+            console.error("Tattoo payment update sign in:", error);
+          }
+        }
         await axios.patch(
           `https://hyperinkersform.com/api/${item_service}/payment`,
           {
