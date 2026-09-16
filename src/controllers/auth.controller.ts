@@ -4327,23 +4327,45 @@ export const fixMissingTattooSpending = async (req: Request, res: Response) => {
 
 export const scriptInsertData = async (req: Request, res: Response) => {
   try {
-    // Range: Jan 1st to Jan 31st, 2025
-    let current = dayjs("2024-12-19");
-    const endDate = dayjs("2024-12-31");
-    let totalInserted = 0;
+    // Range: Dec 19th to Dec 31st, 2024
+    let current = dayjs("2026-03-01");
+    const endDate = dayjs("2026-04-01");
+
+    let totalFetched = 0;
+    let totalWithAppointment = 0;
+    let totalSkippedNoAppointment = 0;
+    let totalUpserted = 0;
+    let totalFailed = 0;
 
     while (current.isBefore(endDate) || current.isSame(endDate, "day")) {
       const apiDateFormat = current.format("MMDDYYYY");
-      console.log(`📡 Fetching: ${apiDateFormat}`);
+      console.log(`\n📡 Fetching date: ${apiDateFormat}`);
 
       const response = await axios.post(
         "https://hyperinkersform.com/api/fetching",
         { endDate: apiDateFormat },
       );
 
-      if (response.data?.data && Array.isArray(response.data.data)) {
-        for (const item of response.data.data) {
+      const items = response.data?.data;
+
+      if (Array.isArray(items)) {
+        console.log(`📦 Fetched ${items.length} records for ${apiDateFormat}`);
+        totalFetched += items.length;
+
+        for (const item of items) {
           try {
+            // Extract appointment_id
+            const appointmentId =
+              item.appointment_id || item.appointmentId || null;
+
+            // Skip item completely if appointment_id does not exist
+            if (!appointmentId) {
+              totalSkippedNoAppointment++;
+              continue;
+            }
+
+            totalWithAppointment++;
+
             // --- ⚠️ CONSOLE WARNINGS FOR MISSING DATA ---
             if (!item.city?.name && !item.city)
               console.warn(`⚠️ Missing City for ID: ${item.id}`);
@@ -4355,7 +4377,9 @@ export const scriptInsertData = async (req: Request, res: Response) => {
             // --- DATABASE INSERTION (UPSERT) ---
             await prisma.signInCustomer.upsert({
               where: { document_id: item.id },
-              update: {}, // Don't overwrite if it already exists
+              update: {
+                appointment_id: appointmentId,
+              },
               create: {
                 name:
                   `${item.firstName || ""} ${item.lastName || ""}`.trim() ||
@@ -4365,39 +4389,65 @@ export const scriptInsertData = async (req: Request, res: Response) => {
                 phone: item.phoneNumber || "N/A",
                 address: item.addressOne || "N/A",
 
-                // Handling the new Object structure for City/State
-                city: item?.city || item.city?.name || "N/A",
+                // Handling the Object structure for City/State
+                city: item?.city?.name || item?.city || "N/A",
                 state:
+                  item?.state?.isoCode ||
+                  item?.state?.name ||
                   item?.state ||
-                  item.state?.isoCode ||
-                  item.state?.name ||
                   "N/A",
 
                 zip_code: item?.postalCode || "N/A",
                 document_id: item.id,
+                appointment_id: appointmentId,
                 service: item.service || "Unknown",
                 spending_artist: item.artist || "Unknown",
                 spending_services: item.tattooStyle || "N/A",
 
-                // Using Number(item.price) to handle both string "10" or number 10 safely
+                // Safely convert price string/number
                 spending_amount: Number(item.price) || 0,
 
-                // Use the loop's current date to ensure year is 2025
+                // Use the loop's current date
                 createdAt: current.toDate(),
               },
             });
-            totalInserted++;
+
+            totalUpserted++;
           } catch (err) {
+            totalFailed++;
             console.error(`❌ DB Error for ID ${item.id}:`, err);
           }
         }
+      } else {
+        console.warn(`⚠️ No array data returned for ${apiDateFormat}`);
       }
 
       current = current.add(1, "day");
     }
 
-    console.log(`🏁 Migration finished. Total records: ${totalInserted}`);
-    return res.status(200).json({ success: true, count: totalInserted });
+    // --- FINAL MIGRATION SUMMARY LOGS ---
+    console.log("\n==========================================");
+    console.log("🏁 MIGRATION COMPLETED SUMMARY");
+    console.log("==========================================");
+    console.log(`📥 Total Items Fetched: ${totalFetched}`);
+    console.log(`📅 Items WITH Appointment ID: ${totalWithAppointment}`);
+    console.log(
+      `⏭️  Items SKIPPED (No Appointment ID): ${totalSkippedNoAppointment}`,
+    );
+    console.log(`✅ Successfully Upserted: ${totalUpserted}`);
+    console.log(`❌ Failed DB Upserts: ${totalFailed}`);
+    console.log("==========================================\n");
+
+    return res.status(200).json({
+      success: true,
+      stats: {
+        totalFetched,
+        totalWithAppointment,
+        totalSkippedNoAppointment,
+        totalUpserted,
+        totalFailed,
+      },
+    });
   } catch (error: any) {
     console.error("❌ Global Error:", error.message);
     return res.status(500).json({ success: false, error: error.message });

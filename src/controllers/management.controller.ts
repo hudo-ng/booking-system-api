@@ -8,6 +8,12 @@ import dayjs from "dayjs";
 import axios from "axios";
 import { normalizeName, normalizePhone } from "../utils/utils";
 
+import utc from "dayjs/plugin/utc";
+import timezone from "dayjs/plugin/timezone";
+
+// 🔌 Extend dayjs with timezone capabilities
+dayjs.extend(utc);
+dayjs.extend(timezone);
 const prisma = new PrismaClient();
 
 export const deleteEmployee = async (req: Request, res: Response) => {
@@ -461,25 +467,16 @@ const getCustomerType = (
 
 export const getSignInCustomers = async (req: Request, res: Response) => {
   try {
-    const { userId } = (req as any).user as {
-      userId?: string;
-    };
-
+    const { userId } = (req as any).user as { userId?: string };
     const { start_date, end_date, is_customers } = req.query;
 
     if (!userId) {
-      return res.status(401).json({
-        error: "Unauthorized",
-      });
+      return res.status(401).json({ error: "Unauthorized" });
     }
 
     const currentUser = await prisma.user.findUnique({
-      where: {
-        id: userId,
-      },
-      select: {
-        isOwner: true,
-      },
+      where: { id: userId },
+      select: { isOwner: true },
     });
 
     if (!currentUser?.isOwner) {
@@ -487,18 +484,12 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
         success: true,
         data: [],
         array_of_form_bookings: [],
-        customerTypeCounts: {
-          new: 0,
-          normal: 0,
-          regular: 0,
-          vip: 0,
-          risk: 0,
-        },
+        customerTypeCounts: { new: 0, normal: 0, regular: 0, vip: 0, risk: 0 },
+        summaryAnalytics: null,
       });
     }
 
     const whereClause: any = {};
-
     if (start_date && end_date) {
       whereClause.createdAt = {
         gte: new Date(start_date as string),
@@ -506,33 +497,26 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
       };
     }
 
+    // 1. Fetch SignInCustomers and FormBookings in parallel
     const [signInCustomers, formBookings] = await Promise.all([
       prisma.signInCustomer.findMany({
         where: whereClause,
-        orderBy: {
-          createdAt: "desc",
-        },
+        orderBy: { createdAt: "desc" },
       }),
-
       is_customers === "true"
         ? Promise.resolve([])
         : prisma.formBookingRequest.findMany({
             where: whereClause,
-            orderBy: {
-              createdAt: "desc",
-            },
+            orderBy: { createdAt: "desc" },
           }),
     ]);
 
-    // 2. STAGE EARLY ESCAPE: If only customer list is targeted or no forms exist
-
+    // 2. Group Sign-In Customers into unique Customer Profiles
     const groupedCustomers = new Map<string, any>();
 
     for (const visit of signInCustomers) {
       const email = visit.email?.toLowerCase().trim() || "";
-
       const phone = normalizePhone(visit.phone);
-
       const key = email || phone || visit.id;
 
       if (!key) continue;
@@ -542,33 +526,22 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
       if (!customer) {
         customer = {
           id: visit.id,
-
           name: visit.name,
-
           email: visit.email,
-
           phone: visit.phone,
-
           dob: visit.dob,
-
           service: visit.service,
-
           visits: [],
-
           visitCount: 0,
-
           totalSpent: 0,
-
           latestVisit: null,
+          signInCustomer: visit,
         };
-
         groupedCustomers.set(key, customer);
       }
 
       customer.visits.push(visit);
-
       customer.visitCount++;
-
       customer.totalSpent += visit.spending_amount || 0;
 
       if (
@@ -576,10 +549,10 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
         visit.createdAt > customer.latestVisit.createdAt
       ) {
         customer.latestVisit = visit;
+        customer.signInCustomer = visit;
       }
     }
 
-    // Initialize counts object
     const customerTypeCounts = {
       new: 0,
       normal: 0,
@@ -593,18 +566,17 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
         customer.visits.sort(
           (a: any, b: any) => b.createdAt.getTime() - a.createdAt.getTime(),
         );
-
         const type_of_customer = getCustomerType(
           customer.visitCount,
           customer.latestVisit?.createdAt,
         );
-
-        // Increment respective customer type count
         customerTypeCounts[type_of_customer]++;
 
         return {
           ...customer,
           type_of_customer,
+          signInCustomer:
+            customer.signInCustomer || customer.latestVisit || null,
         };
       })
       .sort(
@@ -615,35 +587,29 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
     if (is_customers === "true" || formBookings.length === 0) {
       return res.json({
         success: true,
-
         data: customers,
-
         customerTypeCounts,
-
         array_of_form_bookings: [],
-
         summaryAnalytics: {
-          totalBookedAppointments: 0,
-
-          totalFormBookingsProcessed: 0,
-
-          conversionRatePercentage: 0,
-
-          breakdowns: [],
+          totalForms: formBookings.length,
+          totalAppointments: 0,
+          totalCompletedVisits: 0,
+          formToApptRate: 0,
+          apptToVisitRate: 0,
+          overallConversionRate: 0,
+          totalRevenue: 0,
+          artistBreakdown: [],
         },
       });
     }
 
     // ----------------------------------------------------------
-    // Booking Conversion Analytics
+    // 3. Match Form Bookings -> Prospective Appointments
     // ----------------------------------------------------------
-
     const emails = formBookings
       .map((b) => b.email?.toLowerCase().trim())
       .filter(Boolean);
-
     const rawPhones = formBookings.map((b) => b.phone).filter(Boolean);
-
     const names = formBookings.map((b) => b.name).filter(Boolean);
 
     const earliestFormDate = formBookings.reduce(
@@ -652,88 +618,94 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
     );
 
     const matchConditions: any[] = [];
-
-    if (emails.length) {
-      matchConditions.push({
-        email: {
-          in: emails,
-        },
-      });
-    }
-
-    if (rawPhones.length) {
-      matchConditions.push({
-        phone: {
-          in: rawPhones,
-        },
-      });
-    }
-
-    if (names.length) {
-      matchConditions.push({
-        customerName: {
-          in: names,
-        },
-      });
-    }
+    if (emails.length) matchConditions.push({ email: { in: emails } });
+    if (rawPhones.length) matchConditions.push({ phone: { in: rawPhones } });
+    if (names.length) matchConditions.push({ customerName: { in: names } });
 
     names.forEach((name) => {
       const cleanName = normalizeName(name);
-
       if (cleanName && cleanName.length >= 3) {
         matchConditions.push({
-          email: {
-            contains: cleanName,
-            mode: "insensitive",
-          },
+          email: { contains: cleanName, mode: "insensitive" },
         });
       }
     });
 
     const prospectiveAppointments = await prisma.appointment.findMany({
       where: {
-        createdAt: {
-          gte: earliestFormDate,
-        },
-
+        createdAt: { gte: earliestFormDate },
         OR: matchConditions,
       },
-
       select: {
         id: true,
         email: true,
         phone: true,
         customerName: true,
         createdAt: true,
-
+        quote_amount: true,
+        deposit_amount: true,
+        employee: {
+          select: { id: true, name: true, colour: true },
+        },
         assignedBy: {
-          select: {
-            id: true,
-            name: true,
-            colour: true,
-          },
+          select: { id: true, name: true, colour: true },
         },
       },
     });
 
-    const bookedAppointmentsTracked: any[] = [];
+    // ----------------------------------------------------------
+    // 4. Match Appointments -> Completed SignInCustomer Visits
+    // ----------------------------------------------------------
+    const matchedApptIds = prospectiveAppointments.map((app) => app.id);
+
+    const completedVisits = await prisma.signInCustomer.findMany({
+      where: {
+        appointment_id: { in: matchedApptIds },
+      },
+      select: {
+        id: true,
+        appointment_id: true,
+        spending_amount: true,
+        spending_artist: true,
+        createdAt: true,
+      },
+    });
+
+    // Map appointment_id to completed visits
+    const completedVisitMap = new Map<string, (typeof completedVisits)[0]>();
+    completedVisits.forEach((visit) => {
+      if (visit.appointment_id) {
+        completedVisitMap.set(visit.appointment_id, visit);
+      }
+    });
+
+    // ----------------------------------------------------------
+    // 5. Build Booking Analytics & Assignee Maps
+    // ----------------------------------------------------------
+    const trackedAppointments: any[] = [];
+    let totalRevenue = 0;
+
+    const artistMap = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        colour: string | null;
+        assignedCount: number;
+        completedCount: number;
+        revenue: number;
+      }
+    >();
 
     const array_of_form_bookings = formBookings.map((booking) => {
       const bookingEmail = booking.email?.toLowerCase().trim() || "";
-
       const bookingPhone = normalizePhone(booking.phone);
-
       const bookingName = normalizeName(booking.name);
 
-      const matchingAppointment = prospectiveAppointments.find((app) => {
-        if (!app.createdAt || app.createdAt <= booking.createdAt) {
-          return false;
-        }
-
+      const matchingAppt = prospectiveAppointments.find((app) => {
+        if (!app.createdAt || app.createdAt <= booking.createdAt) return false;
         const appEmail = app.email?.toLowerCase().trim() || "";
-
         const appPhone = normalizePhone(app.phone);
-
         const appName = normalizeName(app.customerName);
 
         return (
@@ -744,114 +716,139 @@ export const getSignInCustomers = async (req: Request, res: Response) => {
         );
       });
 
-      if (matchingAppointment) {
-        bookedAppointmentsTracked.push(matchingAppointment);
+      let completedVisit: (typeof completedVisits)[0] | null = null;
+
+      if (matchingAppt) {
+        trackedAppointments.push(matchingAppt);
+        completedVisit = completedVisitMap.get(matchingAppt.id) || null;
+
+        // Calculate Revenue (prefer exact spending_amount, fallback to appointment quotes/deposits)
+        const apptRevenue =
+          completedVisit?.spending_amount ||
+          matchingAppt.quote_amount ||
+          matchingAppt.deposit_amount ||
+          0;
+
+        if (completedVisit) {
+          totalRevenue += apptRevenue;
+        }
+
+        // Target assigned employee (Artist who performed work) or assigner fallback
+        const artist = matchingAppt.employee || matchingAppt.assignedBy;
+        const artistId = artist?.id || "unassigned";
+        const artistName = artist?.name || "Unassigned / Online";
+        const artistColour = artist?.colour || null;
+
+        const currentArtistStats = artistMap.get(artistId) || {
+          id: artistId,
+          name: artistName,
+          colour: artistColour,
+          assignedCount: 0,
+          completedCount: 0,
+          revenue: 0,
+        };
+
+        currentArtistStats.assignedCount += 1;
+        if (completedVisit) {
+          currentArtistStats.completedCount += 1;
+          currentArtistStats.revenue += apptRevenue;
+        }
+
+        artistMap.set(artistId, currentArtistStats);
       }
 
       return {
         ...booking,
-
-        hasAppointment: !!matchingAppointment,
-
-        bookedBy: matchingAppointment?.assignedBy
+        hasAppointment: !!matchingAppt,
+        isCompleted: !!completedVisit,
+        appointmentId: matchingAppt?.id || null,
+        signInCustomer: completedVisit || null,
+        bookedBy: matchingAppt?.assignedBy
           ? {
-              id: matchingAppointment.assignedBy.id,
-              name: matchingAppointment.assignedBy.name,
-              colour: matchingAppointment.assignedBy.colour,
+              id: matchingAppt.assignedBy.id,
+              name: matchingAppt.assignedBy.name,
+              colour: matchingAppt.assignedBy.colour,
             }
-          : matchingAppointment
-            ? {
-                name: "System/Unknown",
-              }
+          : matchingAppt
+            ? { name: "System/Unknown" }
             : null,
+        artist: matchingAppt?.employee
+          ? {
+              id: matchingAppt.employee.id,
+              name: matchingAppt.employee.name,
+              colour: matchingAppt.employee.colour,
+            }
+          : null,
       };
     });
 
     // ----------------------------------------------------------
-    // Breakdown
+    // 6. Aggregate Funnel Ratios & Breakdown Data
     // ----------------------------------------------------------
+    const totalForms = formBookings.length;
+    const totalAppointments = trackedAppointments.length;
+    const totalCompletedVisits = completedVisits.length;
 
-    const totalBookedAppointments = bookedAppointmentsTracked.length;
+    const formToApptRate =
+      totalForms > 0
+        ? Number(((totalAppointments / totalForms) * 100).toFixed(2))
+        : 0;
+    const apptToVisitRate =
+      totalAppointments > 0
+        ? Number(((totalCompletedVisits / totalAppointments) * 100).toFixed(2))
+        : 0;
+    const overallConversionRate =
+      totalForms > 0
+        ? Number(((totalCompletedVisits / totalForms) * 100).toFixed(2))
+        : 0;
 
-    const assigneeMap: Record<
-      string,
-      {
-        count: number;
-        name: string;
-        colour: string | null;
-      }
-    > = {};
-
-    bookedAppointmentsTracked.forEach((appointment) => {
-      const id = appointment.assignedBy?.id || "system";
-
-      const name = appointment.assignedBy?.name || "Online Booking";
-
-      const colour = appointment.assignedBy?.colour || null;
-
-      if (!assigneeMap[id]) {
-        assigneeMap[id] = {
-          count: 0,
-          name,
-          colour,
-        };
-      }
-
-      assigneeMap[id].count++;
-    });
-
-    const breakdowns = Object.entries(assigneeMap)
-      .map(([id, value]) => ({
-        userId: id === "system" ? null : id,
-
-        userName: value.name,
-
-        userColour: value.colour,
-
-        count: value.count,
-
-        percentage:
-          totalBookedAppointments > 0
-            ? Number(((value.count / totalBookedAppointments) * 100).toFixed(2))
+    const artistBreakdown = Array.from(artistMap.values())
+      .map((artist) => ({
+        artistId: artist.id === "unassigned" ? null : artist.id,
+        artistName: artist.name,
+        artistColour: artist.colour,
+        assignedCount: artist.assignedCount,
+        completedCount: artist.completedCount,
+        completionRate:
+          artist.assignedCount > 0
+            ? Number(
+                ((artist.completedCount / artist.assignedCount) * 100).toFixed(
+                  2,
+                ),
+              )
             : 0,
+        shareOfTotalForms:
+          totalForms > 0
+            ? Number(((artist.assignedCount / totalForms) * 100).toFixed(2))
+            : 0,
+        revenue: Number(artist.revenue.toFixed(2)),
       }))
-      .sort((a, b) => b.count - a.count);
+      .sort(
+        (a, b) => b.completedCount - a.completedCount || b.revenue - a.revenue,
+      );
 
     // ----------------------------------------------------------
-    // Final Response
+    // Final Payload Output
     // ----------------------------------------------------------
-
     return res.json({
       success: true,
-
       data: customers,
-
       customerTypeCounts,
-
       array_of_form_bookings,
-
       summaryAnalytics: {
-        totalBookedAppointments,
-
-        totalFormBookingsProcessed: formBookings.length,
-
-        conversionRatePercentage: formBookings.length
-          ? Number(
-              ((totalBookedAppointments / formBookings.length) * 100).toFixed(
-                2,
-              ),
-            )
-          : 0,
-
-        breakdowns,
+        totalForms,
+        totalAppointments,
+        totalCompletedVisits,
+        formToApptRate,
+        apptToVisitRate,
+        overallConversionRate,
+        totalRevenue: Number(totalRevenue.toFixed(2)),
+        artistBreakdown,
       },
     });
   } catch (error: any) {
     console.error("Get SignInCustomers error:", error);
-
-    return res.status(500).json({
-      error: "Internal server error",
-    });
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
 
