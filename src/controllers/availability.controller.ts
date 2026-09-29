@@ -402,29 +402,23 @@ export const getShopAvailabilityByDay = async (req: Request, res: Response) => {
     const results = [];
 
     for (const employee of employees) {
-      const workOn = allTimeWorkOns.find((w) => w.userId === employee.id);
+      const isTimeWorkOn = allTimeWorkOns.some(
+        (w) =>
+          w.userId === employee.id &&
+          w.date >= startOfDayUtc &&
+          w.date < endOfDayUtc,
+      );
 
-      const isOffRecord = allTimeOffs.find((t) => t.employeeId === employee.id);
-
-      const hours = allWorkingHours.filter((h) => h.employeeId === employee.id);
-      const appts = allAppts.filter((a) => a.employeeId === employee.id);
       const availableSlots: { start: string; end: string }[] = [];
-      const occupied = new Set<string>();
-      const isTimeWorkOn = !!workOn;
-      if (workOn) {
-        let curLocal = dayjs.tz(`${date} 12:00`, ZONE);
-        const endLocal = dayjs.tz(`${date} 23:00`, ZONE);
 
-        while (curLocal.isBefore(endLocal)) {
-          const slotStart = curLocal;
-          const slotEnd = curLocal.add(2, "hour");
+      // 1️⃣ HANDLE "WORK ON" FORCED DAYS
+      if (isTimeWorkOn) {
+        let cur = dayjs.tz(`${date} 12:00`, ZONE);
+        const end = dayjs.tz(`${date} 23:00`, ZONE);
 
-          if (slotEnd.isAfter(endLocal)) {
-            break;
-          }
-
-          const sUtc = slotStart.utc();
-          const eUtc = slotEnd.utc();
+        while (cur.add(2, "hour").isSameOrBefore(end)) {
+          const sUtc = cur.utc();
+          const eUtc = cur.add(2, "hour").utc();
 
           if (sUtc.isAfter(nowUtc)) {
             availableSlots.push({
@@ -433,7 +427,7 @@ export const getShopAvailabilityByDay = async (req: Request, res: Response) => {
             });
           }
 
-          curLocal = curLocal.add(2, "hour");
+          cur = cur.add(2, "hour");
         }
 
         results.push({
@@ -441,32 +435,47 @@ export const getShopAvailabilityByDay = async (req: Request, res: Response) => {
           name: employee.name,
           is_day_off: false,
           slots: availableSlots,
-          is_time_work_on: isTimeWorkOn,
+          is_time_work_on: true,
         });
 
         continue;
       }
-      for (const a of appts) {
-        let cur = dayjs(a.startTime).utc();
-        const end = dayjs(a.endTime).utc();
-        while (cur.isBefore(end)) {
-          occupied.add(cur.toISOString());
-          cur = cur.add(1, "hour");
-        }
-      }
 
-      if (isOffRecord || !hours.length) {
+      // 2️⃣ HANDLE APPROVED TIME OFF & MISSING WORKING HOURS
+      const isOffRecord = allTimeOffs.some(
+        (t) =>
+          t.employeeId === employee.id &&
+          t.date >= startOfDayUtc &&
+          t.date < endOfDayUtc,
+      );
+
+      const hoursForDay = allWorkingHours.filter(
+        (h) => h.employeeId === employee.id,
+      );
+
+      if (isOffRecord || !hoursForDay.length) {
         results.push({
           id: employee.id,
           name: employee.name,
           is_day_off: true,
           slots: [],
-          is_time_work_on: isTimeWorkOn,
+          is_time_work_on: false,
         });
+
         continue;
       }
 
-      for (const interval of hours) {
+      // 3️⃣ HANDLE REGULAR WORKING HOURS & APPOINTMENT CONFLICTS
+      const apptsForDay = allAppts.filter(
+        (a) =>
+          a.employeeId === employee.id &&
+          a.startTime &&
+          a.endTime &&
+          a.startTime < endOfDayUtc &&
+          a.endTime > startOfDayUtc,
+      );
+
+      for (const interval of hoursForDay) {
         if (!interval.startTime || !interval.endTime) continue;
 
         const baseStart = dayjs.tz(`${date} ${interval.startTime}`, ZONE);
@@ -475,40 +484,43 @@ export const getShopAvailabilityByDay = async (req: Request, res: Response) => {
         if (interval.type === "custom") {
           const sUtc = baseStart.utc();
           const eUtc = baseEnd.utc();
-          const hasConflict = appts.some(
+
+          const conflict = apptsForDay.some(
             (a) =>
               sUtc.isBefore(dayjs(a.endTime)) &&
               dayjs(a.startTime).isBefore(eUtc),
           );
 
-          if (sUtc.isAfter(nowUtc) && !hasConflict) {
+          if (!conflict && sUtc.isAfter(nowUtc)) {
             availableSlots.push({
               start: sUtc.toISOString(),
               end: eUtc.toISOString(),
             });
           }
-        } else {
-          const step = interval.intervalLength || 60;
-          let curLocal = baseStart.clone();
+          continue;
+        }
 
-          while (curLocal.isBefore(baseEnd)) {
-            const slotStartLocal = curLocal;
-            const slotEndLocal = curLocal.add(step, "minute");
-            if (slotEndLocal.isAfter(baseEnd)) break;
+        const step = interval.intervalLength || 60;
+        let cur = baseStart.clone();
 
-            const sUtc = slotStartLocal.utc();
-            const eUtc = slotEndLocal.utc();
-            const isPast = !sUtc.isAfter(nowUtc);
-            const isOccupied = occupied.has(sUtc.toISOString());
+        while (cur.add(step, "minute").isSameOrBefore(baseEnd)) {
+          const sUtc = cur.utc();
+          const eUtc = cur.add(step, "minute").utc();
 
-            if (!isPast && !isOccupied) {
-              availableSlots.push({
-                start: sUtc.toISOString(),
-                end: eUtc.toISOString(),
-              });
-            }
-            curLocal = curLocal.add(step, "minute");
+          const conflict = apptsForDay.some(
+            (a) =>
+              sUtc.isBefore(dayjs(a.endTime)) &&
+              dayjs(a.startTime).isBefore(eUtc),
+          );
+
+          if (!conflict && sUtc.isAfter(nowUtc)) {
+            availableSlots.push({
+              start: sUtc.toISOString(),
+              end: eUtc.toISOString(),
+            });
           }
+
+          cur = cur.add(step, "minute");
         }
       }
 
@@ -517,7 +529,7 @@ export const getShopAvailabilityByDay = async (req: Request, res: Response) => {
         name: employee.name,
         is_day_off: false,
         slots: availableSlots,
-        is_time_work_on: isTimeWorkOn,
+        is_time_work_on: false,
       });
     }
 
