@@ -272,6 +272,11 @@ model Paystub {
   cash        Float?
   name        String?
   total       Float?
+  // Piercing Breakdown Totals
+  piercing_saline   Float?
+  piercing_jewlery Float?
+  piercing_piercing Float?
+  piercing_service  Float?
 }
 
 model WorkShift {

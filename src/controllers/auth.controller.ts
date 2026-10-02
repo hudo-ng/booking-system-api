@@ -1916,8 +1916,6 @@ export const sendWeeklyReceptionPaystub = async (
   try {
     console.log("Starting weekly reception paystub generation...");
     const dataArtist = [
-      { userId: "bab24c5b-ec93-4386-bdfb-7b0e1f25eb7f", isFree15Hour: true },
-      { userId: "317b8640-2920-4d1d-853f-c8552545e634", isFree15Hour: false },
       { userId: "0ae16fcd-9ca3-4463-94f4-2aecb02f1745", isFree15Hour: false },
       { userId: "8502391d-7aa2-475c-b719-03107497b396", isFree15Hour: false },
     ];
@@ -3802,30 +3800,35 @@ export const sendAllArtistPaystubs = async (req: Request, res: Response) => {
     return res.status(500).json({ error: error.message });
   }
 };
+
 export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
   try {
     const targetEmail = (req.query.email as string) || "nicole@example.com";
     const studioFee1Amount = 65.0;
     const studioFee2Amount = 50.0;
 
-    const now = new Date();
-    now.setDate(now.getDate() - 2);
-    // now.setDate(now.getDate() - 5);
-    const dayOfWeek = now.getDay();
-    const toDate = new Date(now);
+    // 1. Calculate Start and End dates for the ENTIRE previous month
+    const startOfPreviousMonth = dayjs().subtract(1, "month").startOf("month");
+    const endOfPreviousMonth = dayjs().subtract(1, "month").endOf("month");
 
-    toDate.setDate(now.getDate() - dayOfWeek - 1);
-    const fromDate = new Date(toDate);
-    fromDate.setDate(toDate.getDate() - 13);
+    const fromDate = startOfPreviousMonth.toDate();
+    const toDate = endOfPreviousMonth.toDate();
 
-    const periodStr = `${dayjs(fromDate).format("MMM DD, YYYY")} - ${dayjs(toDate).format("MMM DD, YYYY")}`;
+    const periodStr = `${startOfPreviousMonth.format("MMM DD, YYYY")} - ${endOfPreviousMonth.format("MMM DD, YYYY")}`;
     const dailyLogs: any[] = [];
+
+    // Loop through each day of the previous month
     let cursor = new Date(fromDate);
+
+    // Track total raw/gross contribution to the store
+    let totalGrossSaline = 0;
+    let totalGrossJewelry = 0;
+    let totalGrossPiercing = 0;
+    let totalGrossService = 0;
 
     while (cursor <= toDate) {
       const formatted = dayjs(cursor).format("MMDDYYYY");
 
-      // Individual Columns Logic
       let jDirect = 0,
         jYen = 0,
         jZoe = 0;
@@ -3866,27 +3869,38 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
 
           if (p > 0) totalPiercingForFee += p;
 
+          // Track raw store contribution totals
+          totalGrossJewelry += pJ;
+          totalGrossSaline += pS;
+          if (isService) {
+            totalGrossService += p;
+          } else {
+            totalGrossPiercing += p;
+          }
+
+          // Updated Commission Logic
           if (artist === "nicole") {
-            if (isService) service += p * 0.6;
-            else piercing += p * 0.6;
-            jDirect += pJ * 0.6;
-            sDirect += pS * 1.0;
+            if (isService)
+              service += p * 0.6; // 60% Service
+            else piercing += p * 0.6; // 60% Piercing
+            jDirect += pJ * 0.6; // 60% Jewelry
+            sDirect += pS * 1.0; // 100% Saline
             tips += pT;
           } else if (artist === "yen") {
-            jYen += pJ * 0.1;
-            sYen += pS * 0.5;
+            jYen += pJ * 0; // 10% Jewelry from Yen
+            sYen += pS * 0.5; // 50% Saline from Yen
           } else if (artist === "zoe") {
-            jZoe += pJ * 0.5;
-            sZoe += pS * 0.9;
+            jZoe += pJ * 0.3; // 30% Jewelry from Zoe (Updated)
+            sZoe += pS * 0.9; // 90% Saline from Zoe
           }
 
           let rCash = parseFloat(i.cash) || 0,
             rCard = parseFloat(i.card) || 0;
           if (rCash + rCard === 0) rCash = p + pJ + pS + pT;
+
           if (i.paid_by?.toLowerCase().includes("card")) {
             card += rCard;
-          }
-          if (i.paid_by?.toLowerCase().includes("card")) {
+          } else {
             cash += rCash;
           }
         });
@@ -3896,7 +3910,7 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
           studioFeeTwo = studioFee2Amount;
         }
       } catch (err) {
-        console.error(err);
+        console.error("Error fetching daily items:", err);
       }
 
       dailyLogs.push({
@@ -3939,6 +3953,7 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
       (d) => d.sDirect + d.sYen + d.sZoe + d.piercing + d.service > 0,
     ).length;
 
+    // HTML Rendering Logic ...
     const htmlContent = `
     <html>
       <head>
@@ -3982,8 +3997,8 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
             </tr>
             <tr>
               <th style="background: #e3f2fd;">Direct (60%)</th>
-              <th style="background: #e3f2fd;">Yen (10%)</th>
-              <th style="background: #e3f2fd;">Zoe (50%)</th>
+              <th style="background: #e3f2fd;">Yen (0%)</th>
+              <th style="background: #e3f2fd;">Zoe (30%)</th>
               <th style="background: #e8f5e9;">Direct (100%)</th>
               <th style="background: #e8f5e9;">Yen (50%)</th>
               <th style="background: #e8f5e9;">Zoe (90%)</th>
@@ -4045,6 +4060,7 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
       folder: "/nicole-paystubs",
     });
 
+    // Save record to database including store contribution metrics
     await prisma.paystub.create({
       data: {
         userId: "1faf65bc-ab45-4b02-9548-5d367532ffea",
@@ -4056,6 +4072,12 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
         startDate: fromDate,
         endDate: toDate,
         grossAmount: netPay,
+
+        // Save raw totals for store contribution breakdown
+        piercing_saline: totalGrossSaline,
+        piercing_jewlery: totalGrossJewelry,
+        piercing_piercing: totalGrossPiercing,
+        piercing_service: totalGrossService,
       },
     });
 
@@ -4156,10 +4178,10 @@ export const generateNicolePaystubData = async (
               dayCash += rCash;
             }
           } else if (artist === "yen") {
-            jYen += pJ * 0.1; // 10% Yen's Jewelry
+            jYen += pJ * 0; // 10% Yen's Jewelry
             sYen += pS * 0.5; // 50% Yen's Saline
           } else if (artist === "zoe") {
-            jZoe += pJ * 0.5; // 50% Zoe's Jewelry
+            jZoe += pJ * 0.3; // 30% Zoe's Jewelry
             sZoe += pS * 0.9; // 90% Zoe's Saline
           }
         });
@@ -4614,5 +4636,95 @@ export const adminLoginWithoutDevice = async (req: Request, res: Response) => {
     return res.json({ token, ...safeUser });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });
+  }
+};
+
+export const getUniqueCustomerCount = async (req: Request, res: Response) => {
+  console.log("\n==================================================");
+  console.log("🚀 [DEMO] Starting getUniqueCustomerCount Controller");
+  console.log("==================================================");
+
+  try {
+    // 1. Read userId from query params
+    const userId = req.query.userId as string | undefined;
+
+    console.log("📥 [1/3] Incoming Query Parameters:");
+    console.log(`     - Received userId: "${userId || "MISSING"}"`);
+
+    if (!userId) {
+      console.log(
+        "⚠️ [Auth Failed] Request rejected: userId is required in query params (?userId=...).",
+      );
+      return res
+        .status(400)
+        .json({ error: "userId query parameter is required" });
+    }
+
+    // 2. Fetch User & Verify Ownership
+    console.log("🔍 [2/3] Verifying user permissions in database...");
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { isOwner: true },
+    });
+
+    console.log(`     - DB User Found: ${!!currentUser}`);
+    console.log(
+      `     - User Permissions: isOwner = ${currentUser?.isOwner ?? false}`,
+    );
+
+    if (!currentUser?.isOwner) {
+      console.log(
+        "⛔ [Access Denied] Non-owner or invalid user. Returning count: 0.",
+      );
+      return res.json({
+        success: true,
+        count: 0,
+      });
+    }
+
+    // 3. Retrieve All SignInCustomers
+    console.log("🗄️ [3/3] Querying all SignInCustomers from database...");
+    const visits = await prisma.signInCustomer.findMany({
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+      },
+    });
+
+    console.log(`     - Retrieved ${visits.length} total sign-in records.`);
+
+    // 4. Deduplicate Unique Customers
+    console.log("⚙️ Deduplicating customer records...");
+    const uniqueKeys = new Set<string>();
+
+    visits.forEach((visit, index) => {
+      const email = visit.email?.toLowerCase().trim() || "";
+      const phone = normalizePhone(visit.phone);
+      const key = email || phone || visit.id;
+
+      if (key) {
+        const isNew = !uniqueKeys.has(key);
+        uniqueKeys.add(key);
+
+        console.log(
+          `     [Record #${index + 1}] ID: ${visit.id} | Email: "${email || "N/A"}" | Phone: "${phone || "N/A"}" -> Key: "${key}" (${isNew ? "NEW UNIQUE" : "DUPLICATE"})`,
+        );
+      }
+    });
+
+    console.log("--------------------------------------------------");
+    console.log(
+      `📊 [DEMO RESULT] Total Unique Customers: ${uniqueKeys.size} (from ${visits.length} raw visits)`,
+    );
+    console.log("==================================================\n");
+
+    return res.json({
+      success: true,
+      count: uniqueKeys.size,
+    });
+  } catch (error: any) {
+    console.error("❌ [ERROR] getUniqueCustomerCount failed:", error);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
