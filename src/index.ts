@@ -16,6 +16,7 @@ import cronRouter from "./routes/cron";
 import cardPaymentsRouter from "./routes/cardPayments.routes";
 import googleRoutes from "./routes/google.routes";
 import laserRoutes from "./routes/laser.routes";
+import giftCardsRouter from "./routes/giftCards.routes";
 
 const app = express();
 
@@ -63,6 +64,7 @@ app.use("/cron", cronRouter);
 app.use("/card-payments", cardPaymentsRouter);
 app.use("/google", googleRoutes);
 app.use("/laser", laserRoutes);
+app.use("/gift-cards", giftCardsRouter);
 app.get("/", (req: Request, res: Response) => {
   res.send("Hello from express");
 });
