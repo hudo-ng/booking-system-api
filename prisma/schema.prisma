@@ -416,6 +416,41 @@ model WebPaymentTracking {
   booking           Appointment? @relation(fields: [bookingId], references: [id])
 }
 
+model GiftCard {
+  id                String               @id @default(uuid())
+  code              String               @unique
+  initialAmount     Float
+  balance           Float
+  status            GiftCardStatus       @default(ACTIVE)
+  paymentMethod     String
+  providerPaymentId String?              @unique
+  buyerName         String
+  buyerEmail        String
+  buyerPhone        String?
+  recipientName     String
+  recipientEmail    String
+  recipientPhone    String
+  giftMessage       String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  redemptions       GiftCardRedemption[]
+}
+
+model GiftCardRedemption {
+  id            String   @id @default(uuid())
+  giftCardId    String
+  amount        Float
+  appointmentId String?
+  createdAt     DateTime @default(now())
+  giftCard      GiftCard @relation(fields: [giftCardId], references: [id])
+}
+
+enum GiftCardStatus {
+  ACTIVE
+  REDEEMED
+  CANCELLED
+}
+
 model Review {
   id                String          @id @default(uuid())
   googleReviewId    String          @unique
