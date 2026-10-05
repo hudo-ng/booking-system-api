@@ -3,9 +3,16 @@ import { PrismaClient } from "@prisma/client";
 import { customAlphabet } from "nanoid";
 import Mailgun from "mailgun.js";
 import FormData from "form-data";
+import { SquareClient, SquareEnvironment } from "square";
+import crypto from "crypto";
 import { sendSMS } from "../utils/sms";
 
 const prisma = new PrismaClient();
+
+const squareClient = new SquareClient({
+  token: process.env.SQUARE_ACCESS_TOKEN!,
+  environment: SquareEnvironment.Production,
+});
 
 const generateCode = customAlphabet("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", 10);
 
@@ -13,6 +20,28 @@ const mg = new Mailgun(FormData).client({
   username: "api",
   key: process.env.MAILGUN_API_KEY!,
 });
+
+const MIN_AMOUNT = 1;
+const MAX_AMOUNT = 10000;
+const CARD_FEE_RATE = 0.035;
+const PAYMENT_METHODS = ["Debit/Credit", "Apple Pay", "Cash App Pay"];
+
+function removeBigInts(obj: any) {
+  return JSON.parse(
+    JSON.stringify(obj, (_, value) =>
+      typeof value === "bigint" ? value.toString() : value,
+    ),
+  );
+}
+
+function escapeHtml(s: string) {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
 async function generateUniqueCode() {
   for (let i = 0; i < 5; i++) {
@@ -23,85 +52,178 @@ async function generateUniqueCode() {
   throw new Error("Could not generate a unique gift card code");
 }
 
-// Call this once payment has already been taken care of (card, cash, terminal, etc).
-// This endpoint only records the gift card and sends the receipt/code - it never charges anything itself.
-export const purchaseGiftCard = async (req: Request, res: Response) => {
-  try {
-    const {
-      amount,
-      paymentMethod,
-      providerPaymentId,
-      buyerName,
-      buyerEmail,
-      buyerPhone,
-      recipientName,
-      recipientEmail,
-      recipientPhone,
-      giftMessage,
-    } = req.body;
+async function sendGiftCardNotifications(giftCard: {
+  code: string;
+  initialAmount: number;
+  buyerName: string;
+  buyerEmail: string;
+  recipientName: string;
+  recipientEmail: string;
+  recipientPhone: string;
+  giftMessage: string | null;
+}) {
+  const amount = `$${giftCard.initialAmount.toFixed(2)}`;
+  const buyerName = escapeHtml(giftCard.buyerName);
+  const recipientName = escapeHtml(giftCard.recipientName);
 
-    if (!amount || Number(amount) <= 0) {
-      return res.status(400).json({ success: false, message: "Invalid amount" });
+  // The card is already paid for and saved, so a failed notification must not fail the purchase.
+  const results = await Promise.allSettled([
+    mg.messages.create(process.env.MAILGUN_DOMAIN!, {
+      from: process.env.MAILGUN_FROM!,
+      to: giftCard.buyerEmail,
+      subject: "Your gift card purchase receipt",
+      html: `<p>Thanks for your purchase, ${buyerName}!</p>
+             <p>You bought a <strong>${amount}</strong> gift card for ${recipientName}.</p>
+             <p>It has been sent to them by email and text message.</p>`,
+    }),
+    mg.messages.create(process.env.MAILGUN_DOMAIN!, {
+      from: process.env.MAILGUN_FROM!,
+      to: giftCard.recipientEmail,
+      subject: `${giftCard.buyerName} sent you a gift card!`,
+      html: `<p>You've received a <strong>${amount}</strong> gift card from ${buyerName}.</p>
+             ${giftCard.giftMessage ? `<p>"${escapeHtml(giftCard.giftMessage)}"</p>` : ""}
+             <p>Your code: <strong>${giftCard.code}</strong></p>
+             <p>Present this code at checkout to redeem it.</p>`,
+    }),
+    sendSMS(
+      giftCard.recipientPhone,
+      `${giftCard.buyerName} sent you a ${amount} gift card! Code: ${giftCard.code}. Present it at checkout to redeem.`,
+    ),
+  ]);
+
+  results.forEach((r) => {
+    if (r.status === "rejected") {
+      console.error(`Gift card ${giftCard.code} notification failed:`, r.reason);
     }
-    if (
-      !paymentMethod ||
-      !buyerName ||
-      !buyerEmail ||
-      !recipientName ||
-      !recipientEmail ||
-      !recipientPhone
-    ) {
-      return res.status(400).json({ success: false, message: "Missing required fields" });
+  });
+}
+
+// Charges the customer through Square and issues the gift card in one request,
+// so a gift card can only exist for a completed payment of the same amount.
+export const purchaseGiftCard = async (req: Request, res: Response) => {
+  const {
+    amount,
+    sourceId,
+    paymentMethod,
+    buyerName,
+    buyerEmail,
+    buyerPhone,
+    recipientName,
+    recipientEmail,
+    recipientPhone,
+    giftMessage,
+  } = req.body;
+
+  const value = Math.round(Number(amount) * 100) / 100;
+  if (!Number.isFinite(value) || value < MIN_AMOUNT || value > MAX_AMOUNT) {
+    return res.status(400).json({
+      success: false,
+      message: `Amount must be between $${MIN_AMOUNT} and $${MAX_AMOUNT}`,
+    });
+  }
+  // The convenience fee is computed here, never taken from the client.
+  const chargeCents =
+    Math.round(value * 100) + Math.round(value * CARD_FEE_RATE * 100);
+
+  if (!sourceId || typeof sourceId !== "string") {
+    return res.status(400).json({ success: false, message: "Missing payment token" });
+  }
+  if (!PAYMENT_METHODS.includes(paymentMethod)) {
+    return res.status(400).json({ success: false, message: "Invalid payment method" });
+  }
+  if (!buyerName || !buyerEmail || !recipientName || !recipientEmail || !recipientPhone) {
+    return res.status(400).json({ success: false, message: "Missing required fields" });
+  }
+
+  // Square payment tokens are single-use; keying on the token makes a retried request
+  // return the original payment instead of charging twice.
+  const idempotencyKey = crypto
+    .createHash("sha256")
+    .update(`giftcard:${sourceId}`)
+    .digest("hex")
+    .slice(0, 45);
+
+  let payment;
+  try {
+    const paymentResp = await squareClient.payments.create({
+      idempotencyKey,
+      amountMoney: {
+        amount: BigInt(chargeCents),
+        currency: "USD",
+      },
+      sourceId,
+      locationId: process.env.SQUARE_LOCATION_ID!,
+      note: `E-gift card for ${String(recipientName).slice(0, 100)}`,
+    });
+    payment = paymentResp.payment;
+  } catch (error) {
+    console.error("Gift card Square error:", error);
+    return res.status(402).json({
+      success: false,
+      message: "Payment was declined. You have not been charged.",
+    });
+  }
+
+  if (!payment?.id || payment.status !== "COMPLETED") {
+    return res.status(402).json({ success: false, message: "Payment not completed" });
+  }
+
+  try {
+    // A retry with the same token returns the same payment; hand back the card already issued for it.
+    const existing = await prisma.giftCard.findUnique({
+      where: { providerPaymentId: payment.id },
+    });
+    if (existing) {
+      return res.json({ success: true, giftCard: existing });
     }
 
     const code = await generateUniqueCode();
-    const giftCard = await prisma.giftCard.create({
-      data: {
-        code,
-        initialAmount: Number(amount),
-        balance: Number(amount),
-        paymentMethod,
-        providerPaymentId,
-        buyerName,
-        buyerEmail,
-        buyerPhone,
-        recipientName,
-        recipientEmail,
-        recipientPhone,
-        giftMessage,
-      },
+    const giftCard = await prisma.$transaction(async (tx) => {
+      await tx.webPaymentTracking.create({
+        data: {
+          provider: "SQUARE",
+          providerPaymentId: payment.id!,
+          method: paymentMethod,
+          amount: chargeCents / 100,
+          currency: "USD",
+          status: payment.status!,
+          avsStatus: payment.cardDetails?.avsStatus ?? null,
+          cvvStatus: payment.cardDetails?.cvvStatus ?? null,
+          rawResponse: removeBigInts(payment),
+        },
+      });
+
+      return tx.giftCard.create({
+        data: {
+          code,
+          initialAmount: value,
+          balance: value,
+          paymentMethod,
+          providerPaymentId: payment.id!,
+          buyerName,
+          buyerEmail,
+          buyerPhone: buyerPhone || null,
+          recipientName,
+          recipientEmail,
+          recipientPhone,
+          giftMessage: giftMessage ? String(giftMessage).slice(0, 300) : null,
+        },
+      });
     });
 
-    await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
-      from: process.env.MAILGUN_FROM!,
-      to: buyerEmail,
-      subject: "Your gift card purchase receipt",
-      html: `<p>Thanks for your purchase, ${buyerName}!</p>
-             <p>You bought a <strong>$${Number(amount).toFixed(2)}</strong> gift card for ${recipientName}.</p>
-             <p>It has been sent to them by email and text message.</p>`,
-    });
-
-    await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
-      from: process.env.MAILGUN_FROM!,
-      to: recipientEmail,
-      subject: `${buyerName} sent you a gift card!`,
-      html: `<p>You've received a <strong>$${Number(amount).toFixed(2)}</strong> gift card from ${buyerName}.</p>
-             ${giftMessage ? `<p>"${giftMessage}"</p>` : ""}
-             <p>Your code: <strong>${code}</strong></p>
-             <p>Present this code at checkout to redeem it.</p>`,
-    });
-
-    await sendSMS(
-      recipientPhone,
-      `${buyerName} sent you a $${Number(amount).toFixed(2)} gift card! Code: ${code}. Present it at checkout to redeem.`
-    );
+    await sendGiftCardNotifications(giftCard);
 
     return res.json({ success: true, giftCard });
   } catch (error) {
-    console.error("Gift card purchase error:", error);
+    console.error(
+      `Gift card issue failed AFTER Square payment ${payment.id} was charged:`,
+      error,
+    );
     return res.status(500).json({
       success: false,
-      message: error instanceof Error ? error.message : "An unknown error occurred",
+      paymentId: payment.id,
+      message:
+        "Your payment went through but the gift card could not be issued. Please contact us with your payment reference.",
     });
   }
 };
