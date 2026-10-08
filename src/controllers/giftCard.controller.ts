@@ -55,6 +55,7 @@ async function generateUniqueCode() {
 async function sendGiftCardNotifications(giftCard: {
   code: string;
   initialAmount: number;
+  paymentMethod: string;
   buyerName: string;
   buyerEmail: string;
   recipientName: string;
@@ -65,29 +66,38 @@ async function sendGiftCardNotifications(giftCard: {
   const amount = `$${giftCard.initialAmount.toFixed(2)}`;
   const buyerName = escapeHtml(giftCard.buyerName);
   const recipientName = escapeHtml(giftCard.recipientName);
+  const paymentMethod = escapeHtml(giftCard.paymentMethod);
 
   // The card is already paid for and saved, so a failed notification must not fail the purchase.
   const results = await Promise.allSettled([
     mg.messages.create(process.env.MAILGUN_DOMAIN!, {
       from: process.env.MAILGUN_FROM!,
       to: giftCard.buyerEmail,
-      subject: "Your gift card purchase receipt",
-      html: `<p>Thanks for your purchase, ${buyerName}!</p>
-             <p>You bought a <strong>${amount}</strong> gift card for ${recipientName}.</p>
-             <p>It has been sent to them by email and text message.</p>`,
+      subject: "You just made someone's day 🎁",
+      html: `<p>Hi ${buyerName},</p>
+             <p>Thanks for the gift card — ${recipientName} is going to love it! Here's your receipt for the records:</p>
+             <ul>
+               <li>Amount: <strong>${amount}</strong></li>
+               <li>Recipient: ${recipientName}</li>
+               <li>Payment method: ${paymentMethod}</li>
+             </ul>
+             <p>We've already sent ${recipientName} their code by email and text, so there's nothing else you need to do.</p>
+             <p>Thanks for choosing us,<br/>Hyper Inkers</p>`,
     }),
     mg.messages.create(process.env.MAILGUN_DOMAIN!, {
       from: process.env.MAILGUN_FROM!,
       to: giftCard.recipientEmail,
-      subject: `${giftCard.buyerName} sent you a gift card!`,
-      html: `<p>You've received a <strong>${amount}</strong> gift card from ${buyerName}.</p>
+      subject: `🎁 ${giftCard.buyerName} just sent you a gift!`,
+      html: `<p>Hey ${recipientName},</p>
+             <p>Good news — ${buyerName} just treated you to a <strong>${amount}</strong> gift card at Hyper Inkers.</p>
              ${giftCard.giftMessage ? `<p>"${escapeHtml(giftCard.giftMessage)}"</p>` : ""}
              <p>Your code: <strong>${giftCard.code}</strong></p>
-             <p>Present this code at checkout to redeem it.</p>`,
+             <p>Just show this at checkout whenever you're ready — it never expires, so take your time picking out something great.</p>
+             <p>Can't wait to see you,<br/>Hyper Inkers</p>`,
     }),
     sendSMS(
       giftCard.recipientPhone,
-      `${giftCard.buyerName} sent you a ${amount} gift card! Code: ${giftCard.code}. Present it at checkout to redeem.`,
+      `🎁 Surprise! ${giftCard.buyerName} just sent you a ${amount} gift card to Hyper Inkers. Code: ${giftCard.code} — flash it at checkout whenever you're ready, no expiration. Enjoy!`,
     ),
   ]);
 
