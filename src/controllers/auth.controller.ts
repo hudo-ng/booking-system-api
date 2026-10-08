@@ -1916,8 +1916,9 @@ export const sendWeeklyReceptionPaystub = async (
   try {
     console.log("Starting weekly reception paystub generation...");
     const dataArtist = [
-      { userId: "0ae16fcd-9ca3-4463-94f4-2aecb02f1745", isFree15Hour: false },
-      { userId: "8502391d-7aa2-475c-b719-03107497b396", isFree15Hour: false },
+      // { userId: "0ae16fcd-9ca3-4463-94f4-2aecb02f1745", isFree15Hour: false }, // Andrea
+      // { userId: "8502391d-7aa2-475c-b719-03107497b396", isFree15Hour: false }, // Mervic
+      { userId: "dd1c0e82-6dd9-45d6-ade0-cec7218f3d28", isFree15Hour: false }, //Lenci
     ];
 
     const results = [];
@@ -1990,19 +1991,19 @@ export const sendWeeklyReceptionPaystub = async (
       // 2. Booking Commission Sync Logic
       const apiDataCache = new Map<string, any[]>();
       let fetchCursor = new Date(fromDate.toDate());
-      while (fetchCursor <= toDate.toDate()) {
-        const formatted = dayjs(fetchCursor).format("MMDDYYYY");
-        try {
-          const response = await axios.post(
-            "https://hyperinkersform.com/api/fetching",
-            { endDate: formatted },
-          );
-          apiDataCache.set(formatted, response.data?.data || []);
-        } catch (err) {
-          apiDataCache.set(formatted, []);
-        }
-        fetchCursor.setDate(fetchCursor.getDate() + 1);
-      }
+      // while (fetchCursor <= toDate.toDate()) {
+      //   const formatted = dayjs(fetchCursor).format("MMDDYYYY");
+      //   try {
+      //     const response = await axios.post(
+      //       "https://hyperinkersform.com/api/fetching",
+      //       { endDate: formatted },
+      //     );
+      //     apiDataCache.set(formatted, response.data?.data || []);
+      //   } catch (err) {
+      //     apiDataCache.set(formatted, []);
+      //   }
+      //   fetchCursor.setDate(fetchCursor.getDate() + 1);
+      // }
 
       let totalBookingVolume = 0;
       let qualifiedBookingCount = 0;
@@ -2428,21 +2429,21 @@ export const sendZoePaystub = async (req: Request, res: Response) => {
     const commRate = 0.1; // 10%
     const commPercent = commRate * 100;
 
-    // 1. Date Range Setup (Previous 2 Weeks)
-    const now = new Date();
-    now.setDate(now.getDate() - 3);
-    const dayOfWeek = now.getDay();
-    const toDate = new Date(now);
-    toDate.setDate(now.getDate() - dayOfWeek - 1);
-    const fromDate = new Date(toDate);
-    fromDate.setDate(toDate.getDate() - 13);
+    // 1. Date Range Setup (Entire Previous Month)
+    const startOfPreviousMonth = dayjs().subtract(10, "month").startOf("month");
+    const endOfPreviousMonth = dayjs().subtract(10, "month").endOf("month");
 
-    const periodStr = `${dayjs(fromDate).format("MMM DD, YYYY")} - ${dayjs(toDate).format("MMM DD, YYYY")}`;
+    const fromDate = startOfPreviousMonth.toDate();
+    const toDate = endOfPreviousMonth.toDate();
+    const paystubMonth = startOfPreviousMonth.month() + 1; // 1 = Jan, 10 = Oct, etc.
+
+    const periodStr = `${startOfPreviousMonth.format("MMM DD, YYYY")} - ${endOfPreviousMonth.format("MMM DD, YYYY")}`;
     const dailyLogs: any[] = [];
     let cursor = new Date(fromDate);
 
     while (cursor <= toDate) {
       const formatted = dayjs(cursor).format("MMDDYYYY");
+      let dayPiercingTotal = 0;
       let dayServiceTotal = 0;
       let dayJewelry = 0;
       let daySaline = 0;
@@ -2485,8 +2486,14 @@ export const sendZoePaystub = async (req: Request, res: Response) => {
 
           artistItems.forEach((i: any) => {
             const fullName = `${i?.firstName} ${i?.lastName}`;
-            if (fullName.includes("*"))
-              dayServiceTotal += Number(i?.price) || 0;
+            const price = Number(i?.price) || 0;
+
+            if (fullName.includes("*")) {
+              dayServiceTotal += price;
+            } else {
+              dayPiercingTotal += price; // Track regular piercing price for store contribution
+            }
+
             dayJewelry += Number(i?.priceJewelry) || 0;
             daySaline += Number(i?.priceSaline) || 0;
             dayTips += Number(i?.tip) || 0;
@@ -2515,6 +2522,7 @@ export const sendZoePaystub = async (req: Request, res: Response) => {
         hrs: dayHours,
         jewelry: dayJewelry,
         saline: daySaline,
+        piercingPrice: dayPiercingTotal,
         servicePrice: dayServiceTotal,
         tips: dayTips,
       });
@@ -2527,6 +2535,10 @@ export const sendZoePaystub = async (req: Request, res: Response) => {
     const laborPay = totalHours * hourlyRate;
     const totalJ = dailyLogs.reduce((acc, d) => acc + d.jewelry, 0);
     const totalS = dailyLogs.reduce((acc, d) => acc + d.saline, 0);
+    const totalPiercing = dailyLogs.reduce(
+      (acc, d) => acc + d.piercingPrice,
+      0,
+    );
     const totalService = dailyLogs.reduce((acc, d) => acc + d.servicePrice, 0);
     const totalTips = dailyLogs.reduce((acc, d) => acc + d.tips, 0);
 
@@ -2537,10 +2549,11 @@ export const sendZoePaystub = async (req: Request, res: Response) => {
     const totalCommission = jewelryComm + salineComm + serviceComm;
     const netPay = laborPay + totalCommission + totalTips;
     const totalWorkDays = dailyLogs.filter(
-      (d) => d.hrs > 0 || d.tips > 0 || d.servicePrice > 0,
+      (d) =>
+        d.hrs > 0 || d.tips > 0 || d.servicePrice > 0 || d.piercingPrice > 0,
     ).length;
 
-    // 3. HTML Content using your Design
+    // 3. HTML Content
     const htmlContent = `
     <html>
       <head>
@@ -2592,6 +2605,7 @@ export const sendZoePaystub = async (req: Request, res: Response) => {
               <th>Hours</th>
               <th>Jewelry</th>
               <th>Saline</th>
+              <th>Piercing</th>
               <th>Service</th>
               <th>Tips</th> 
               <th style="text-align:right">Daily Gross</th>
@@ -2608,11 +2622,9 @@ export const sendZoePaystub = async (req: Request, res: Response) => {
               <tr>
                 <td>${d.date}</td>
                 <td>${d.hrs}h ($${dLabor.toFixed(2)})</td>
-                <td>$${d.jewelry.toFixed(2)}</td>
-                <td>$${d.saline.toFixed(2)}</td>
-                <td>$${d.servicePrice.toFixed(2)}</td>
-                <td style="color: #2e7d32;">$${d.tips.toFixed(2)}</td> 
-                <td class="bold-total">$${dTotal.toFixed(2)}</td>
+                <td>$${d.jewelry.toFixed(2)}</td>                 <td>$${d.saline.toFixed(2)}</td>
+                <td>$${d.piercingPrice.toFixed(2)}</td>                 <td>$${d.servicePrice.toFixed(2)}</td>
+                <td style="color: #2e7d32;">$${d.tips.toFixed(2)}</td>                  <td class="bold-total">$${dTotal.toFixed(2)}</td>
               </tr>`;
               })
               .join("")}
@@ -2623,6 +2635,7 @@ export const sendZoePaystub = async (req: Request, res: Response) => {
               <td>$${laborPay.toFixed(2)}</td>
               <td>$${jewelryComm.toFixed(2)}</td>
               <td>$${salineComm.toFixed(2)}</td>
+              <td>$${totalPiercing.toFixed(2)} (0%)</td>
               <td>$${serviceComm.toFixed(2)}</td>
               <td>$${totalTips.toFixed(2)}</td> 
               <td class="bold-total">$${netPay.toFixed(2)}</td>
@@ -2655,7 +2668,8 @@ export const sendZoePaystub = async (req: Request, res: Response) => {
       fileName: `zoe_paystub_${dayjs().format("YYYYMMDD")}.png`,
       folder: "/zoe-paystubs",
     });
-    // 7. Store in Prisma
+
+    // 5. Store in Prisma with full contribution tracking and paystub_month
     await prisma.paystub.create({
       data: {
         userId: String(req.query.userId),
@@ -2663,12 +2677,20 @@ export const sendZoePaystub = async (req: Request, res: Response) => {
         name: artistName,
         cash: 0,
         card: 0,
-        total: 0,
+        total: totalJ + totalS + totalService + totalPiercing,
         startDate: fromDate,
         endDate: toDate,
         grossAmount: netPay,
+        paystub_month: paystubMonth,
+
+        // Gross contribution breakdown for Zoe (now tracking piercing_piercing)
+        piercing_saline: totalS,
+        piercing_jewlery: totalJ,
+        piercing_piercing: totalPiercing,
+        piercing_service: totalService,
       },
     });
+
     return res.json({
       success: true,
       imageUrl: upload.url,
@@ -2831,15 +2853,15 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
     const commRate = 0.5;
     const commPercent = commRate * 100;
 
-    const now = new Date();
-    now.setDate(now.getDate() - 2);
-    const dayOfWeek = now.getDay();
-    const toDate = new Date(now);
-    toDate.setDate(now.getDate() - dayOfWeek - 1);
-    const fromDate = new Date(toDate);
-    fromDate.setDate(toDate.getDate() - 13);
+    // 1. Date Range Setup (Entire Previous Month)
+    const startOfPreviousMonth = dayjs().subtract(10, "month").startOf("month");
+    const endOfPreviousMonth = dayjs().subtract(10, "month").endOf("month");
 
-    const periodStr = `${dayjs(fromDate).format("MMM DD, YYYY")} - ${dayjs(toDate).format("MMM DD, YYYY")}`;
+    const fromDate = startOfPreviousMonth.toDate();
+    const toDate = endOfPreviousMonth.toDate();
+    const paystubMonth = startOfPreviousMonth.month() + 1; // 1 = Jan, 9 = Sep, etc.
+
+    const periodStr = `${startOfPreviousMonth.format("MMM DD, YYYY")} - ${endOfPreviousMonth.format("MMM DD, YYYY")}`;
 
     const dailyLogs: any[] = [];
     let cursor = new Date(fromDate);
@@ -2850,7 +2872,7 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
       let dayServiceTotal = 0;
       let dayJewelry = 0;
       let daySaline = 0;
-      let dayTips = 0; // Added tips variable
+      let dayTips = 0;
       let dayHours = 0;
       let dayCash = 0;
       let dayCard = 0;
@@ -2896,7 +2918,6 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
               dayCash += recordCash;
             }
             if (recordCash + recordCard > price + pJewelry + pSaline) {
-              // Destructure parentSignature out, and collect the rest into 'logData'
               const { signature, parentSignature, ...logData } = i;
               console.warn("Mismatch detected for record:", logData);
             }
@@ -2940,7 +2961,7 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
     // 4. Aggregate Totals
     const totalCash = dailyLogs.reduce((acc, d) => acc + d.cash, 0);
     const totalCard = dailyLogs.reduce((acc, d) => acc + d.card, 0);
-    const totalSalesVolume = totalCash + totalCard; // Sum of all cash + card transactions
+    const totalSalesVolume = totalCash + totalCard;
     const totalHours = dailyLogs.reduce((acc, d) => acc + d.hrs, 0);
     const totalJ = dailyLogs.reduce((acc, d) => acc + d.jewelry, 0);
     const totalS = dailyLogs.reduce((acc, d) => acc + d.saline, 0);
@@ -2949,7 +2970,7 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
       0,
     );
     const totalService = dailyLogs.reduce((acc, d) => acc + d.servicePrice, 0);
-    const totalTips = dailyLogs.reduce((acc, d) => acc + d.tips, 0); // Total tips (100% to artist)
+    const totalTips = dailyLogs.reduce((acc, d) => acc + d.tips, 0);
 
     const laborPay = isHourlyPaid ? totalHours * hourlyRate : 0;
     const piercingComm = isHourlyPaid ? 0 : totalPiercing * commRate;
@@ -2973,7 +2994,8 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
         d.saline > 0 ||
         d.tips > 0,
     ).length;
-    // 5. Build HTML Content (Added Tips Columns)
+
+    // 5. Build HTML Content
     const htmlContent = `
     <html>
       <head>
@@ -3044,12 +3066,9 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
                   d.tips;
                 return `
                 <tr>
-                  <td>${d.date}</td>
-                  ${isHourlyPaid ? `<td>${d.hrs}h</td>` : ""}
-                  <td>$${d.jewelry.toFixed(2)}</td>
-                  <td>$${d.saline.toFixed(2)}</td>
-                  <td>$${d.piercingPrice.toFixed(2)}</td>
-                  <td>$${d.servicePrice.toFixed(2)}</td>
+                  <td>${d.date}</td>${isHourlyPaid ? `<td>${d.hrs}h</td>` : ""}
+                  <td>$${d.jewelry.toFixed(2)}</td>                   <td>$${d.saline.toFixed(2)}</td>
+                  <td>$${d.piercingPrice.toFixed(2)}</td>                   <td>$${d.servicePrice.toFixed(2)}</td>
                   <td style="color: #2e7d32;">$${d.tips.toFixed(2)}</td> <td class="bold-total">$${dTotal.toFixed(2)}</td>
                 </tr>`;
               })
@@ -3094,7 +3113,7 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
       folder: "/artist-paystubs",
     });
 
-    // 7. Store in Prisma
+    // 7. Store in Prisma with contribution totals & paystub_month
     await prisma.paystub.create({
       data: {
         userId: String(req.query.userId),
@@ -3106,26 +3125,15 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
         startDate: fromDate,
         endDate: toDate,
         grossAmount: netPay,
+        paystub_month: paystubMonth,
+
+        // Store contribution breakdown
+        piercing_saline: totalS,
+        piercing_jewlery: totalJ,
+        piercing_piercing: totalPiercing,
+        piercing_service: totalService,
       },
     });
-
-    // 8. Email with Link & Attachment
-    const mg = new Mailgun(FormData).client({
-      username: "api",
-      key: process.env.MAILGUN_API_KEY!,
-    });
-    // await mg.messages.create(process.env.MAILGUN_DOMAIN!, {
-    //   from: process.env.MAILGUN_FROM!,
-    //   to: targetEmail,
-    //   subject: `Earnings: ${artistName} (${periodStr})`,
-    //   html: `<p>Your statement is ready: <a href="${upload.url}">View Online</a></p>`,
-    //   attachment: [
-    //     {
-    //       filename: `${artistName}_Paystub.png`,
-    //       data: Buffer.from(imageBuffer),
-    //     },
-    //   ],
-    // });
 
     return res.json({
       success: true,
@@ -3137,6 +3145,7 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
       startDate: fromDate,
       endDate: toDate,
       grossAmount: netPay,
+      paystub_month: paystubMonth,
     });
   } catch (error: any) {
     console.error(error);
@@ -4094,6 +4103,7 @@ export const generateNicolePaystubData = async (
   try {
     const { start_date, end_date } = req.body;
     const artistName = "Nicole";
+    const TAX_RATE = 0.085; // 8.5% tax rate for jewelry and saline
 
     // Fee Effective Dates
     const feeChangeDateMay = dayjs("2026-05-10");
@@ -4123,7 +4133,8 @@ export const generateNicolePaystubData = async (
         studioFeeTwo = 0;
       let totalPiercingForFee = 0;
       let dayCash = 0,
-        dayCard = 0;
+        dayCard = 0,
+        dayTax = 0;
 
       try {
         const response = await axios.post(
@@ -4162,38 +4173,43 @@ export const generateNicolePaystubData = async (
             // Cash/Card Tracking
             let rCash = parseFloat(i.cash) || 0;
             let rCard = parseFloat(i.card) || 0;
-            if (rCash + rCard === 0) rCash = p + pJ + pS + pT;
+            const totalItemAmount = p + pJ + pS + pT;
 
-            if (i.paid_by?.toLowerCase().includes("card")) {
-              dayCard += rCard;
-            }
-            if (
-              !i?.paid_by ||
-              i?.paid_by === undefined ||
-              i.paid_by?.toLowerCase().includes("cash")
-            ) {
-              if (rCash === 0) {
-                rCash = p + pJ + pS;
+            if (rCash + rCard === 0) {
+              // Fallback if neither field is populated: default to cash if paid_by is cash or empty
+              if (!i?.paid_by || i.paid_by?.toLowerCase().includes("cash")) {
+                rCash = totalItemAmount;
+              } else {
+                rCard = totalItemAmount;
               }
-              dayCash += rCash;
             }
+
+            dayCash += rCash;
+            dayCard += rCard;
+
+            // Calculate percentage of this specific transaction paid via Cash
+            const totalPaid = rCash + rCard;
+            const cashRatio = totalPaid > 0 ? rCash / totalPaid : 0;
+
+            // Tax applies only to Jewelry & Saline, proportioned by the cash ratio
+            const itemTax = (pJ + pS) * TAX_RATE;
+            const cashTaxPortion = itemTax * cashRatio;
+            dayTax += cashTaxPortion;
           } else if (artist === "yen") {
-            jYen += pJ * 0; // 10% Yen's Jewelry
-            sYen += pS * 0.5; // 50% Yen's Saline
+            jYen += pJ * 0;
+            sYen += pS * 0.5; // 50% Saline from Yen
           } else if (artist === "zoe") {
-            jZoe += pJ * 0.3; // 30% Zoe's Jewelry
-            sZoe += pS * 0.9; // 90% Zoe's Saline
+            jZoe += pJ * 0.3; // 30% Jewelry from Zoe
+            sZoe += pS * 0.9; // 90% Saline from Zoe
           }
         });
 
         // Apply Studio Fees only if there was piercing activity
         if (totalPiercingForFee > 0) {
-          // Fee 1: Adjusts to 75 starting June 26, 2026. Otherwise, it's 65.
           studioFeeOne = currentCursorDayjs.isBefore(feeChangeDateJune, "day")
             ? 65.0
             : 75.0;
 
-          // Fee 2: 0 before May 10, 50 between May 10 and June 25, 69 starting June 26.
           if (currentCursorDayjs.isBefore(feeChangeDateMay, "day")) {
             studioFeeTwo = 0.0;
           } else if (currentCursorDayjs.isBefore(feeChangeDateJune, "day")) {
@@ -4206,7 +4222,6 @@ export const generateNicolePaystubData = async (
         console.error(`Fetch failed for ${formatted}`);
       }
 
-      // Deduct both Fee One and Fee Two from the daily subtotal
       const daySubtotal =
         jDirect +
         jYen +
@@ -4233,8 +4248,9 @@ export const generateNicolePaystubData = async (
         studioFeeOne,
         studioFeeTwo,
         cash: dayCash,
+        tax: dayTax, // Tracked tax to be paid back from cash
         subtotal: daySubtotal,
-        dailyNet: daySubtotal, // Explicit mapping for the UI's parsing fallback
+        dailyNet: daySubtotal,
         direct: jDirect + sDirect + piercing + service,
         passive: jYen + jZoe + sYen + sZoe,
       });
@@ -4249,12 +4265,12 @@ export const generateNicolePaystubData = async (
       totalFeesOne: dailyLogs.reduce((acc, d) => acc + d.studioFeeOne, 0),
       totalFeesTwo: dailyLogs.reduce((acc, d) => acc + d.studioFeeTwo, 0),
       totalCash: dailyLogs.reduce((acc, d) => acc + d.cash, 0),
-      netPay: 0, // calculated below
+      totalTaxToPayback: dailyLogs.reduce((acc, d) => acc + d.tax, 0), // Total tax collected in cash to return
+      netPay: 0,
       totalWorkDays: dailyLogs.filter((d) => d.direct > 0).length,
       totalOpenDays: dailyLogs.filter((d) => d.studioFeeOne > 0).length,
     };
 
-    // Aggregate everything into the total Net Pay
     stats.netPay =
       stats.totalDirect +
       stats.totalPassive +
@@ -4274,7 +4290,6 @@ export const generateNicolePaystubData = async (
     return res.status(500).json({ error: error.message });
   }
 };
-
 export const fixMissingTattooSpending = async (req: Request, res: Response) => {
   try {
     // 1. Find all Tattoo customers with 0 or null spending_amount
@@ -4639,92 +4654,183 @@ export const adminLoginWithoutDevice = async (req: Request, res: Response) => {
   }
 };
 
-export const getUniqueCustomerCount = async (req: Request, res: Response) => {
+export const getCustomerAgeDemographics = async (
+  req: Request,
+  res: Response,
+) => {
   console.log("\n==================================================");
-  console.log("🚀 [DEMO] Starting getUniqueCustomerCount Controller");
+  console.log("🚀 [DEMO] Starting getCustomerAgeDemographics Controller");
   console.log("==================================================");
 
   try {
-    // 1. Read userId from query params
     const userId = req.query.userId as string | undefined;
 
-    console.log("📥 [1/3] Incoming Query Parameters:");
+    console.log("📥 [1/3] Incoming Request Parameters:");
     console.log(`     - Received userId: "${userId || "MISSING"}"`);
 
     if (!userId) {
       console.log(
-        "⚠️ [Auth Failed] Request rejected: userId is required in query params (?userId=...).",
+        "⚠️ [Auth Failed] Request rejected: userId query param is required.",
       );
       return res
         .status(400)
         .json({ error: "userId query parameter is required" });
     }
 
-    // 2. Fetch User & Verify Ownership
-    console.log("🔍 [2/3] Verifying user permissions in database...");
+    // 1. Verify User Ownership Permissions
+    console.log("🔍 [2/3] Checking user permissions in database...");
     const currentUser = await prisma.user.findUnique({
       where: { id: userId },
       select: { isOwner: true },
     });
 
-    console.log(`     - DB User Found: ${!!currentUser}`);
-    console.log(
-      `     - User Permissions: isOwner = ${currentUser?.isOwner ?? false}`,
-    );
-
     if (!currentUser?.isOwner) {
       console.log(
-        "⛔ [Access Denied] Non-owner or invalid user. Returning count: 0.",
+        "⛔ [Access Denied] Non-owner user. Returning zeroed metrics.",
       );
       return res.json({
         success: true,
-        count: 0,
+        totalUniqueCustomers: 0,
+        data: {
+          under18: { count: 0, percentage: 0 },
+          moreThan18: { count: 0, percentage: 0 },
+          moreThan40: { count: 0, percentage: 0 },
+          unknown: { count: 0, percentage: 0 },
+        },
       });
     }
 
-    // 3. Retrieve All SignInCustomers
-    console.log("🗄️ [3/3] Querying all SignInCustomers from database...");
+    // 2. Query DB for minimal required customer fields
+    console.log(
+      "🗄️ [3/3] Fetching customer visits & DOB data from database...",
+    );
     const visits = await prisma.signInCustomer.findMany({
       select: {
         id: true,
         email: true,
         phone: true,
+        dob: true,
       },
     });
 
-    console.log(`     - Retrieved ${visits.length} total sign-in records.`);
+    console.log(`     - Total raw visits fetched: ${visits.length}`);
 
-    // 4. Deduplicate Unique Customers
-    console.log("⚙️ Deduplicating customer records...");
-    const uniqueKeys = new Set<string>();
+    // 3. Deduplicate customers to avoid double counting same person
+    const uniqueCustomers = new Map<string, string>(); // Key: Customer Identifier -> Value: DOB
 
-    visits.forEach((visit, index) => {
+    for (const visit of visits) {
       const email = visit.email?.toLowerCase().trim() || "";
       const phone = normalizePhone(visit.phone);
       const key = email || phone || visit.id;
 
-      if (key) {
-        const isNew = !uniqueKeys.has(key);
-        uniqueKeys.add(key);
-
-        console.log(
-          `     [Record #${index + 1}] ID: ${visit.id} | Email: "${email || "N/A"}" | Phone: "${phone || "N/A"}" -> Key: "${key}" (${isNew ? "NEW UNIQUE" : "DUPLICATE"})`,
-        );
+      if (key && !uniqueCustomers.has(key)) {
+        uniqueCustomers.set(key, visit.dob);
       }
+    }
+
+    console.log(
+      `⚙️ Deduplicated into ${uniqueCustomers.size} unique customer profiles.`,
+    );
+
+    // 4. Calculate Raw Age Counts
+    const rawCounts = {
+      under18: 0, // Age < 18
+      moreThan18: 0, // Age >= 18 and <= 40
+      moreThan40: 0, // Age > 40
+      unknown: 0, // Invalid/Missing DOB
+    };
+
+    const today = dayjs();
+    let index = 1;
+
+    uniqueCustomers.forEach((dobString, key) => {
+      if (!dobString) {
+        rawCounts.unknown++;
+        console.log(
+          `     [Customer #${index}] Key: "${key}" | DOB: N/A -> Category: UNKNOWN`,
+        );
+        index++;
+        return;
+      }
+
+      const birthDate = dayjs(dobString, "YYYY-MM-DD", true);
+
+      if (!birthDate.isValid()) {
+        rawCounts.unknown++;
+        console.log(
+          `     [Customer #${index}] Key: "${key}" | DOB: "${dobString}" -> Invalid Date`,
+        );
+        index++;
+        return;
+      }
+
+      const age = today.diff(birthDate, "year");
+      let category = "";
+
+      if (age < 18) {
+        rawCounts.under18++;
+        category = "Under 18";
+      } else if (age <= 40) {
+        rawCounts.moreThan18++;
+        category = "More than 18 (18-40)";
+      } else {
+        rawCounts.moreThan40++;
+        category = "More than 40 (>40)";
+      }
+
+      console.log(
+        `     [Customer #${index}] Key: "${key}" | DOB: ${dobString} | Age: ${age} -> Category: [${category}]`,
+      );
+      index++;
     });
 
+    // 5. Calculate Percentages
+    const totalUnique = uniqueCustomers.size;
+    const calcPercentage = (count: number) =>
+      totalUnique > 0 ? Number(((count / totalUnique) * 100).toFixed(2)) : 0;
+
+    const data = {
+      under18: {
+        count: rawCounts.under18,
+        percentage: calcPercentage(rawCounts.under18),
+      },
+      moreThan18: {
+        count: rawCounts.moreThan18,
+        percentage: calcPercentage(rawCounts.moreThan18),
+      },
+      moreThan40: {
+        count: rawCounts.moreThan40,
+        percentage: calcPercentage(rawCounts.moreThan40),
+      },
+      unknown: {
+        count: rawCounts.unknown,
+        percentage: calcPercentage(rawCounts.unknown),
+      },
+    };
+
     console.log("--------------------------------------------------");
+    console.log("📊 [DEMO RESULT] Age Demographic Breakdown with Percentages:");
     console.log(
-      `📊 [DEMO RESULT] Total Unique Customers: ${uniqueKeys.size} (from ${visits.length} raw visits)`,
+      `     - Under 18:      ${data.under18.count} (${data.under18.percentage}%)`,
+    );
+    console.log(
+      `     - More than 18:  ${data.moreThan18.count} (${data.moreThan18.percentage}%)`,
+    );
+    console.log(
+      `     - More than 40:  ${data.moreThan40.count} (${data.moreThan40.percentage}%)`,
+    );
+    console.log(
+      `     - Unknown DOB:   ${data.unknown.count} (${data.unknown.percentage}%)`,
     );
     console.log("==================================================\n");
 
     return res.json({
       success: true,
-      count: uniqueKeys.size,
+      totalUniqueCustomers: totalUnique,
+      data,
     });
   } catch (error: any) {
-    console.error("❌ [ERROR] getUniqueCustomerCount failed:", error);
+    console.error("❌ [ERROR] getCustomerAgeDemographics failed:", error);
     return res.status(500).json({ error: "Internal server error" });
   }
 };

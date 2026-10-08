@@ -26,7 +26,7 @@ import {
   adminLoginWithoutDevice,
   markDepositHasBeenUsed,
   trackToSeeDepositHasbeenused,
-  getUniqueCustomerCount,
+  getCustomerAgeDemographics,
 } from "../controllers/auth.controller";
 import { getAllMiniPhoto } from "../controllers/management.controller";
 
@@ -59,7 +59,7 @@ router.get("/script/data", scriptInsertData);
 router.get("/script/zip_code", getServiceDemographics);
 // router.get("/script/post", getLatestInstagramPost);
 // Paystub
-router.get("/paystub/sign-in-customer", getUniqueCustomerCount);
+router.get("/paystub/sign-in-customer", getCustomerAgeDemographics);
 router.get("/paystub/reception", calculateTotalCapturedHourFromWorkShift);
 router.get("/paystub/send/reception", sendWeeklyReceptionPaystub);
 router.get("/paystub/send/zoe", sendZoePaystub);
