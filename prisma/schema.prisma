@@ -51,6 +51,7 @@ model User {
   WorkShift                WorkShift[]
   workingHours             WorkingHours[]
   Notification             Notification[]
+  giftCardRedemptions      GiftCardRedemption[]
 }
 
 model ContentBonus {
@@ -440,9 +441,12 @@ model GiftCardRedemption {
   id            String   @id @default(uuid())
   giftCardId    String
   amount        Float
+  balanceAfter  Float
   appointmentId String?
+  redeemedById  String?
   createdAt     DateTime @default(now())
   giftCard      GiftCard @relation(fields: [giftCardId], references: [id])
+  redeemedBy    User?    @relation(fields: [redeemedById], references: [id])
 }
 
 enum GiftCardStatus {

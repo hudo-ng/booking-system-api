@@ -145,8 +145,6 @@ export const purchaseGiftCard = async (req: Request, res: Response) => {
     return res.status(400).json({ success: false, message: "Missing required fields" });
   }
 
-  // Square payment tokens are single-use; keying on the token makes a retried request
-  // return the original payment instead of charging twice.
   const idempotencyKey = crypto
     .createHash("sha256")
     .update(`giftcard:${sourceId}`)
@@ -241,11 +239,28 @@ export const purchaseGiftCard = async (req: Request, res: Response) => {
 export const getGiftCardByCode = async (req: Request, res: Response) => {
   try {
     const code = req.params.code.toUpperCase();
-    const giftCard = await prisma.giftCard.findUnique({ where: { code } });
+    const giftCard = await prisma.giftCard.findUnique({
+      where: { code },
+      include: { redemptions: { orderBy: { createdAt: "desc" } } },
+    });
     if (!giftCard) {
       return res.status(404).json({ success: false, message: "Gift card not found" });
     }
-    return res.json({ success: true, giftCard });
+
+    const { redemptions, ...giftCardFields } = giftCard;
+    return res.json({
+      success: true,
+      giftCard: {
+        ...giftCardFields,
+        redemptions: redemptions.map((r) => ({
+          id: r.id,
+          amount: r.amount,
+          balanceAfter: r.balanceAfter,
+          appointmentId: r.appointmentId,
+          createdAt: r.createdAt,
+        })),
+      },
+    });
   } catch (error) {
     console.error("Gift card lookup error:", error);
     return res.status(500).json({
@@ -280,6 +295,7 @@ export const redeemGiftCard = async (req: Request, res: Response) => {
     }
 
     const newBalance = giftCard.balance - Number(amount);
+    const redeemedById = (req as any).user?.userId ?? null;
 
     const [updated] = await prisma.$transaction([
       prisma.giftCard.update({
@@ -293,7 +309,9 @@ export const redeemGiftCard = async (req: Request, res: Response) => {
         data: {
           giftCardId: giftCard.id,
           amount: Number(amount),
+          balanceAfter: newBalance,
           appointmentId,
+          redeemedById,
         },
       }),
     ]);
