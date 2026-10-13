@@ -4961,10 +4961,15 @@ export const analyseTargetOfPiercingArtist = async (
 
     // Parse the selected date or default to current time
     const targetDate = selected_date ? dayjs(selected_date) : dayjs();
+    const currentDayOfMonth = targetDate.date();
 
     // Define date boundaries for the current month from SignInCustomer
     const startOfMonth = targetDate.startOf("month").toDate();
     const endOfMonth = targetDate.endOf("month").toDate();
+
+    // Define start and end of today
+    const startOfToday = targetDate.startOf("day").toDate();
+    const endOfToday = targetDate.endOf("day").toDate();
 
     // ==========================================
     // 1️⃣ CALCULATE CURRENT MONTH TOTALS FROM SIGNIN CUSTOMER
@@ -5005,7 +5010,6 @@ export const analyseTargetOfPiercingArtist = async (
       .startOf("month")
       .toDate();
 
-    // Fetch paystub records using startDate for the last 12 months
     const paystubs = await prisma.paystub.findMany({
       where: {
         name: {
@@ -5018,9 +5022,10 @@ export const analyseTargetOfPiercingArtist = async (
       },
     });
 
-    // Group paystubs by year and paystub_month to find peak monthly numbers
     const monthlyMap: {
       [key: string]: {
+        year: number;
+        month: number;
         piercing: number;
         jewelry: number;
         saline: number;
@@ -5037,6 +5042,8 @@ export const analyseTargetOfPiercingArtist = async (
 
       if (!monthlyMap[monthKey]) {
         monthlyMap[monthKey] = {
+          year: stubYear,
+          month: stubMonth,
           piercing: 0,
           jewelry: 0,
           saline: 0,
@@ -5050,58 +5057,195 @@ export const analyseTargetOfPiercingArtist = async (
       monthlyMap[monthKey].service += Number(stub.piercing_service || 0);
     }
 
-    // Find the max (highest peak) for each category across the recorded months
-    let peakPiercing = 0;
-    let peakJewelry = 0;
-    let peakSaline = 0;
-    let peakService = 0;
+    let peakMonthly = {
+      piercing: { total: 0, daysInMonth: 30 },
+      jewelry: { total: 0, daysInMonth: 30 },
+      saline: { total: 0, daysInMonth: 30 },
+      service: { total: 0, daysInMonth: 30 },
+      overall: { total: 0, daysInMonth: 30 },
+    };
 
     Object.values(monthlyMap).forEach((m) => {
-      if (m.piercing > peakPiercing) peakPiercing = m.piercing;
-      if (m.jewelry > peakJewelry) peakJewelry = m.jewelry;
-      if (m.saline > peakSaline) peakSaline = m.saline;
-      if (m.service > peakService) peakService = m.service;
+      const daysInThatMonth = dayjs(
+        `${m.year}-${m.month}-01`,
+        "YYYY-M-DD",
+      ).daysInMonth();
+      const totalMonthSum = m.piercing + m.jewelry + m.saline + m.service;
+
+      if (m.piercing > peakMonthly.piercing.total) {
+        peakMonthly.piercing = {
+          total: m.piercing,
+          daysInMonth: daysInThatMonth,
+        };
+      }
+      if (m.jewelry > peakMonthly.jewelry.total) {
+        peakMonthly.jewelry = {
+          total: m.jewelry,
+          daysInMonth: daysInThatMonth,
+        };
+      }
+      if (m.saline > peakMonthly.saline.total) {
+        peakMonthly.saline = { total: m.saline, daysInMonth: daysInThatMonth };
+      }
+      if (m.service > peakMonthly.service.total) {
+        peakMonthly.service = {
+          total: m.service,
+          daysInMonth: daysInThatMonth,
+        };
+      }
+      if (totalMonthSum > peakMonthly.overall.total) {
+        peakMonthly.overall = {
+          total: totalMonthSum,
+          daysInMonth: daysInThatMonth,
+        };
+      }
     });
 
-    const peakTotal = peakPiercing + peakJewelry + peakSaline + peakService;
+    // ==========================================
+    // 3️⃣ FETCH GOOGLE REVIEWS (INDEPENDENT COUNTS)
+    // ==========================================
+    const baseReviewFilter = {
+      comment: {
+        contains: artist_name,
+        mode: "insensitive" as const,
+      },
+    };
+
+    // Total reviews this month (entire month range)
+    const reviewsThisMonthCount = await prisma.review.count({
+      where: {
+        ...baseReviewFilter,
+        createTime: {
+          gte: startOfMonth,
+          lte: endOfMonth,
+        },
+      },
+    });
+
+    // Reviews received strictly today
+    const reviewsTodayCount = await prisma.review.count({
+      where: {
+        ...baseReviewFilter,
+        createTime: {
+          gte: startOfToday,
+          lte: endOfToday,
+        },
+      },
+    });
+
+    // Ensure today's count can never exceed the total month count
+    const finalReviewsToday = Math.min(
+      reviewsTodayCount,
+      reviewsThisMonthCount,
+    );
+
+    // Fetch the 2 latest reviews mentioning the artist this month
+    const latestReviewsThisMonth = await prisma.review.findMany({
+      where: {
+        ...baseReviewFilter,
+        createTime: {
+          gte: startOfMonth,
+          lte: endOfMonth,
+        },
+      },
+      orderBy: {
+        createTime: "desc",
+      },
+      take: 2,
+      select: {
+        id: true,
+        reviewerName: true,
+        starRating: true,
+        comment: true,
+        createTime: true,
+      },
+    });
 
     // ==========================================
-    // 3️⃣ CALCULATE PERCENTAGE OF TARGETS
+    // 4️⃣ CALCULATE PERCENTAGES & DAILY AVERAGES
     // ==========================================
     const calcPercentage = (current: number, peak: number) => {
       if (peak <= 0) return 0;
       return Number(((current / peak) * 100).toFixed(2));
     };
 
+    const getDailyPeak = (peakTotal: number, days: number) => {
+      if (days <= 0) return 0;
+      return Number((peakTotal / days).toFixed(2));
+    };
+
+    const currentDaysElapsed = currentDayOfMonth;
+    const getCurrentDailyAvg = (currentVal: number) => {
+      if (currentDaysElapsed <= 0) return 0;
+      return Number((currentVal / currentDaysElapsed).toFixed(2));
+    };
+
     const analysisResult = {
       artist: artist_name,
       period: targetDate.format("MMMM YYYY"),
+      targetDate: targetDate.format("YYYY-MM-DD"),
+      daysElapsed: currentDaysElapsed,
+      reviews: {
+        thisMonth: reviewsThisMonthCount,
+        today: finalReviewsToday,
+        latestThisMonth: latestReviewsThisMonth,
+      },
       categories: {
         piercing: {
-          current: currentPiercing,
-          highestPeak12M: peakPiercing,
-          percentageOfPeak: calcPercentage(currentPiercing, peakPiercing),
+          percentageOfMonthlyPeak: calcPercentage(
+            currentPiercing,
+            peakMonthly.piercing.total,
+          ),
+          dailyPeakBenchmark: getDailyPeak(
+            peakMonthly.piercing.total,
+            peakMonthly.piercing.daysInMonth,
+          ),
+          currentDailyAverage: getCurrentDailyAvg(currentPiercing),
         },
         jewelry: {
-          current: currentJewelry,
-          highestPeak12M: peakJewelry,
-          percentageOfPeak: calcPercentage(currentJewelry, peakJewelry),
+          percentageOfMonthlyPeak: calcPercentage(
+            currentJewelry,
+            peakMonthly.jewelry.total,
+          ),
+          dailyPeakBenchmark: getDailyPeak(
+            peakMonthly.jewelry.total,
+            peakMonthly.jewelry.daysInMonth,
+          ),
+          currentDailyAverage: getCurrentDailyAvg(currentJewelry),
         },
         saline: {
-          current: currentSaline,
-          highestPeak12M: peakSaline,
-          percentageOfPeak: calcPercentage(currentSaline, peakSaline),
+          percentageOfMonthlyPeak: calcPercentage(
+            currentSaline,
+            peakMonthly.saline.total,
+          ),
+          dailyPeakBenchmark: getDailyPeak(
+            peakMonthly.saline.total,
+            peakMonthly.saline.daysInMonth,
+          ),
+          currentDailyAverage: getCurrentDailyAvg(currentSaline),
         },
         service: {
-          current: currentService,
-          highestPeak12M: peakService,
-          percentageOfPeak: calcPercentage(currentService, peakService),
+          percentageOfMonthlyPeak: calcPercentage(
+            currentService,
+            peakMonthly.service.total,
+          ),
+          dailyPeakBenchmark: getDailyPeak(
+            peakMonthly.service.total,
+            peakMonthly.service.daysInMonth,
+          ),
+          currentDailyAverage: getCurrentDailyAvg(currentService),
         },
       },
       overall: {
-        currentTotal: currentTotalRevenue,
-        peakTotal12M: peakTotal,
-        percentageOfPeak: calcPercentage(currentTotalRevenue, peakTotal),
+        percentageOfMonthlyPeak: calcPercentage(
+          currentTotalRevenue,
+          peakMonthly.overall.total,
+        ),
+        dailyPeakBenchmark: getDailyPeak(
+          peakMonthly.overall.total,
+          peakMonthly.overall.daysInMonth,
+        ),
+        currentDailyAverage: getCurrentDailyAvg(currentTotalRevenue),
       },
     };
 
