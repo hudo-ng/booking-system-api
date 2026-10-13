@@ -1656,8 +1656,16 @@ export const updateSignInCustomerByDocumentId = async (
   res: Response,
 ) => {
   try {
-    const { spending_artist, spending_services, spending_amount, document_id } =
-      req.body;
+    const {
+      spending_artist,
+      spending_services,
+      spending_amount,
+      piercing_jewlery,
+      piercing_piercing,
+      piercing_saline,
+      piercing_service,
+      document_id,
+    } = req.body;
 
     if (!document_id) {
       return res.status(400).json({
@@ -1681,6 +1689,10 @@ export const updateSignInCustomerByDocumentId = async (
         spending_artist,
         spending_services,
         spending_amount,
+        piercing_jewlery,
+        piercing_piercing,
+        piercing_saline,
+        piercing_service,
       },
     });
 
@@ -2430,8 +2442,8 @@ export const sendZoePaystub = async (req: Request, res: Response) => {
     const commPercent = commRate * 100;
 
     // 1. Date Range Setup (Entire Previous Month)
-    const startOfPreviousMonth = dayjs().subtract(10, "month").startOf("month");
-    const endOfPreviousMonth = dayjs().subtract(10, "month").endOf("month");
+    const startOfPreviousMonth = dayjs().subtract(11, "month").startOf("month");
+    const endOfPreviousMonth = dayjs().subtract(11, "month").endOf("month");
 
     const fromDate = startOfPreviousMonth.toDate();
     const toDate = endOfPreviousMonth.toDate();
@@ -2854,8 +2866,8 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
     const commPercent = commRate * 100;
 
     // 1. Date Range Setup (Entire Previous Month)
-    const startOfPreviousMonth = dayjs().subtract(10, "month").startOf("month");
-    const endOfPreviousMonth = dayjs().subtract(10, "month").endOf("month");
+    const startOfPreviousMonth = dayjs().subtract(11, "month").startOf("month");
+    const endOfPreviousMonth = dayjs().subtract(11, "month").endOf("month");
 
     const fromDate = startOfPreviousMonth.toDate();
     const toDate = endOfPreviousMonth.toDate();
