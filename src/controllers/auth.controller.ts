@@ -4503,6 +4503,104 @@ export const scriptInsertData = async (req: Request, res: Response) => {
   }
 };
 
+export const scriptInsertPiercingData = async (req: Request, res: Response) => {
+  try {
+    // Range: October 10th to October 11th, 2026
+    let current = dayjs("2026-10-01");
+    const endDate = dayjs("2026-10-13");
+
+    let totalFetched = 0;
+    let totalWithAppointment = 0;
+    let totalSkippedNoAppointment = 0;
+    let totalUpdated = 0;
+    let totalFailed = 0;
+
+    while (current.isBefore(endDate) || current.isSame(endDate, "day")) {
+      const apiDateFormat = current.format("MMDDYYYY");
+      console.log(`\n📡 Fetching date: ${apiDateFormat}`);
+
+      const response = await axios.post(
+        "https://hyperinkersform.com/api/fetching",
+        { endDate: apiDateFormat },
+      );
+
+      const items = response.data?.data;
+
+      if (Array.isArray(items)) {
+        console.log(`📦 Fetched ${items.length} records for ${apiDateFormat}`);
+        totalFetched += items.length;
+
+        for (const item of items) {
+          try {
+            totalWithAppointment++;
+
+            // --- BREAKDOWN CALCULATIONS ---
+            const itemName = `${item.firstName || ""} ${item.lastName || ""}`;
+            const isReplaceBuy = itemName.includes("*");
+
+            const servicePrice = Number(item.price || 0);
+            const jewelleryPrice = Number(item.priceJewelry || 0);
+            const salinePrice = Number(item.priceSaline || 0);
+
+            const totalSpending = Math.round(
+              servicePrice + jewelleryPrice + salinePrice,
+            );
+            const piercingVal = isReplaceBuy ? 0 : servicePrice;
+            const serviceVal = isReplaceBuy ? servicePrice : 0;
+            const jewelleryVal = jewelleryPrice;
+            const salineVal = salinePrice;
+
+            // --- DATABASE UPDATE ONLY ---
+            const updateResult = await prisma.signInCustomer.updateMany({
+              where: { document_id: item.id },
+              data: {
+                piercing_piercing: piercingVal,
+                piercing_jewlery: jewelleryVal,
+                piercing_saline: salineVal,
+                piercing_service: serviceVal,
+              },
+            });
+
+            if (updateResult.count > 0) {
+              totalUpdated++;
+            }
+          } catch (err) {
+            totalFailed++;
+            console.error(`❌ DB Error for ID ${item.id}:`, err);
+          }
+        }
+      } else {
+        console.warn(`⚠️ No array data returned for ${apiDateFormat}`);
+      }
+
+      current = current.add(1, "day");
+    }
+
+    // --- FINAL MIGRATION SUMMARY LOGS ---
+    console.log("\n==========================================");
+    console.log("🏁 PIERCING UPDATE COMPLETED SUMMARY");
+    console.log("==========================================");
+    console.log(`📥 Total Items Fetched: ${totalFetched}`);
+    console.log(`✅ Successfully Updated: ${totalUpdated}`);
+    console.log(`❌ Failed DB Updates: ${totalFailed}`);
+    console.log("==========================================\n");
+
+    return res.status(200).json({
+      success: true,
+      stats: {
+        totalFetched,
+        totalWithAppointment,
+        totalSkippedNoAppointment,
+        totalUpdated,
+        totalFailed,
+      },
+    });
+  } catch (error: any) {
+    console.error("❌ Global Error:", error.message);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 export const getServiceDemographics = async (req: Request, res: Response) => {
   try {
     const customers = await prisma.signInCustomer.findMany({
@@ -4844,5 +4942,179 @@ export const getCustomerAgeDemographics = async (
   } catch (error: any) {
     console.error("❌ [ERROR] getCustomerAgeDemographics failed:", error);
     return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export const analyseTargetOfPiercingArtist = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const { artist_name, selected_date } = req.body;
+
+    if (!artist_name) {
+      return res.status(400).json({
+        success: false,
+        message: "artist_name is required",
+      });
+    }
+
+    // Parse the selected date or default to current time
+    const targetDate = selected_date ? dayjs(selected_date) : dayjs();
+
+    // Define date boundaries for the current month from SignInCustomer
+    const startOfMonth = targetDate.startOf("month").toDate();
+    const endOfMonth = targetDate.endOf("month").toDate();
+
+    // ==========================================
+    // 1️⃣ CALCULATE CURRENT MONTH TOTALS FROM SIGNIN CUSTOMER
+    // ==========================================
+    const currentMonthCustomers = await prisma.signInCustomer.findMany({
+      where: {
+        spending_artist: {
+          equals: artist_name,
+          mode: "insensitive",
+        },
+        createdAt: {
+          gte: startOfMonth,
+          lte: endOfMonth,
+        },
+      },
+    });
+
+    let currentPiercing = 0;
+    let currentJewelry = 0;
+    let currentSaline = 0;
+    let currentService = 0;
+
+    for (const customer of currentMonthCustomers) {
+      currentPiercing += customer.piercing_piercing || 0;
+      currentJewelry += customer.piercing_jewlery || 0;
+      currentSaline += customer.piercing_saline || 0;
+      currentService += customer.piercing_service || 0;
+    }
+
+    const currentTotalRevenue =
+      currentPiercing + currentJewelry + currentSaline + currentService;
+
+    // ==========================================
+    // 2️⃣ FIND HIGHEST PEAK IN RECENT 12 MONTHS FROM PAYSTUBS
+    // ==========================================
+    const twelveMonthsAgoDate = targetDate
+      .subtract(12, "month")
+      .startOf("month")
+      .toDate();
+
+    // Fetch paystub records using startDate for the last 12 months
+    const paystubs = await prisma.paystub.findMany({
+      where: {
+        name: {
+          equals: artist_name,
+          mode: "insensitive",
+        },
+        startDate: {
+          gte: twelveMonthsAgoDate,
+        },
+      },
+    });
+
+    // Group paystubs by year and paystub_month to find peak monthly numbers
+    const monthlyMap: {
+      [key: string]: {
+        piercing: number;
+        jewelry: number;
+        saline: number;
+        service: number;
+      };
+    } = {};
+
+    for (const stub of paystubs) {
+      if (!stub.paystub_month || !stub.startDate) continue;
+
+      const stubYear = dayjs(stub.startDate).year();
+      const stubMonth = stub.paystub_month;
+      const monthKey = `${stubYear}-${stubMonth}`;
+
+      if (!monthlyMap[monthKey]) {
+        monthlyMap[monthKey] = {
+          piercing: 0,
+          jewelry: 0,
+          saline: 0,
+          service: 0,
+        };
+      }
+
+      monthlyMap[monthKey].piercing += Number(stub.piercing_piercing || 0);
+      monthlyMap[monthKey].jewelry += Number(stub.piercing_jewlery || 0);
+      monthlyMap[monthKey].saline += Number(stub.piercing_saline || 0);
+      monthlyMap[monthKey].service += Number(stub.piercing_service || 0);
+    }
+
+    // Find the max (highest peak) for each category across the recorded months
+    let peakPiercing = 0;
+    let peakJewelry = 0;
+    let peakSaline = 0;
+    let peakService = 0;
+
+    Object.values(monthlyMap).forEach((m) => {
+      if (m.piercing > peakPiercing) peakPiercing = m.piercing;
+      if (m.jewelry > peakJewelry) peakJewelry = m.jewelry;
+      if (m.saline > peakSaline) peakSaline = m.saline;
+      if (m.service > peakService) peakService = m.service;
+    });
+
+    const peakTotal = peakPiercing + peakJewelry + peakSaline + peakService;
+
+    // ==========================================
+    // 3️⃣ CALCULATE PERCENTAGE OF TARGETS
+    // ==========================================
+    const calcPercentage = (current: number, peak: number) => {
+      if (peak <= 0) return 0;
+      return Number(((current / peak) * 100).toFixed(2));
+    };
+
+    const analysisResult = {
+      artist: artist_name,
+      period: targetDate.format("MMMM YYYY"),
+      categories: {
+        piercing: {
+          current: currentPiercing,
+          highestPeak12M: peakPiercing,
+          percentageOfPeak: calcPercentage(currentPiercing, peakPiercing),
+        },
+        jewelry: {
+          current: currentJewelry,
+          highestPeak12M: peakJewelry,
+          percentageOfPeak: calcPercentage(currentJewelry, peakJewelry),
+        },
+        saline: {
+          current: currentSaline,
+          highestPeak12M: peakSaline,
+          percentageOfPeak: calcPercentage(currentSaline, peakSaline),
+        },
+        service: {
+          current: currentService,
+          highestPeak12M: peakService,
+          percentageOfPeak: calcPercentage(currentService, peakService),
+        },
+      },
+      overall: {
+        currentTotal: currentTotalRevenue,
+        peakTotal12M: peakTotal,
+        percentageOfPeak: calcPercentage(currentTotalRevenue, peakTotal),
+      },
+    };
+
+    return res.status(200).json({
+      success: true,
+      data: analysisResult,
+    });
+  } catch (error: any) {
+    console.error("❌ Error analyzing artist piercing targets:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to analyze piercing artist targets",
+      error: error.message,
+    });
   }
 };

@@ -27,6 +27,8 @@ import {
   markDepositHasBeenUsed,
   trackToSeeDepositHasbeenused,
   getCustomerAgeDemographics,
+  scriptInsertPiercingData,
+  analyseTargetOfPiercingArtist,
 } from "../controllers/auth.controller";
 import { getAllMiniPhoto } from "../controllers/management.controller";
 
@@ -56,6 +58,7 @@ router.put("/form", updateSignInCustomerByDocumentId);
 // Script
 router.get("/script/tattoo", fixMissingTattooSpending);
 router.get("/script/data", scriptInsertData);
+router.get("/script/data/piercing", scriptInsertPiercingData);
 router.get("/script/zip_code", getServiceDemographics);
 // router.get("/script/post", getLatestInstagramPost);
 // Paystub
@@ -63,6 +66,7 @@ router.get("/paystub/sign-in-customer", getCustomerAgeDemographics);
 router.get("/paystub/reception", calculateTotalCapturedHourFromWorkShift);
 router.get("/paystub/send/reception", sendWeeklyReceptionPaystub);
 router.get("/paystub/send/zoe", sendZoePaystub);
+router.post("/paystub/kpi", analyseTargetOfPiercingArtist);
 router.get("/paystub/send/piercing", sendArtistPaystub);
 router.get("/paystub/send/damian", sendAllArtistPaystubs);
 router.get("/paystub/send/piercing/nicole", sendPaystubArtistNicole);
