@@ -17,6 +17,7 @@ import cardPaymentsRouter from "./routes/cardPayments.routes";
 import googleRoutes from "./routes/google.routes";
 import laserRoutes from "./routes/laser.routes";
 import giftCardsRouter from "./routes/giftCards.routes";
+import jewelryRouter from "./routes/jewelry.routes";
 
 const app = express();
 
@@ -65,6 +66,7 @@ app.use("/card-payments", cardPaymentsRouter);
 app.use("/google", googleRoutes);
 app.use("/laser", laserRoutes);
 app.use("/gift-cards", giftCardsRouter);
+app.use("/jewelry", jewelryRouter);
 app.get("/", (req: Request, res: Response) => {
   res.send("Hello from express");
 });
