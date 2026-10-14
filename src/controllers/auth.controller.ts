@@ -2715,12 +2715,12 @@ export const sendZoePaystub = async (req: Request, res: Response) => {
 };
 export const generateZoePaystubData = async (req: Request, res: Response) => {
   try {
-    const { start_date, end_date } = req.body;
+    const { start_date, end_date, userId } = req.body;
 
     // 1. Zoe's Specific Configuration
     const artistName = "Zoe";
-    const hourlyRate = 12.5;
-    const commRate = 0.1; // 10%
+    const hourlyRate = 13.5;
+    const commRate = 0.2; // 20% on Jewelry only
 
     const fromDate = dayjs(start_date).toDate();
     const toDate = dayjs(end_date).toDate();
@@ -2728,10 +2728,11 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
     const dailyLogs: any[] = [];
     let cursor = new Date(fromDate);
 
-    // 2. Main Processing Loop (Matches your original logic)
+    // 2. Main Processing Loop
     while (cursor <= toDate) {
       const formatted = dayjs(cursor).format("MMDDYYYY");
       let dayServiceTotal = 0,
+        dayPiercingTotal = 0,
         dayJewelry = 0,
         daySaline = 0,
         dayTips = 0,
@@ -2757,7 +2758,6 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
         );
 
         if (artistItems.length > 0) {
-          // --- Logic Check: Payment IDs for Clock Out ---
           const trackingIds = artistItems
             .map((i: any) => i.tracking_payment_id)
             .filter(Boolean);
@@ -2771,19 +2771,21 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
               dayjs(a.createdAt).valueOf() - dayjs(b.createdAt).valueOf(),
           );
 
-          // --- Logic Check: Service vs Jewelry vs Saline ---
           artistItems.forEach((i: any) => {
             const fullName = `${i?.firstName} ${i?.lastName}`;
-            // Only add to service if name contains "*"
-            if (fullName.includes("*"))
-              dayServiceTotal += Number(i?.price) || 0;
+            const price = Number(i?.price) || 0;
+
+            if (fullName.includes("*")) {
+              dayServiceTotal += price;
+            } else {
+              dayPiercingTotal += price;
+            }
 
             dayJewelry += Number(i?.priceJewelry) || 0;
             daySaline += Number(i?.priceSaline) || 0;
             dayTips += Number(i?.tip) || 0;
           });
 
-          // --- Logic Check: Clock In / Out ---
           const clockInStr =
             promoData["Zoe"]?.fullTimestamp || promoData["Zoe"];
           const lastPayment = sortedPayments[sortedPayments.length - 1];
@@ -2803,9 +2805,8 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
         console.error(`Fetch failed for ${formatted}:`, err);
       }
 
-      // Daily Sub-calculations for the UI
       const dLabor = dayHours * hourlyRate;
-      const dComm = (dayJewelry + daySaline + dayServiceTotal) * commRate;
+      const dComm = dayJewelry * commRate;
 
       dailyLogs.push({
         date: dayjs(cursor).format("MMM DD, YYYY"),
@@ -2813,6 +2814,7 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
         labor: dLabor,
         jewelry: dayJewelry,
         saline: daySaline,
+        piercingPrice: dayPiercingTotal,
         servicePrice: dayServiceTotal,
         tips: dayTips,
         commission: dComm,
@@ -2827,14 +2829,103 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
     const laborPay = totalHours * hourlyRate;
     const totalJ = dailyLogs.reduce((acc, d) => acc + d.jewelry, 0);
     const totalS = dailyLogs.reduce((acc, d) => acc + d.saline, 0);
+    const totalPiercing = dailyLogs.reduce(
+      (acc, d) => acc + d.piercingPrice,
+      0,
+    );
     const totalService = dailyLogs.reduce((acc, d) => acc + d.servicePrice, 0);
     const totalTips = dailyLogs.reduce((acc, d) => acc + d.tips, 0);
 
-    const totalCommission = (totalJ + totalS + totalService) * commRate;
-    const netPay = laborPay + totalCommission + totalTips;
+    const totalCommission = totalJ * commRate;
+
+    // 4. Fetch 5-Star Reviews using the explicit review table filter
+    const baseReviewFilter = {
+      comment: {
+        contains: artistName,
+        mode: "insensitive" as const,
+      },
+    };
+
+    const totalFiveStarReviews = await prisma.review.count({
+      where: {
+        ...baseReviewFilter,
+        createTime: {
+          gte: fromDate,
+          lte: toDate,
+        },
+      },
+    });
+
+    // 5. KPI Historical Peak Analysis & % KPI Calculations
+    const twelveMonthsAgo = dayjs(fromDate).subtract(12, "month").toDate();
+    const pastPaystubs = await prisma.paystub.findMany({
+      where: {
+        name: { equals: artistName, mode: "insensitive" },
+        createdAt: { gte: twelveMonthsAgo },
+        startDate: { lt: fromDate },
+      },
+    });
+
+    // --- Piercing + Service Peak Analysis ---
+    const currentPiercingServiceTotal = totalPiercing + totalService;
+    const maxPastPiercingService = pastPaystubs.reduce((max, stub) => {
+      const stubPiercing = stub.piercing_piercing || 0;
+      const stubService = stub.piercing_service || 0;
+      return Math.max(max, stubPiercing + stubService);
+    }, 0);
+
+    let piercingServiceBonus = 0;
+    let piercingServiceKpiPercentage = 100;
+    let piercingServiceRemaining = 0;
+
+    if (maxPastPiercingService > 0) {
+      piercingServiceKpiPercentage =
+        (currentPiercingServiceTotal / maxPastPiercingService) * 100;
+      if (currentPiercingServiceTotal > maxPastPiercingService) {
+        piercingServiceBonus = 200.0;
+        piercingServiceRemaining = 0;
+      } else {
+        piercingServiceRemaining =
+          maxPastPiercingService - currentPiercingServiceTotal;
+      }
+    } else {
+      piercingServiceBonus = currentPiercingServiceTotal > 0 ? 200.0 : 0;
+    }
+
+    // --- Jewelry Peak Analysis ---
+    const maxPastJewelry = pastPaystubs.reduce((max, stub) => {
+      return Math.max(max, stub.piercing_jewlery || 0);
+    }, 0);
+
+    let jewelryBonus = 0;
+    let jewelryKpiPercentage = 100;
+    let jewelryRemaining = 0;
+
+    if (maxPastJewelry > 0) {
+      jewelryKpiPercentage = (totalJ / maxPastJewelry) * 100;
+      if (totalJ > maxPastJewelry) {
+        jewelryBonus = 200.0;
+        jewelryRemaining = 0;
+      } else {
+        jewelryRemaining = maxPastJewelry - totalJ;
+      }
+    } else {
+      jewelryBonus = totalJ > 0 ? 200.0 : 0;
+    }
+
+    // Review Bonus ($3 per 5-star review)
+    const reviewBonus = totalFiveStarReviews * 3.0;
+
+    const netPay =
+      laborPay +
+      totalCommission +
+      totalTips +
+      piercingServiceBonus +
+      jewelryBonus +
+      reviewBonus;
     const totalWorkDays = dailyLogs.filter((d) => d.subtotal > 0).length;
 
-    // 4. Return structured JSON for Expo
+    // 6. Return structured JSON for Expo
     return res.json({
       success: true,
       artist: { name: artistName, hourlyRate, commRate },
@@ -2846,6 +2937,27 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
         laborPay,
         totalCommission,
         totalTips,
+        kpiMetrics: {
+          piercingService: {
+            current: currentPiercingServiceTotal,
+            peak: maxPastPiercingService,
+            kpiPercentage: piercingServiceKpiPercentage.toFixed(1) + "%",
+            amountNeededToReach:
+              piercingServiceRemaining > 0
+                ? piercingServiceRemaining.toFixed(2)
+                : "0.00",
+            bonusEarned: piercingServiceBonus,
+          },
+          jewelry: {
+            current: totalJ,
+            peak: maxPastJewelry,
+            kpiPercentage: jewelryKpiPercentage.toFixed(1) + "%",
+            amountNeededToReach:
+              jewelryRemaining > 0 ? jewelryRemaining.toFixed(2) : "0.00",
+            bonusEarned: jewelryBonus,
+          },
+          reviews: { count: totalFiveStarReviews, amount: reviewBonus },
+        },
         netPay,
         totalWorkDays,
       },
@@ -4506,7 +4618,7 @@ export const scriptInsertData = async (req: Request, res: Response) => {
 export const scriptInsertPiercingData = async (req: Request, res: Response) => {
   try {
     // Range: October 10th to October 11th, 2026
-    let current = dayjs("2026-10-01");
+    let current = dayjs("2026-10-12");
     const endDate = dayjs("2026-10-13");
 
     let totalFetched = 0;
