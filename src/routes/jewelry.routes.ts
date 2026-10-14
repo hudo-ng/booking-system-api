@@ -27,9 +27,9 @@ router.get("/items/:id", getItem);
 router.get("/demo-photos", listDemoPhotos);
 router.get("/demo-photos/:id", getDemoPhoto);
 
-// Admin portal (mobile app).
+// Admin portal (mobile app): owners and employees.
 const admin = Router();
-admin.use(authenticate, enforceDevice, authorize(["admin"]));
+admin.use(authenticate, enforceDevice, authorize(["admin", "employee"]));
 
 admin.post("/categories", createCategory);
 admin.patch("/categories/:id", updateCategory);

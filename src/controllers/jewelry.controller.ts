@@ -27,12 +27,18 @@ function pagination(req: Request) {
   return { page, limit, skip: (page - 1) * limit };
 }
 
-// Photos are uploaded straight to ImageKit by the app (see GET /employee/imagekit/auth),
-// so only accept URLs that point at our own ImageKit endpoint.
+// Photos are uploaded straight to ImageKit by the mobile app,
+// so only accept URLs served by ImageKit (or our configured ImageKit endpoint).
 function isValidPhotoUrl(url: unknown): url is string {
-  if (typeof url !== "string" || !url.startsWith("https://")) return false;
+  if (typeof url !== "string") return false;
   const endpoint = process.env.IMAGEKIT_URL_ENDPOINT;
-  return !endpoint || url.startsWith(endpoint);
+  if (endpoint && url.startsWith(endpoint)) return true;
+  try {
+    const { protocol, hostname } = new URL(url);
+    return protocol === "https:" && hostname === "ik.imagekit.io";
+  } catch {
+    return false;
+  }
 }
 
 function parsePrice(value: unknown): number | null {

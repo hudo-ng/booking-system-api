@@ -10,7 +10,8 @@ const router = Router();
 
 router.get("/imagekit/auth", (_req, res) => {
   const auth = imageKit.getAuthenticationParameters();
-  res.json(auth);
+  // The public key is safe to share; the mobile app needs it for signed uploads.
+  res.json({ ...auth, publicKey: process.env.IMAGEKIT_PUBLIC_URL });
 });
 
 router.post("/:id/request-booking", requestBooking);

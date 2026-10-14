@@ -396,10 +396,6 @@ model SignInCustomer {
   spending_artist   String
   spending_services String?
   spending_amount   Float?
-  piercing_jewlery   Float?
-  piercing_piercing  Float?
-  piercing_saline    Float?
-  piercing_service   Float?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   appointment_id    String?
@@ -745,4 +741,34 @@ enum PaymentStatus {
   PAID
   REFUNDED
   VOIDED
+}
+
+model JewelryCategory {
+  id         String      @id @default(uuid())
+  name       String      @unique
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  demoPhotos DemoPhoto[]
+}
+
+model JewelryItem {
+  id          String      @id @default(uuid())
+  name        String
+  description String?
+  price       Float
+  photoUrl    String
+  photoFileId String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  demoPhotos  DemoPhoto[]
+}
+
+model DemoPhoto {
+  id          String            @id @default(uuid())
+  photoUrl    String
+  photoFileId String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  categories  JewelryCategory[]
+  items       JewelryItem[]
 }
