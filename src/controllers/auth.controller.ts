@@ -1656,8 +1656,16 @@ export const updateSignInCustomerByDocumentId = async (
   res: Response,
 ) => {
   try {
-    const { spending_artist, spending_services, spending_amount, document_id } =
-      req.body;
+    const {
+      spending_artist,
+      spending_services,
+      spending_amount,
+      piercing_jewlery,
+      piercing_piercing,
+      piercing_saline,
+      piercing_service,
+      document_id,
+    } = req.body;
 
     if (!document_id) {
       return res.status(400).json({
@@ -1681,6 +1689,10 @@ export const updateSignInCustomerByDocumentId = async (
         spending_artist,
         spending_services,
         spending_amount,
+        piercing_jewlery,
+        piercing_piercing,
+        piercing_saline,
+        piercing_service,
       },
     });
 
@@ -2430,8 +2442,8 @@ export const sendZoePaystub = async (req: Request, res: Response) => {
     const commPercent = commRate * 100;
 
     // 1. Date Range Setup (Entire Previous Month)
-    const startOfPreviousMonth = dayjs().subtract(10, "month").startOf("month");
-    const endOfPreviousMonth = dayjs().subtract(10, "month").endOf("month");
+    const startOfPreviousMonth = dayjs().subtract(11, "month").startOf("month");
+    const endOfPreviousMonth = dayjs().subtract(11, "month").endOf("month");
 
     const fromDate = startOfPreviousMonth.toDate();
     const toDate = endOfPreviousMonth.toDate();
@@ -2703,12 +2715,12 @@ export const sendZoePaystub = async (req: Request, res: Response) => {
 };
 export const generateZoePaystubData = async (req: Request, res: Response) => {
   try {
-    const { start_date, end_date } = req.body;
+    const { start_date, end_date, userId } = req.body;
 
     // 1. Zoe's Specific Configuration
     const artistName = "Zoe";
-    const hourlyRate = 12.5;
-    const commRate = 0.1; // 10%
+    const hourlyRate = 13.5;
+    const commRate = 0.2; // 20% on Jewelry only
 
     const fromDate = dayjs(start_date).toDate();
     const toDate = dayjs(end_date).toDate();
@@ -2716,10 +2728,11 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
     const dailyLogs: any[] = [];
     let cursor = new Date(fromDate);
 
-    // 2. Main Processing Loop (Matches your original logic)
+    // 2. Main Processing Loop
     while (cursor <= toDate) {
       const formatted = dayjs(cursor).format("MMDDYYYY");
       let dayServiceTotal = 0,
+        dayPiercingTotal = 0,
         dayJewelry = 0,
         daySaline = 0,
         dayTips = 0,
@@ -2745,7 +2758,6 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
         );
 
         if (artistItems.length > 0) {
-          // --- Logic Check: Payment IDs for Clock Out ---
           const trackingIds = artistItems
             .map((i: any) => i.tracking_payment_id)
             .filter(Boolean);
@@ -2759,19 +2771,21 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
               dayjs(a.createdAt).valueOf() - dayjs(b.createdAt).valueOf(),
           );
 
-          // --- Logic Check: Service vs Jewelry vs Saline ---
           artistItems.forEach((i: any) => {
             const fullName = `${i?.firstName} ${i?.lastName}`;
-            // Only add to service if name contains "*"
-            if (fullName.includes("*"))
-              dayServiceTotal += Number(i?.price) || 0;
+            const price = Number(i?.price) || 0;
+
+            if (fullName.includes("*")) {
+              dayServiceTotal += price;
+            } else {
+              dayPiercingTotal += price;
+            }
 
             dayJewelry += Number(i?.priceJewelry) || 0;
             daySaline += Number(i?.priceSaline) || 0;
             dayTips += Number(i?.tip) || 0;
           });
 
-          // --- Logic Check: Clock In / Out ---
           const clockInStr =
             promoData["Zoe"]?.fullTimestamp || promoData["Zoe"];
           const lastPayment = sortedPayments[sortedPayments.length - 1];
@@ -2791,9 +2805,8 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
         console.error(`Fetch failed for ${formatted}:`, err);
       }
 
-      // Daily Sub-calculations for the UI
       const dLabor = dayHours * hourlyRate;
-      const dComm = (dayJewelry + daySaline + dayServiceTotal) * commRate;
+      const dComm = dayJewelry * commRate;
 
       dailyLogs.push({
         date: dayjs(cursor).format("MMM DD, YYYY"),
@@ -2801,6 +2814,7 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
         labor: dLabor,
         jewelry: dayJewelry,
         saline: daySaline,
+        piercingPrice: dayPiercingTotal,
         servicePrice: dayServiceTotal,
         tips: dayTips,
         commission: dComm,
@@ -2815,14 +2829,103 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
     const laborPay = totalHours * hourlyRate;
     const totalJ = dailyLogs.reduce((acc, d) => acc + d.jewelry, 0);
     const totalS = dailyLogs.reduce((acc, d) => acc + d.saline, 0);
+    const totalPiercing = dailyLogs.reduce(
+      (acc, d) => acc + d.piercingPrice,
+      0,
+    );
     const totalService = dailyLogs.reduce((acc, d) => acc + d.servicePrice, 0);
     const totalTips = dailyLogs.reduce((acc, d) => acc + d.tips, 0);
 
-    const totalCommission = (totalJ + totalS + totalService) * commRate;
-    const netPay = laborPay + totalCommission + totalTips;
+    const totalCommission = totalJ * commRate;
+
+    // 4. Fetch 5-Star Reviews using the explicit review table filter
+    const baseReviewFilter = {
+      comment: {
+        contains: artistName,
+        mode: "insensitive" as const,
+      },
+    };
+
+    const totalFiveStarReviews = await prisma.review.count({
+      where: {
+        ...baseReviewFilter,
+        createTime: {
+          gte: fromDate,
+          lte: toDate,
+        },
+      },
+    });
+
+    // 5. KPI Historical Peak Analysis & % KPI Calculations
+    const twelveMonthsAgo = dayjs(fromDate).subtract(12, "month").toDate();
+    const pastPaystubs = await prisma.paystub.findMany({
+      where: {
+        name: { equals: artistName, mode: "insensitive" },
+        createdAt: { gte: twelveMonthsAgo },
+        startDate: { lt: fromDate },
+      },
+    });
+
+    // --- Piercing + Service Peak Analysis ---
+    const currentPiercingServiceTotal = totalPiercing + totalService;
+    const maxPastPiercingService = pastPaystubs.reduce((max, stub) => {
+      const stubPiercing = stub.piercing_piercing || 0;
+      const stubService = stub.piercing_service || 0;
+      return Math.max(max, stubPiercing + stubService);
+    }, 0);
+
+    let piercingServiceBonus = 0;
+    let piercingServiceKpiPercentage = 100;
+    let piercingServiceRemaining = 0;
+
+    if (maxPastPiercingService > 0) {
+      piercingServiceKpiPercentage =
+        (currentPiercingServiceTotal / maxPastPiercingService) * 100;
+      if (currentPiercingServiceTotal > maxPastPiercingService) {
+        piercingServiceBonus = 200.0;
+        piercingServiceRemaining = 0;
+      } else {
+        piercingServiceRemaining =
+          maxPastPiercingService - currentPiercingServiceTotal;
+      }
+    } else {
+      piercingServiceBonus = currentPiercingServiceTotal > 0 ? 200.0 : 0;
+    }
+
+    // --- Jewelry Peak Analysis ---
+    const maxPastJewelry = pastPaystubs.reduce((max, stub) => {
+      return Math.max(max, stub.piercing_jewlery || 0);
+    }, 0);
+
+    let jewelryBonus = 0;
+    let jewelryKpiPercentage = 100;
+    let jewelryRemaining = 0;
+
+    if (maxPastJewelry > 0) {
+      jewelryKpiPercentage = (totalJ / maxPastJewelry) * 100;
+      if (totalJ > maxPastJewelry) {
+        jewelryBonus = 200.0;
+        jewelryRemaining = 0;
+      } else {
+        jewelryRemaining = maxPastJewelry - totalJ;
+      }
+    } else {
+      jewelryBonus = totalJ > 0 ? 200.0 : 0;
+    }
+
+    // Review Bonus ($3 per 5-star review)
+    const reviewBonus = totalFiveStarReviews * 3.0;
+
+    const netPay =
+      laborPay +
+      totalCommission +
+      totalTips +
+      piercingServiceBonus +
+      jewelryBonus +
+      reviewBonus;
     const totalWorkDays = dailyLogs.filter((d) => d.subtotal > 0).length;
 
-    // 4. Return structured JSON for Expo
+    // 6. Return structured JSON for Expo
     return res.json({
       success: true,
       artist: { name: artistName, hourlyRate, commRate },
@@ -2834,6 +2937,27 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
         laborPay,
         totalCommission,
         totalTips,
+        kpiMetrics: {
+          piercingService: {
+            current: currentPiercingServiceTotal,
+            peak: maxPastPiercingService,
+            kpiPercentage: piercingServiceKpiPercentage.toFixed(1) + "%",
+            amountNeededToReach:
+              piercingServiceRemaining > 0
+                ? piercingServiceRemaining.toFixed(2)
+                : "0.00",
+            bonusEarned: piercingServiceBonus,
+          },
+          jewelry: {
+            current: totalJ,
+            peak: maxPastJewelry,
+            kpiPercentage: jewelryKpiPercentage.toFixed(1) + "%",
+            amountNeededToReach:
+              jewelryRemaining > 0 ? jewelryRemaining.toFixed(2) : "0.00",
+            bonusEarned: jewelryBonus,
+          },
+          reviews: { count: totalFiveStarReviews, amount: reviewBonus },
+        },
         netPay,
         totalWorkDays,
       },
@@ -2854,8 +2978,8 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
     const commPercent = commRate * 100;
 
     // 1. Date Range Setup (Entire Previous Month)
-    const startOfPreviousMonth = dayjs().subtract(10, "month").startOf("month");
-    const endOfPreviousMonth = dayjs().subtract(10, "month").endOf("month");
+    const startOfPreviousMonth = dayjs().subtract(11, "month").startOf("month");
+    const endOfPreviousMonth = dayjs().subtract(11, "month").endOf("month");
 
     const fromDate = startOfPreviousMonth.toDate();
     const toDate = endOfPreviousMonth.toDate();
@@ -4491,6 +4615,104 @@ export const scriptInsertData = async (req: Request, res: Response) => {
   }
 };
 
+export const scriptInsertPiercingData = async (req: Request, res: Response) => {
+  try {
+    // Range: October 10th to October 11th, 2026
+    let current = dayjs("2026-10-12");
+    const endDate = dayjs("2026-10-13");
+
+    let totalFetched = 0;
+    let totalWithAppointment = 0;
+    let totalSkippedNoAppointment = 0;
+    let totalUpdated = 0;
+    let totalFailed = 0;
+
+    while (current.isBefore(endDate) || current.isSame(endDate, "day")) {
+      const apiDateFormat = current.format("MMDDYYYY");
+      console.log(`\n📡 Fetching date: ${apiDateFormat}`);
+
+      const response = await axios.post(
+        "https://hyperinkersform.com/api/fetching",
+        { endDate: apiDateFormat },
+      );
+
+      const items = response.data?.data;
+
+      if (Array.isArray(items)) {
+        console.log(`📦 Fetched ${items.length} records for ${apiDateFormat}`);
+        totalFetched += items.length;
+
+        for (const item of items) {
+          try {
+            totalWithAppointment++;
+
+            // --- BREAKDOWN CALCULATIONS ---
+            const itemName = `${item.firstName || ""} ${item.lastName || ""}`;
+            const isReplaceBuy = itemName.includes("*");
+
+            const servicePrice = Number(item.price || 0);
+            const jewelleryPrice = Number(item.priceJewelry || 0);
+            const salinePrice = Number(item.priceSaline || 0);
+
+            const totalSpending = Math.round(
+              servicePrice + jewelleryPrice + salinePrice,
+            );
+            const piercingVal = isReplaceBuy ? 0 : servicePrice;
+            const serviceVal = isReplaceBuy ? servicePrice : 0;
+            const jewelleryVal = jewelleryPrice;
+            const salineVal = salinePrice;
+
+            // --- DATABASE UPDATE ONLY ---
+            const updateResult = await prisma.signInCustomer.updateMany({
+              where: { document_id: item.id },
+              data: {
+                piercing_piercing: piercingVal,
+                piercing_jewlery: jewelleryVal,
+                piercing_saline: salineVal,
+                piercing_service: serviceVal,
+              },
+            });
+
+            if (updateResult.count > 0) {
+              totalUpdated++;
+            }
+          } catch (err) {
+            totalFailed++;
+            console.error(`❌ DB Error for ID ${item.id}:`, err);
+          }
+        }
+      } else {
+        console.warn(`⚠️ No array data returned for ${apiDateFormat}`);
+      }
+
+      current = current.add(1, "day");
+    }
+
+    // --- FINAL MIGRATION SUMMARY LOGS ---
+    console.log("\n==========================================");
+    console.log("🏁 PIERCING UPDATE COMPLETED SUMMARY");
+    console.log("==========================================");
+    console.log(`📥 Total Items Fetched: ${totalFetched}`);
+    console.log(`✅ Successfully Updated: ${totalUpdated}`);
+    console.log(`❌ Failed DB Updates: ${totalFailed}`);
+    console.log("==========================================\n");
+
+    return res.status(200).json({
+      success: true,
+      stats: {
+        totalFetched,
+        totalWithAppointment,
+        totalSkippedNoAppointment,
+        totalUpdated,
+        totalFailed,
+      },
+    });
+  } catch (error: any) {
+    console.error("❌ Global Error:", error.message);
+    return res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 export const getServiceDemographics = async (req: Request, res: Response) => {
   try {
     const customers = await prisma.signInCustomer.findMany({
@@ -4832,5 +5054,323 @@ export const getCustomerAgeDemographics = async (
   } catch (error: any) {
     console.error("❌ [ERROR] getCustomerAgeDemographics failed:", error);
     return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export const analyseTargetOfPiercingArtist = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const { artist_name, selected_date } = req.body;
+
+    if (!artist_name) {
+      return res.status(400).json({
+        success: false,
+        message: "artist_name is required",
+      });
+    }
+
+    // Parse the selected date or default to current time
+    const targetDate = selected_date ? dayjs(selected_date) : dayjs();
+    const currentDayOfMonth = targetDate.date();
+
+    // Define date boundaries for the current month from SignInCustomer
+    const startOfMonth = targetDate.startOf("month").toDate();
+    const endOfMonth = targetDate.endOf("month").toDate();
+
+    // Define start and end of today
+    const startOfToday = targetDate.startOf("day").toDate();
+    const endOfToday = targetDate.endOf("day").toDate();
+
+    // ==========================================
+    // 1️⃣ CALCULATE CURRENT MONTH TOTALS FROM SIGNIN CUSTOMER
+    // ==========================================
+    const currentMonthCustomers = await prisma.signInCustomer.findMany({
+      where: {
+        spending_artist: {
+          equals: artist_name,
+          mode: "insensitive",
+        },
+        createdAt: {
+          gte: startOfMonth,
+          lte: endOfMonth,
+        },
+      },
+    });
+
+    let currentPiercing = 0;
+    let currentJewelry = 0;
+    let currentSaline = 0;
+    let currentService = 0;
+
+    for (const customer of currentMonthCustomers) {
+      currentPiercing += customer.piercing_piercing || 0;
+      currentJewelry += customer.piercing_jewlery || 0;
+      currentSaline += customer.piercing_saline || 0;
+      currentService += customer.piercing_service || 0;
+    }
+
+    const currentTotalRevenue =
+      currentPiercing + currentJewelry + currentSaline + currentService;
+
+    // ==========================================
+    // 2️⃣ FIND HIGHEST PEAK IN RECENT 12 MONTHS FROM PAYSTUBS
+    // ==========================================
+    const twelveMonthsAgoDate = targetDate
+      .subtract(12, "month")
+      .startOf("month")
+      .toDate();
+
+    const paystubs = await prisma.paystub.findMany({
+      where: {
+        name: {
+          equals: artist_name,
+          mode: "insensitive",
+        },
+        startDate: {
+          gte: twelveMonthsAgoDate,
+        },
+      },
+    });
+
+    const monthlyMap: {
+      [key: string]: {
+        year: number;
+        month: number;
+        piercing: number;
+        jewelry: number;
+        saline: number;
+        service: number;
+      };
+    } = {};
+
+    for (const stub of paystubs) {
+      if (!stub.paystub_month || !stub.startDate) continue;
+
+      const stubYear = dayjs(stub.startDate).year();
+      const stubMonth = stub.paystub_month;
+      const monthKey = `${stubYear}-${stubMonth}`;
+
+      if (!monthlyMap[monthKey]) {
+        monthlyMap[monthKey] = {
+          year: stubYear,
+          month: stubMonth,
+          piercing: 0,
+          jewelry: 0,
+          saline: 0,
+          service: 0,
+        };
+      }
+
+      monthlyMap[monthKey].piercing += Number(stub.piercing_piercing || 0);
+      monthlyMap[monthKey].jewelry += Number(stub.piercing_jewlery || 0);
+      monthlyMap[monthKey].saline += Number(stub.piercing_saline || 0);
+      monthlyMap[monthKey].service += Number(stub.piercing_service || 0);
+    }
+
+    let peakMonthly = {
+      piercing: { total: 0, daysInMonth: 30 },
+      jewelry: { total: 0, daysInMonth: 30 },
+      saline: { total: 0, daysInMonth: 30 },
+      service: { total: 0, daysInMonth: 30 },
+      overall: { total: 0, daysInMonth: 30 },
+    };
+
+    Object.values(monthlyMap).forEach((m) => {
+      const daysInThatMonth = dayjs(
+        `${m.year}-${m.month}-01`,
+        "YYYY-M-DD",
+      ).daysInMonth();
+      const totalMonthSum = m.piercing + m.jewelry + m.saline + m.service;
+
+      if (m.piercing > peakMonthly.piercing.total) {
+        peakMonthly.piercing = {
+          total: m.piercing,
+          daysInMonth: daysInThatMonth,
+        };
+      }
+      if (m.jewelry > peakMonthly.jewelry.total) {
+        peakMonthly.jewelry = {
+          total: m.jewelry,
+          daysInMonth: daysInThatMonth,
+        };
+      }
+      if (m.saline > peakMonthly.saline.total) {
+        peakMonthly.saline = { total: m.saline, daysInMonth: daysInThatMonth };
+      }
+      if (m.service > peakMonthly.service.total) {
+        peakMonthly.service = {
+          total: m.service,
+          daysInMonth: daysInThatMonth,
+        };
+      }
+      if (totalMonthSum > peakMonthly.overall.total) {
+        peakMonthly.overall = {
+          total: totalMonthSum,
+          daysInMonth: daysInThatMonth,
+        };
+      }
+    });
+
+    // ==========================================
+    // 3️⃣ FETCH GOOGLE REVIEWS (INDEPENDENT COUNTS)
+    // ==========================================
+    const baseReviewFilter = {
+      comment: {
+        contains: artist_name,
+        mode: "insensitive" as const,
+      },
+    };
+
+    // Total reviews this month (entire month range)
+    const reviewsThisMonthCount = await prisma.review.count({
+      where: {
+        ...baseReviewFilter,
+        createTime: {
+          gte: startOfMonth,
+          lte: endOfMonth,
+        },
+      },
+    });
+
+    // Reviews received strictly today
+    const reviewsTodayCount = await prisma.review.count({
+      where: {
+        ...baseReviewFilter,
+        createTime: {
+          gte: startOfToday,
+          lte: endOfToday,
+        },
+      },
+    });
+
+    // Ensure today's count can never exceed the total month count
+    const finalReviewsToday = Math.min(
+      reviewsTodayCount,
+      reviewsThisMonthCount,
+    );
+
+    // Fetch the 2 latest reviews mentioning the artist this month
+    const latestReviewsThisMonth = await prisma.review.findMany({
+      where: {
+        ...baseReviewFilter,
+        createTime: {
+          gte: startOfMonth,
+          lte: endOfMonth,
+        },
+      },
+      orderBy: {
+        createTime: "desc",
+      },
+      take: 2,
+      select: {
+        id: true,
+        reviewerName: true,
+        starRating: true,
+        comment: true,
+        createTime: true,
+      },
+    });
+
+    // ==========================================
+    // 4️⃣ CALCULATE PERCENTAGES & DAILY AVERAGES
+    // ==========================================
+    const calcPercentage = (current: number, peak: number) => {
+      if (peak <= 0) return 0;
+      return Number(((current / peak) * 100).toFixed(2));
+    };
+
+    const getDailyPeak = (peakTotal: number, days: number) => {
+      if (days <= 0) return 0;
+      return Number((peakTotal / days).toFixed(2));
+    };
+
+    const currentDaysElapsed = currentDayOfMonth;
+    const getCurrentDailyAvg = (currentVal: number) => {
+      if (currentDaysElapsed <= 0) return 0;
+      return Number((currentVal / currentDaysElapsed).toFixed(2));
+    };
+
+    const analysisResult = {
+      artist: artist_name,
+      period: targetDate.format("MMMM YYYY"),
+      targetDate: targetDate.format("YYYY-MM-DD"),
+      daysElapsed: currentDaysElapsed,
+      reviews: {
+        thisMonth: reviewsThisMonthCount,
+        today: finalReviewsToday,
+        latestThisMonth: latestReviewsThisMonth,
+      },
+      categories: {
+        piercing: {
+          percentageOfMonthlyPeak: calcPercentage(
+            currentPiercing,
+            peakMonthly.piercing.total,
+          ),
+          dailyPeakBenchmark: getDailyPeak(
+            peakMonthly.piercing.total,
+            peakMonthly.piercing.daysInMonth,
+          ),
+          currentDailyAverage: getCurrentDailyAvg(currentPiercing),
+        },
+        jewelry: {
+          percentageOfMonthlyPeak: calcPercentage(
+            currentJewelry,
+            peakMonthly.jewelry.total,
+          ),
+          dailyPeakBenchmark: getDailyPeak(
+            peakMonthly.jewelry.total,
+            peakMonthly.jewelry.daysInMonth,
+          ),
+          currentDailyAverage: getCurrentDailyAvg(currentJewelry),
+        },
+        saline: {
+          percentageOfMonthlyPeak: calcPercentage(
+            currentSaline,
+            peakMonthly.saline.total,
+          ),
+          dailyPeakBenchmark: getDailyPeak(
+            peakMonthly.saline.total,
+            peakMonthly.saline.daysInMonth,
+          ),
+          currentDailyAverage: getCurrentDailyAvg(currentSaline),
+        },
+        service: {
+          percentageOfMonthlyPeak: calcPercentage(
+            currentService,
+            peakMonthly.service.total,
+          ),
+          dailyPeakBenchmark: getDailyPeak(
+            peakMonthly.service.total,
+            peakMonthly.service.daysInMonth,
+          ),
+          currentDailyAverage: getCurrentDailyAvg(currentService),
+        },
+      },
+      overall: {
+        percentageOfMonthlyPeak: calcPercentage(
+          currentTotalRevenue,
+          peakMonthly.overall.total,
+        ),
+        dailyPeakBenchmark: getDailyPeak(
+          peakMonthly.overall.total,
+          peakMonthly.overall.daysInMonth,
+        ),
+        currentDailyAverage: getCurrentDailyAvg(currentTotalRevenue),
+      },
+    };
+
+    return res.status(200).json({
+      success: true,
+      data: analysisResult,
+    });
+  } catch (error: any) {
+    console.error("❌ Error analyzing artist piercing targets:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to analyze piercing artist targets",
+      error: error.message,
+    });
   }
 };
