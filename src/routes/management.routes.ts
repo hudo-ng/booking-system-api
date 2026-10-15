@@ -14,6 +14,7 @@ import {
   getCleanSchedules,
   getDailyReportBySelectedDate,
   getDailyReportFormBySelectedMonthYear,
+  getKpiForPiercingArtist,
   getListOfBookedAppointmentsByFormId,
   getPaidPayments,
   getSignInCustomers,
@@ -53,6 +54,7 @@ router.get(
   getDailyReportFormBySelectedMonthYear,
 );
 router.get("/daily-report/daily-summary", getDailyReportBySelectedDate);
+router.post("/kpi-piercing-artist", getKpiForPiercingArtist);
 router.post("/tattoo-artist", requestTattooArtistPaymentByUserId);
 
 router.post("/zoe-artist", generateZoePaystubData);

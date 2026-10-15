@@ -2047,7 +2047,7 @@ export const getDailyReportBySelectedDate = async (
     if (!currentUser?.isOwner) {
       return res.status(403).json({ error: "You do not have permission" });
     }
-
+    const name = currentUser.name;
     const { date } = req.query as { date?: string };
 
     if (!date) {
@@ -2148,5 +2148,193 @@ export const getDailyReportBySelectedDate = async (
     return res.status(500).json({
       message: "Internal server error reading daily metrics summary.",
     });
+  }
+};
+
+export const getKpiForPiercingArtist = async (req: Request, res: Response) => {
+  try {
+    const { userId } = (req as any).user as { userId?: string };
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!currentUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const { start_date, end_date } = req.body;
+    const targetDate = start_date ? dayjs(start_date) : dayjs();
+
+    // Determine target artists based on permissions
+    let targetArtists: string[] = [];
+    if (currentUser.isOwner) {
+      targetArtists = ["Nicole", "Yen", "Zoe"];
+    } else {
+      if (!currentUser.name) {
+        return res.status(400).json({ error: "User name not configured" });
+      }
+      targetArtists = [currentUser.name];
+    }
+
+    const startOfMonth = targetDate.startOf("month").toDate();
+    const endOfMonth = targetDate.endOf("month").toDate();
+    const twelveMonthsAgoDate = targetDate
+      .subtract(12, "month")
+      .startOf("month")
+      .toDate();
+
+    const results: any[] = [];
+
+    for (const artistName of targetArtists) {
+      // 1. Calculate current month totals from SignInCustomer
+      const currentMonthCustomers = await prisma.signInCustomer.findMany({
+        where: {
+          spending_artist: {
+            equals: artistName,
+            mode: "insensitive",
+          },
+          createdAt: {
+            gte: startOfMonth,
+            lte: endOfMonth,
+          },
+        },
+      });
+
+      let currentPiercing = 0;
+      let currentJewelry = 0;
+      let currentSaline = 0;
+      let currentService = 0;
+
+      for (const customer of currentMonthCustomers) {
+        currentPiercing += customer.piercing_piercing || 0;
+        currentJewelry += customer.piercing_jewlery || 0;
+        currentSaline += customer.piercing_saline || 0;
+        currentService += customer.piercing_service || 0;
+      }
+
+      // 2. Find highest peaks in recent 12 months from paystubs
+      const paystubs = await prisma.paystub.findMany({
+        where: {
+          name: {
+            equals: artistName,
+            mode: "insensitive",
+          },
+          startDate: {
+            gte: twelveMonthsAgoDate,
+          },
+        },
+      });
+
+      let peakPiercing = 0;
+      let peakJewelry = 0;
+      let peakSaline = 0;
+      let peakService = 0;
+
+      for (const stub of paystubs) {
+        if (Number(stub.piercing_piercing || 0) > peakPiercing) {
+          peakPiercing = Number(stub.piercing_piercing || 0);
+        }
+        if (Number(stub.piercing_jewlery || 0) > peakJewelry) {
+          peakJewelry = Number(stub.piercing_jewlery || 0);
+        }
+        if (Number(stub.piercing_saline || 0) > peakSaline) {
+          peakSaline = Number(stub.piercing_saline || 0);
+        }
+        if (Number(stub.piercing_service || 0) > peakService) {
+          peakService = Number(stub.piercing_service || 0);
+        }
+      }
+
+      // 3. Fetch Google Reviews
+      const reviewsCount = await prisma.review.count({
+        where: {
+          comment: {
+            contains: artistName,
+            mode: "insensitive" as const,
+          },
+          createTime: {
+            gte: startOfMonth,
+            lte: endOfMonth,
+          },
+        },
+      });
+
+      const calcPercentage = (current: number, peak: number) => {
+        if (peak <= 0) return current > 0 ? 100 : 0;
+        return Number(((current / peak) * 100).toFixed(2));
+      };
+
+      const getRemaining = (current: number, peak: number) => {
+        if (peak <= 0 || current >= peak) return "0.00";
+        return (peak - current).toFixed(2);
+      };
+
+      const getBonus = (current: number, peak: number) => {
+        if (peak <= 0) return current > 0 ? 200 : 0;
+        return current > peak ? 200 : 0;
+      };
+
+      results.push({
+        artistName,
+        breakdown: {
+          piercing: currentPiercing,
+          service: currentService,
+          jewelry: currentJewelry,
+          saline: currentSaline,
+        },
+        kpiMetrics: {
+          piercing: {
+            current: currentPiercing,
+            peak: peakPiercing,
+            kpiPercentage: calcPercentage(currentPiercing, peakPiercing) + "%",
+            amountNeededToReach: getRemaining(currentPiercing, peakPiercing),
+            bonusEarned: getBonus(currentPiercing, peakPiercing),
+          },
+          service: {
+            current: currentService,
+            peak: peakService,
+            kpiPercentage: calcPercentage(currentService, peakService) + "%",
+            amountNeededToReach: getRemaining(currentService, peakService),
+            bonusEarned: getBonus(currentService, peakService),
+          },
+          jewelry: {
+            current: currentJewelry,
+            peak: peakJewelry,
+            kpiPercentage: calcPercentage(currentJewelry, peakJewelry) + "%",
+            amountNeededToReach: getRemaining(currentJewelry, peakJewelry),
+            bonusEarned: getBonus(currentJewelry, peakJewelry),
+          },
+          saline: {
+            current: currentSaline,
+            peak: peakSaline,
+            kpiPercentage: calcPercentage(currentSaline, peakSaline) + "%",
+            amountNeededToReach: getRemaining(currentSaline, peakSaline),
+            bonusEarned: getBonus(currentSaline, peakSaline),
+          },
+          reviews: {
+            count: reviewsCount,
+            amount: reviewsCount * 3.0,
+          },
+        },
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      isOwner: currentUser.isOwner,
+      period: {
+        formatted: targetDate.format("MMMM YYYY"),
+        start: targetDate.startOf("month").format("YYYY-MM-DD"),
+        end: targetDate.endOf("month").format("YYYY-MM-DD"),
+      },
+      data: results,
+    });
+  } catch (error: any) {
+    console.error("❌ Error in getKpiForPiercingArtist:", error);
+    return res.status(500).json({ error: error.message });
   }
 };

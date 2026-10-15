@@ -2720,7 +2720,9 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
     // 1. Zoe's Specific Configuration
     const artistName = "Zoe";
     const hourlyRate = 13.5;
-    const commRate = 0.2; // 20% on Jewelry only
+    const jewelryCommRate = 0.2; // 20% on Jewelry
+    const serviceCommRate = 0.1; // 10% on Service
+    const salineCommRate = 0.1; // 10% on Saline
 
     const fromDate = dayjs(start_date).toDate();
     const toDate = dayjs(end_date).toDate();
@@ -2806,7 +2808,10 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
       }
 
       const dLabor = dayHours * hourlyRate;
-      const dComm = dayJewelry * commRate;
+      const dComm =
+        dayJewelry * jewelryCommRate +
+        dayServiceTotal * serviceCommRate +
+        daySaline * salineCommRate;
 
       dailyLogs.push({
         date: dayjs(cursor).format("MMM DD, YYYY"),
@@ -2836,9 +2841,12 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
     const totalService = dailyLogs.reduce((acc, d) => acc + d.servicePrice, 0);
     const totalTips = dailyLogs.reduce((acc, d) => acc + d.tips, 0);
 
-    const totalCommission = totalJ * commRate;
+    const jewelryComm = totalJ * jewelryCommRate;
+    const serviceComm = totalService * serviceCommRate;
+    const salineComm = totalS * salineCommRate;
+    const totalCommission = jewelryComm + serviceComm + salineComm;
 
-    // 4. Fetch 5-Star Reviews using the explicit review table filter
+    // 4. Fetch 5-Star Reviews
     const baseReviewFilter = {
       comment: {
         contains: artistName,
@@ -2928,7 +2936,11 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
     // 6. Return structured JSON for Expo
     return res.json({
       success: true,
-      artist: { name: artistName, hourlyRate, commRate },
+      artist: {
+        name: artistName,
+        hourlyRate,
+        commRates: { jewelry: 20, service: 10, saline: 10 },
+      },
       period: {
         formatted: `${dayjs(fromDate).format("MMM DD")} - ${dayjs(toDate).format("MMM DD, YYYY")}`,
       },
@@ -2936,6 +2948,7 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
         totalHours: totalHours.toFixed(2),
         laborPay,
         totalCommission,
+        breakdown: { jewelryComm, serviceComm, salineComm },
         totalTips,
         kpiMetrics: {
           piercingService: {
@@ -2978,8 +2991,8 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
     const commPercent = commRate * 100;
 
     // 1. Date Range Setup (Entire Previous Month)
-    const startOfPreviousMonth = dayjs().subtract(11, "month").startOf("month");
-    const endOfPreviousMonth = dayjs().subtract(11, "month").endOf("month");
+    const startOfPreviousMonth = dayjs().subtract(12, "month").startOf("month");
+    const endOfPreviousMonth = dayjs().subtract(12, "month").endOf("month");
 
     const fromDate = startOfPreviousMonth.toDate();
     const toDate = endOfPreviousMonth.toDate();
@@ -3941,8 +3954,8 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
     const studioFee2Amount = 50.0;
 
     // 1. Calculate Start and End dates for the ENTIRE previous month
-    const startOfPreviousMonth = dayjs().subtract(1, "month").startOf("month");
-    const endOfPreviousMonth = dayjs().subtract(1, "month").endOf("month");
+    const startOfPreviousMonth = dayjs().subtract(10, "month").startOf("month");
+    const endOfPreviousMonth = dayjs().subtract(10, "month").endOf("month");
 
     const fromDate = startOfPreviousMonth.toDate();
     const toDate = endOfPreviousMonth.toDate();
@@ -4197,14 +4210,19 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
     await prisma.paystub.create({
       data: {
         userId: "1faf65bc-ab45-4b02-9548-5d367532ffea",
-        imageUrl: upload.url,
         name: "Nicole",
-        cash: dailyLogs.reduce((acc, d) => acc + d.cash, 0),
-        card: dailyLogs.reduce((acc, d) => acc + d.card, 0),
-        total: dailyLogs.reduce((acc, d) => acc + d.cash + d.card, 0),
+        // imageUrl: upload.url,
+        // cash: dailyLogs.reduce((acc, d) => acc + d.cash, 0),
+        // card: dailyLogs.reduce((acc, d) => acc + d.card, 0),
+        // total: dailyLogs.reduce((acc, d) => acc + d.cash + d.card, 0),
+        // grossAmount: netPay,
+        imageUrl: "",
+        cash: 0,
+        card: 0,
+        total: 0,
+        grossAmount: 0,
         startDate: fromDate,
         endDate: toDate,
-        grossAmount: netPay,
 
         // Save raw totals for store contribution breakdown
         piercing_saline: totalGrossSaline,
