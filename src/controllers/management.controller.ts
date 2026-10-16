@@ -2338,3 +2338,148 @@ export const getKpiForPiercingArtist = async (req: Request, res: Response) => {
     return res.status(500).json({ error: error.message });
   }
 };
+
+export const searchSignInCustomers = async (req: Request, res: Response) => {
+  try {
+    const { userId } = (req as any).user as { userId?: string };
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { isOwner: true },
+    });
+
+    if (!currentUser?.isOwner) {
+      return res.status(403).json({ error: "You do not have permission" });
+    }
+
+    const { query, searchType } = req.body;
+    if (!query || typeof query !== "string") {
+      return res.status(400).json({ error: "Search query is required" });
+    }
+
+    let cleanedQuery = query
+      .toLowerCase()
+      .trim()
+      .replace(/[\+\(\)\-\s]/g, "");
+    if (
+      searchType === "phone" &&
+      cleanedQuery.startsWith("1") &&
+      cleanedQuery.length === 11
+    ) {
+      cleanedQuery = cleanedQuery.slice(1);
+    }
+
+    let whereCondition: any = {};
+
+    if (searchType === "email") {
+      whereCondition = {
+        email: {
+          contains: cleanedQuery,
+          mode: "insensitive",
+        },
+      };
+    } else if (searchType === "phone") {
+      whereCondition = {
+        phone: {
+          contains: cleanedQuery,
+          mode: "insensitive",
+        },
+      };
+    } else {
+      whereCondition = {
+        OR: [
+          { email: { contains: cleanedQuery, mode: "insensitive" } },
+          { phone: { contains: cleanedQuery, mode: "insensitive" } },
+          { name: { contains: cleanedQuery, mode: "insensitive" } },
+        ],
+      };
+    }
+
+    const matchedVisits = await prisma.signInCustomer.findMany({
+      where: whereCondition,
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+
+    const groupedCustomers = new Map<string, any>();
+
+    for (const visit of matchedVisits) {
+      const rawPhone = visit.phone || "";
+      let digitsOnly = rawPhone.replace(/\D/g, "");
+      if (digitsOnly.length === 11 && digitsOnly.startsWith("1")) {
+        digitsOnly = digitsOnly.slice(1);
+      }
+
+      const email = visit.email?.toLowerCase().trim() || "";
+      const key = digitsOnly || email || visit.id;
+
+      if (!key) continue;
+
+      let customer = groupedCustomers.get(key);
+
+      if (!customer) {
+        customer = {
+          id: visit.id,
+          name: visit.name,
+          email: visit.email,
+          phone: visit.phone,
+          dob: visit.dob,
+          service: visit.service,
+          visits: [],
+          visitCount: 0,
+          totalSpent: 0,
+          latestVisit: null,
+          signInCustomer: visit,
+        };
+        groupedCustomers.set(key, customer);
+      }
+
+      customer.visits.push(visit);
+      customer.visitCount++;
+      customer.totalSpent += visit.spending_amount || 0;
+
+      if (
+        !customer.latestVisit ||
+        new Date(visit.createdAt) > new Date(customer.latestVisit.createdAt)
+      ) {
+        customer.latestVisit = visit;
+        customer.signInCustomer = visit;
+      }
+    }
+
+    const customers = Array.from(groupedCustomers.values())
+      .map((customer) => {
+        customer.visits.sort(
+          (a: any, b: any) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        );
+        const type_of_customer = getCustomerType(
+          customer.visitCount,
+          customer.latestVisit?.createdAt,
+        );
+
+        return {
+          ...customer,
+          type_of_customer,
+          signInCustomer:
+            customer.signInCustomer || customer.latestVisit || null,
+        };
+      })
+      .sort(
+        (a, b) =>
+          new Date(b.latestVisit.createdAt).getTime() -
+          new Date(a.latestVisit.createdAt).getTime(),
+      );
+
+    return res.json({
+      success: true,
+      data: customers,
+    });
+  } catch (error: any) {
+    console.error("Search SignInCustomers error:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};

@@ -21,6 +21,7 @@ import {
   releaseSms,
   requestTattooArtistPaymentByUserId,
   returnPaymentRequest,
+  searchSignInCustomers,
   updateMiniPhoto,
   voidPaymentRequest,
 } from "../controllers/management.controller";
@@ -48,6 +49,7 @@ router.post("/mini-photo", createMiniPhoto);
 router.get("/mini-photo", getAllMiniPhoto);
 router.put("/mini-photo", updateMiniPhoto);
 router.get("/sign-in-customers", getSignInCustomers);
+router.post("/sign-in-customers/search", searchSignInCustomers);
 router.get("/booked-appointments", getListOfBookedAppointmentsByFormId);
 router.get(
   "/daily-report/monthly-summary",

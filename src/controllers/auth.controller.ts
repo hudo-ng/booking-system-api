@@ -1928,9 +1928,9 @@ export const sendWeeklyReceptionPaystub = async (
   try {
     console.log("Starting weekly reception paystub generation...");
     const dataArtist = [
-      // { userId: "0ae16fcd-9ca3-4463-94f4-2aecb02f1745", isFree15Hour: false }, // Andrea
-      // { userId: "8502391d-7aa2-475c-b719-03107497b396", isFree15Hour: false }, // Mervic
-      { userId: "dd1c0e82-6dd9-45d6-ade0-cec7218f3d28", isFree15Hour: false }, //Lenci
+      { userId: "0ae16fcd-9ca3-4463-94f4-2aecb02f1745", isFree15Hour: false }, // Andrea
+      { userId: "8502391d-7aa2-475c-b719-03107497b396", isFree15Hour: false }, // Mervic
+      // { userId: "dd1c0e82-6dd9-45d6-ade0-cec7218f3d28", isFree15Hour: false }, //Lenci
     ];
 
     const results = [];
@@ -2003,19 +2003,19 @@ export const sendWeeklyReceptionPaystub = async (
       // 2. Booking Commission Sync Logic
       const apiDataCache = new Map<string, any[]>();
       let fetchCursor = new Date(fromDate.toDate());
-      // while (fetchCursor <= toDate.toDate()) {
-      //   const formatted = dayjs(fetchCursor).format("MMDDYYYY");
-      //   try {
-      //     const response = await axios.post(
-      //       "https://hyperinkersform.com/api/fetching",
-      //       { endDate: formatted },
-      //     );
-      //     apiDataCache.set(formatted, response.data?.data || []);
-      //   } catch (err) {
-      //     apiDataCache.set(formatted, []);
-      //   }
-      //   fetchCursor.setDate(fetchCursor.getDate() + 1);
-      // }
+      while (fetchCursor <= toDate.toDate()) {
+        const formatted = dayjs(fetchCursor).format("MMDDYYYY");
+        try {
+          const response = await axios.post(
+            "https://hyperinkersform.com/api/fetching",
+            { endDate: formatted },
+          );
+          apiDataCache.set(formatted, response.data?.data || []);
+        } catch (err) {
+          apiDataCache.set(formatted, []);
+        }
+        fetchCursor.setDate(fetchCursor.getDate() + 1);
+      }
 
       let totalBookingVolume = 0;
       let qualifiedBookingCount = 0;
