@@ -1540,6 +1540,55 @@ export const validateVerification = async (req: Request, res: Response) => {
   }
 };
 
+export const fetchAllVisitByPhone = async (req: Request, res: Response) => {
+  try {
+    const rawPhone = req.body?.phone || req.query?.phone;
+
+    if (!rawPhone) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number is required",
+      });
+    }
+
+    const normalizedInput = normalizePhone(String(rawPhone));
+
+    // Query visits matching the phone directly or via the customer relation
+    const visits = await prisma.laserVisit.findMany({
+      where: {
+        OR: [
+          { phone: { contains: normalizedInput } },
+          { customer: { phoneNumber: { contains: normalizedInput } } },
+        ],
+      },
+      select: {
+        uuid: true,
+        createdAt: true,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    // Map to return array of uuid and ISO timestamp string (e.g., 2026-10-19T19:57:58-05:00)
+    const result = visits.map((visit) => ({
+      uuid: visit.uuid,
+      date: visit.createdAt.toISOString(),
+    }));
+
+    return res.status(200).json({
+      success: true,
+      visits: result,
+    });
+  } catch (error) {
+    console.error("Error fetching visits by phone:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch visits",
+    });
+  }
+};
+
 export const changePassword = async (req: Request, res: Response) => {
   try {
     const { oldPassword, newPassword } = req.body;

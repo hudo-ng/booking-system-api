@@ -29,6 +29,7 @@ import {
   getCustomerAgeDemographics,
   scriptInsertPiercingData,
   analyseTargetOfPiercingArtist,
+  fetchAllVisitByPhone,
 } from "../controllers/auth.controller";
 import { getAllMiniPhoto } from "../controllers/management.controller";
 
@@ -50,7 +51,7 @@ router.get("/payment/:id", getTrackingPaymentById);
 router.post("/verification/create", createVerification);
 // Validate code
 router.post("/verification/validate", validateVerification);
-
+router.post("/laser/visits", fetchAllVisitByPhone);
 router.post("/change-password", changePassword);
 router.post("/form", createSignInCustomer);
 router.post("/hyperinkers/form", createBookingRequest);
