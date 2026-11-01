@@ -7,6 +7,7 @@ import {
   deleteDeviceToken,
   deleteEmployee,
   editEmployee,
+  generatePaystubForNormalPiercing,
   getAllEmployees,
   getAllMiniPhoto,
   getAllNotification,
@@ -60,6 +61,7 @@ router.post("/kpi-piercing-artist", getKpiForPiercingArtist);
 router.post("/tattoo-artist", requestTattooArtistPaymentByUserId);
 
 router.post("/zoe-artist", generateZoePaystubData);
+router.post("/piercing-artist", generatePaystubForNormalPiercing);
 router.post("/yen-artist", generateYenPaystubData);
 router.post("/nicole-artist", generateNicolePaystubData);
 // GET: Fetch successful transactions (statusCode "0000", Cash, CashApp) to build your management table

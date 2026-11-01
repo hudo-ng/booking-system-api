@@ -25,7 +25,14 @@ model User {
   show_on_calendar_booking Boolean              @default(false)
   slug                     String               @unique
   start_price              Float?
-  wage                     Float?               @default(0)
+  wage                       Float?        @default(0) // Hourly rate
+  commission_piercing        Float?        @default(0.1) // e.g., 0.1 for 10%
+  commission_service         Float?        @default(0.1) // e.g., 0.1 for 10%
+  commission_jewelry         Float?        @default(0.2) // e.g., 0.2 for 20%
+  commission_saline          Float?        @default(0.1) // e.g., 0.1 for 10%
+  review_bonus_rate          Float?        @default(3.0) // Bonus per 5-star review
+  kpi_piercing_service_bonus Float?        @default(200.0) // Bonus when hitting piercing+service peak
+  kpi_jewelry_bonus          Float?        @default(200.0) // Bonus when hitting jewelry peak
   is_reception             Boolean              @default(false)
   currentDeviceId          String?
   deletedAt                DateTime?
@@ -35,6 +42,7 @@ model User {
   position                 PositionRole         @default(general)
   sale_content_bonus       Float?               @default(0)
   new_wage                 Float?               @default(0)
+  
   Appointment              Appointment[]        @relation("AssignedBy")
   Appoinment               Appointment[]
   CleanSchedule            CleanSchedule[]

@@ -1158,7 +1158,7 @@ export const getAllEmployees = async (req: Request, res: Response) => {
 
   let employees;
 
-  // Full selection configuration including all database fields
+  // Full selection configuration including all database fields & new dynamic commission/KPI fields
   const completeUserSelection = {
     id: true,
     email: true,
@@ -1185,12 +1185,20 @@ export const getAllEmployees = async (req: Request, res: Response) => {
     is_reception: true,
     is_piercing: true,
     currentDeviceId: true,
+    // --- New Dynamic Commission & KPI Fields ---
+    commission_piercing: true,
+    commission_service: true,
+    commission_jewelry: true,
+    commission_saline: true,
+    review_bonus_rate: true,
+    kpi_piercing_service_bonus: true,
+    kpi_jewelry_bonus: true,
   };
 
   // Owners and Admins see the full list
   if (currentUser?.isOwner || currentUser?.isAdmin) {
     employees = await prisma.user.findMany({
-      where: { deletedAt: null }, // Adjusted to get all employees safely
+      where: { deletedAt: null },
       select: completeUserSelection,
     });
   } else {
@@ -1254,6 +1262,14 @@ export const editEmployee = async (req: Request, res: Response) => {
       "extra_hour_wage",
       "sale_content_bonus",
       "isAdmin",
+      // --- New Dynamic Commission & Bonus Fields ---
+      "commission_piercing",
+      "commission_service",
+      "commission_jewelry",
+      "commission_saline",
+      "review_bonus_rate",
+      "kpi_piercing_service_bonus",
+      "kpi_jewelry_bonus",
     ];
 
     possibleFields.forEach((field) => {
@@ -2481,5 +2497,301 @@ export const searchSignInCustomers = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error("Search SignInCustomers error:", error);
     return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export const generatePaystubForNormalPiercing = async (
+  req: Request,
+  res: Response,
+) => {
+  try {
+    const { start_date, end_date, userId, artist_name } = req.body;
+
+    if (!userId && !artist_name) {
+      return res
+        .status(400)
+        .json({ error: "Either userId or artist_name is required" });
+    }
+
+    // 1. Fetch Employee configuration dynamically from database
+    const employee = await prisma.user.findFirst({
+      where: userId
+        ? { id: userId }
+        : { name: { equals: artist_name, mode: "insensitive" } },
+    });
+
+    if (!employee) {
+      return res.status(404).json({ error: "Piercing artist not found" });
+    }
+
+    const artistName = employee.name;
+    const hourlyRate = employee.wage ?? 13.5;
+    const piercingCommRate = employee.commission_piercing ?? 0.1;
+    const serviceCommRate = employee.commission_service ?? 0.1;
+    const jewelryCommRate = employee.commission_jewelry ?? 0.2;
+    const salineCommRate = employee.commission_saline ?? 0.1;
+    const reviewBonusRate = employee.review_bonus_rate ?? 3.0;
+    const targetPiercingServiceBonus =
+      employee.kpi_piercing_service_bonus ?? 200.0;
+    const targetJewelryBonus = employee.kpi_jewelry_bonus ?? 200.0;
+
+    const fromDate = dayjs(start_date).toDate();
+    const toDate = dayjs(end_date).toDate();
+
+    const dailyLogs: any[] = [];
+    let cursor = new Date(fromDate);
+
+    // 2. Main Processing Loop
+    while (cursor <= toDate) {
+      const formatted = dayjs(cursor).format("MMDDYYYY");
+      let dayServiceTotal = 0,
+        dayPiercingTotal = 0,
+        dayJewelry = 0,
+        daySaline = 0,
+        dayTips = 0,
+        dayHours = 0;
+
+      try {
+        const [salesRes, promoRes] = await Promise.all([
+          axios.post("https://hyperinkersform.com/api/fetching", {
+            endDate: formatted,
+          }),
+          axios.post("https://hyperinkersform.com/api/fetching/promotion", {
+            endDate: formatted,
+          }),
+        ]);
+
+        const items = salesRes.data?.data || [];
+        const promoData = promoRes.data?.data || {};
+
+        const artistItems = items.filter(
+          (i: any) =>
+            i.artist?.toLowerCase() === artistName.toLowerCase() &&
+            ["paid", "done"].includes(i.status?.toLowerCase()),
+        );
+
+        if (artistItems.length > 0) {
+          const trackingIds = artistItems
+            .map((i: any) => i.tracking_payment_id)
+            .filter(Boolean);
+          const payments = await prisma.trackingPayment.findMany({
+            where: { id: { in: trackingIds } },
+            select: { createdAt: true },
+          });
+
+          const sortedPayments = payments.sort(
+            (a, b) =>
+              dayjs(a.createdAt).valueOf() - dayjs(b.createdAt).valueOf(),
+          );
+
+          artistItems.forEach((i: any) => {
+            const fullName = `${i?.firstName} ${i?.lastName}`;
+            const price = Number(i?.price) || 0;
+
+            if (fullName.includes("*")) {
+              dayServiceTotal += price;
+            } else {
+              dayPiercingTotal += price;
+            }
+
+            dayJewelry += Number(i?.priceJewelry) || 0;
+            daySaline += Number(i?.priceSaline) || 0;
+            dayTips += Number(i?.tip) || 0;
+          });
+
+          const clockInStr =
+            promoData[artistName]?._fullTimestamp ||
+            promoData[artistName]?.fullTimestamp ||
+            promoData[artistName];
+          const lastPayment = sortedPayments[sortedPayments.length - 1];
+          const clockOutTime = lastPayment?.createdAt;
+
+          if (typeof clockInStr === "string" && clockOutTime) {
+            const diffMinutes = dayjs(clockOutTime).diff(
+              dayjs(clockInStr),
+              "minute",
+            );
+            dayHours =
+              diffMinutes > 0 ? Number((diffMinutes / 60).toFixed(2)) : 0.5;
+          }
+        }
+        await delay(300);
+      } catch (err) {
+        console.error(`Fetch failed for ${formatted}:`, err);
+      }
+
+      const dLabor = dayHours * hourlyRate;
+      const dComm =
+        dayJewelry * jewelryCommRate +
+        dayPiercingTotal * piercingCommRate +
+        dayServiceTotal * serviceCommRate +
+        daySaline * salineCommRate;
+
+      dailyLogs.push({
+        date: dayjs(cursor).format("MMM DD, YYYY"),
+        hrs: dayHours,
+        labor: dLabor,
+        jewelry: dayJewelry,
+        saline: daySaline,
+        piercingPrice: dayPiercingTotal,
+        servicePrice: dayServiceTotal,
+        tips: dayTips,
+        commission: dComm,
+        subtotal: dLabor + dComm + dayTips,
+      });
+
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    // 3. Final Aggregations
+    const totalHours = dailyLogs.reduce((acc, d) => acc + d.hrs, 0);
+    const laborPay = totalHours * hourlyRate;
+    const totalJ = dailyLogs.reduce((acc, d) => acc + d.jewelry, 0);
+    const totalS = dailyLogs.reduce((acc, d) => acc + d.saline, 0);
+    const totalPiercing = dailyLogs.reduce(
+      (acc, d) => acc + d.piercingPrice,
+      0,
+    );
+    const totalService = dailyLogs.reduce((acc, d) => acc + d.servicePrice, 0);
+    const totalTips = dailyLogs.reduce((acc, d) => acc + d.tips, 0);
+
+    const piercingComm = totalPiercing * piercingCommRate;
+    const jewelryComm = totalJ * jewelryCommRate;
+    const serviceComm = totalService * serviceCommRate;
+    const salineComm = totalS * salineCommRate;
+    const totalCommission =
+      piercingComm + jewelryComm + serviceComm + salineComm;
+
+    // 4. Fetch 5-Star Reviews
+    const baseReviewFilter = {
+      comment: {
+        contains: artistName,
+        mode: "insensitive" as const,
+      },
+    };
+
+    const totalFiveStarReviews = await prisma.review.count({
+      where: {
+        ...baseReviewFilter,
+        createTime: { gte: fromDate, lte: toDate },
+      },
+    });
+
+    // 5. KPI Peak Analysis & Bonus Calculation
+    const twelveMonthsAgo = dayjs(fromDate).subtract(12, "month").toDate();
+    const pastPaystubs = await prisma.paystub.findMany({
+      where: {
+        name: { equals: artistName, mode: "insensitive" },
+        createdAt: { gte: twelveMonthsAgo },
+        startDate: { lt: fromDate },
+      },
+    });
+
+    const currentPiercingServiceTotal = totalPiercing + totalService;
+    const maxPastPiercingService = pastPaystubs.reduce((max, stub) => {
+      const stubPiercing = stub.piercing_piercing || 0;
+      const stubService = stub.piercing_service || 0;
+      return Math.max(max, stubPiercing + stubService);
+    }, 0);
+
+    let piercingServiceBonus = 0;
+    let piercingServiceKpiPercentage = 100;
+    let piercingServiceRemaining = 0;
+
+    if (maxPastPiercingService > 0) {
+      piercingServiceKpiPercentage =
+        (currentPiercingServiceTotal / maxPastPiercingService) * 100;
+      if (currentPiercingServiceTotal > maxPastPiercingService) {
+        piercingServiceBonus = targetPiercingServiceBonus;
+      } else {
+        piercingServiceRemaining =
+          maxPastPiercingService - currentPiercingServiceTotal;
+      }
+    } else {
+      piercingServiceBonus =
+        currentPiercingServiceTotal > 0 ? targetPiercingServiceBonus : 0;
+    }
+
+    const maxPastJewelry = pastPaystubs.reduce((max, stub) => {
+      return Math.max(max, stub.piercing_jewlery || 0);
+    }, 0);
+
+    let jewelryBonus = 0;
+    let jewelryKpiPercentage = 100;
+    let jewelryRemaining = 0;
+
+    if (maxPastJewelry > 0) {
+      jewelryKpiPercentage = (totalJ / maxPastJewelry) * 100;
+      if (totalJ > maxPastJewelry) {
+        jewelryBonus = targetJewelryBonus;
+      } else {
+        jewelryRemaining = maxPastJewelry - totalJ;
+      }
+    } else {
+      jewelryBonus = totalJ > 0 ? targetJewelryBonus : 0;
+    }
+
+    const reviewBonus = totalFiveStarReviews * reviewBonusRate;
+
+    const netPay =
+      laborPay +
+      totalCommission +
+      totalTips +
+      piercingServiceBonus +
+      jewelryBonus +
+      reviewBonus;
+    const totalWorkDays = dailyLogs.filter((d) => d.subtotal > 0).length;
+
+    return res.json({
+      success: true,
+      artist: {
+        id: employee.id,
+        name: artistName,
+        hourlyRate,
+        commRates: {
+          piercing: piercingCommRate * 100,
+          service: serviceCommRate * 100,
+          jewelry: jewelryCommRate * 100,
+          saline: salineCommRate * 100,
+        },
+      },
+      period: {
+        formatted: `${dayjs(fromDate).format("MMM DD")} - ${dayjs(toDate).format("MMM DD, YYYY")}`,
+      },
+      stats: {
+        totalHours: totalHours.toFixed(2),
+        laborPay,
+        totalCommission,
+        breakdown: { piercingComm, jewelryComm, serviceComm, salineComm },
+        totalTips,
+        kpiMetrics: {
+          piercingService: {
+            current: currentPiercingServiceTotal,
+            peak: maxPastPiercingService,
+            kpiPercentage: piercingServiceKpiPercentage.toFixed(1) + "%",
+            amountNeededToReach:
+              piercingServiceRemaining > 0
+                ? piercingServiceRemaining.toFixed(2)
+                : "0.00",
+            bonusEarned: piercingServiceBonus,
+          },
+          jewelry: {
+            current: totalJ,
+            peak: maxPastJewelry,
+            kpiPercentage: jewelryKpiPercentage.toFixed(1) + "%",
+            amountNeededToReach:
+              jewelryRemaining > 0 ? jewelryRemaining.toFixed(2) : "0.00",
+            bonusEarned: jewelryBonus,
+          },
+          reviews: { count: totalFiveStarReviews, amount: reviewBonus },
+        },
+        netPay,
+        totalWorkDays,
+      },
+      dailyLogs: dailyLogs.filter((d) => d.subtotal > 0),
+    });
+  } catch (error: any) {
+    console.error(error);
+    return res.status(500).json({ error: error.message });
   }
 };
