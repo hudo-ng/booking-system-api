@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { sendPushAsync } from "../services/push";
+import axios from "axios";
 import dayjs from "dayjs";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
@@ -535,6 +536,369 @@ export const bookWithPayment = async (req: Request, res: Response) => {
     console.error("bookWithPayment error:", err);
     return res.status(500).json({
       message: err?.message || "Failed to complete payment + booking",
+    });
+  }
+};
+
+export const bookWithStorePayment = async (req: Request, res: Response) => {
+  const { id: employeeId } = req.params;
+  const { booking } = req.body as {
+    booking?: {
+      date: string;
+      startTime: string;
+      endTime: string;
+      customerName: string;
+      email?: string;
+      phone: string;
+      detail?: string;
+      dob?: string;
+      address?: string;
+      attachments?: IncomingAttachment[];
+      deposit_amount: number;
+      quote_amount: number;
+      slug?: string;
+    };
+  };
+
+  if (
+    !booking ||
+    !booking.customerName?.trim() ||
+    !booking.phone?.trim() ||
+    !booking.startTime ||
+    !booking.endTime
+  ) {
+    return res.status(400).json({ message: "Invalid booking details" });
+  }
+
+  const depositAmount = Number(booking.deposit_amount);
+  const quoteAmount = Number(booking.quote_amount);
+  if (
+    !Number.isFinite(depositAmount) ||
+    depositAmount <= 0 ||
+    !Number.isFinite(quoteAmount) ||
+    quoteAmount <= 0
+  ) {
+    return res.status(400).json({
+      message: "Deposit and quote amounts must be greater than zero",
+    });
+  }
+
+  const employee = await prisma.user.findUnique({ where: { id: employeeId } });
+  if (!employee || employee.role !== "employee") {
+    return res.status(404).json({ message: "Employee not found" });
+  }
+  const assignee = booking.slug
+    ? await prisma.user.findFirst({ where: { slug: booking.slug } })
+    : null;
+
+  const start = dayjs(booking.startTime);
+  const end = dayjs(booking.endTime);
+  if (!start.isValid() || !end.isValid()) {
+    return res.status(400).json({ message: "Invalid start or end time" });
+  }
+  if (start.isBefore(dayjs())) {
+    return res.status(400).json({ message: "Cannot book past times" });
+  }
+  if (!end.isAfter(start)) {
+    return res
+      .status(400)
+      .json({ message: "End time must be after start time" });
+  }
+
+  let dobDate: Date | null = null;
+  if (booking.dob) {
+    const dob = dayjs(booking.dob);
+    if (!dob.isValid() || dob.isAfter(dayjs())) {
+      return res.status(400).json({ message: "Invalid date of birth" });
+    }
+    dobDate = dob.toDate();
+  }
+
+  const Tpn = process.env.DEJAVOO_TPN_SECOND;
+  const Authkey = process.env.DEJAVOO_AUTH_KEY_SECOND;
+  const RegisterId = process.env.DEJAVOO_REGISTER_ID_SECOND;
+  const MerchantNumber = process.env.DEJAVOO_MERCHANT_NUMBER;
+  if (!Tpn || !Authkey || !RegisterId || !MerchantNumber) {
+    return res
+      .status(500)
+      .json({ message: "Missing in-store terminal credentials" });
+  }
+
+  const totalAmount = Number((depositAmount * 1.035).toFixed(2));
+  const dayStart = dayjs().tz(ZONE).startOf("day").toDate();
+  const dayEnd = dayjs().tz(ZONE).endOf("day").toDate();
+
+  try {
+    const lastPaymentToday = await prisma.trackingPayment.findFirst({
+      where: {
+        createdAt: { gte: dayStart, lte: dayEnd },
+        device_number: "terminal_2",
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    const referenceId = lastPaymentToday
+      ? (parseInt(lastPaymentToday.referenceId, 10) + 1)
+          .toString()
+          .padStart(3, "0")
+      : "001";
+
+    const terminalResponse = await axios.post(
+      "https://spinpos.net/v2/Payment/Sale",
+      {
+        Amount: totalAmount,
+        PaymentType: "Credit",
+        ReferenceId: referenceId,
+        Tpn,
+        RegisterId,
+        Authkey,
+        MerchantNumber,
+        PrintReceipt: "No",
+        GetReceipt: "No",
+        CaptureSignature: true,
+        CallbackInfo: { Url: "" },
+        GetExtendedData: true,
+        IsReadyForIS: true,
+        CustomFields: { booking_employee_id: employeeId },
+        SPInProxyTimeout: 240,
+      },
+      { headers: { "Content-Type": "application/json" }, timeout: 240000 },
+    );
+
+    let terminalPayment = terminalResponse.data;
+    if (
+      terminalPayment?.GeneralResponse?.StatusCode === "1999" &&
+      terminalPayment?.GeneralResponse?.DetailedMessage ===
+        "Request format error"
+    ) {
+      const lastApprovedPayment = await prisma.trackingPayment.findFirst({
+        where: {
+          createdAt: { gte: dayStart, lte: dayEnd },
+          statusCode: "0000",
+          device_number: "terminal_2",
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      const transactionIndex =
+        Number(lastApprovedPayment?.transactionNumber || 0) + 1;
+
+      for (let attempt = 0; attempt < 20; attempt++) {
+        try {
+          const statusResponse = await axios.post(
+            "https://spinpos.net/v2/Payment/StatusList",
+            {
+              PaymentType: "Credit",
+              Tpn,
+              Authkey,
+              RegisterId,
+              MerchantNumber,
+              TransactionFromIndex: transactionIndex,
+              TransactionToIndex: transactionIndex,
+            },
+            { timeout: 240000 },
+          );
+          const recoveredPayment = statusResponse.data?.Transactions?.find(
+            (transaction: any) => transaction?.ReferenceId === referenceId,
+          );
+          if (recoveredPayment?.GeneralResponse?.StatusCode === "0000") {
+            terminalPayment = recoveredPayment;
+            break;
+          }
+        } catch (statusError) {
+          console.error("Terminal payment status lookup failed:", statusError);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+
+    const paymentRecord = await prisma.trackingPayment.create({
+      data: {
+        referenceId,
+        paymentType: "Credit",
+        transactionType: terminalPayment?.TransactionType ?? "CardPayment",
+        invoiceNumber: terminalPayment?.InvoiceNumber,
+        batchNumber: terminalPayment?.BatchNumber,
+        transactionNumber: terminalPayment?.TransactionNumber,
+        authCode: terminalPayment?.AuthCode,
+        voided: terminalPayment?.Voided ?? false,
+        pnReferenceId: terminalPayment?.PNReferenceId,
+        totalAmount: terminalPayment?.Amounts?.TotalAmount,
+        amount: terminalPayment?.Amounts?.Amount,
+        tipAmount: terminalPayment?.Amounts?.TipAmount,
+        feeAmount: terminalPayment?.Amounts?.FeeAmount,
+        taxAmount: terminalPayment?.Amounts?.TaxAmount,
+        cardType: terminalPayment?.CardData?.CardType,
+        entryType: terminalPayment?.CardData?.EntryType,
+        last4: terminalPayment?.CardData?.Last4,
+        first4: terminalPayment?.CardData?.First4,
+        BIN: terminalPayment?.CardData?.BIN,
+        name: terminalPayment?.CardData?.Name,
+        emvApplicationName: terminalPayment?.EMVData?.ApplicationName,
+        emvAID: terminalPayment?.EMVData?.AID,
+        emvTVR: terminalPayment?.EMVData?.TVR,
+        emvTSI: terminalPayment?.EMVData?.TSI,
+        emvIAD: terminalPayment?.EMVData?.IAD,
+        emvARC: terminalPayment?.EMVData?.ARC,
+        hostResponseCode:
+          terminalPayment?.GeneralResponse?.HostResponseCode,
+        hostResponseMessage:
+          terminalPayment?.GeneralResponse?.HostResponseMessage,
+        resultCode: terminalPayment?.GeneralResponse?.ResultCode,
+        statusCode: terminalPayment?.GeneralResponse?.StatusCode,
+        message: terminalPayment?.GeneralResponse?.Message,
+        detailedMessage: terminalPayment?.GeneralResponse?.DetailedMessage,
+        artist: employee.name,
+        payment_method: "Card in Store",
+        item_service: "Appointment Booking",
+        service_price: depositAmount,
+        customer_name: booking.customerName,
+        customer_phone: booking.phone,
+        device_number: "terminal_2",
+      },
+    });
+
+    if (terminalPayment?.GeneralResponse?.StatusCode !== "0000") {
+      return res.status(402).json({
+        message:
+          terminalPayment?.GeneralResponse?.Message ||
+          "The in-store card payment was not approved.",
+        paymentId: paymentRecord.id,
+      });
+    }
+
+    try {
+      const created = await prisma.$transaction(async (tx) => {
+        const appointment = await tx.appointment.create({
+          data: {
+            employeeId,
+            customerName: booking.customerName.trim(),
+            email: booking.email ?? "",
+            phone: booking.phone.trim(),
+            detail: booking.detail ?? "",
+            status: "pending",
+            startTime: start.toDate(),
+            endTime: end.toDate(),
+            dob: dobDate,
+            address: booking.address || null,
+            paidWith: "Card in Store",
+            deposit_amount: depositAmount,
+            quote_amount: quoteAmount,
+            deposit_category: "Card in Store",
+            extra_deposit_category: `Card in Store:${paymentRecord.id}`,
+            deposit_status: "accepted",
+            payment_id: paymentRecord.id,
+            source_booking: "manual",
+            ...(assignee ? { assignedById: assignee.id } : {}),
+          },
+        });
+
+        if (booking.attachments?.length) {
+          await tx.appointmentAttachment.createMany({
+            data: booking.attachments.map((attachment) => ({
+              appointmentId: appointment.id,
+              fileId: attachment.fileId,
+              url: attachment.url,
+              filename: attachment.filename,
+              mime: attachment.mime,
+              size: attachment.size,
+              width: attachment.width ?? null,
+              height: attachment.height ?? null,
+            })),
+          });
+        }
+
+        await tx.notification.create({
+          data: {
+            created_by: employee.id,
+            title: "has new booking",
+            description: booking.detail ?? "No description provided",
+            customer_name: booking.customerName.trim(),
+            quote_amount: quoteAmount,
+            deposit_amount: depositAmount,
+            deposit_category: "Card in Store",
+            extra_deposit_category: `Card in Store:${paymentRecord.id}`,
+            appointment_start_time: start.toDate(),
+            appointment_end_time: end.toDate(),
+            appointment_id: appointment.id,
+          },
+        });
+
+        return appointment;
+      });
+
+      (async () => {
+        try {
+          const users = await prisma.user.findMany({
+            where: {
+              OR: [{ isOwner: true }, { isAdmin: true }, { is_reception: true }],
+            },
+            select: { id: true },
+          });
+          const userIds = Array.from(
+            new Set([employeeId, ...users.map((user) => user.id)]),
+          );
+          const tokens = (
+            await prisma.deviceToken.findMany({
+              where: { userId: { in: userIds }, enabled: true },
+              select: { token: true },
+            })
+          ).map((device) => device.token);
+
+          if (tokens.length) {
+            await sendPushAsync(tokens, {
+              title: "New booking (Card in Store paid)",
+              body: `${booking.customerName} booked ${start
+                .tz(ZONE)
+                .format("MMM D, HH:mm")}–${end.tz(ZONE).format("HH:mm")}`,
+              data: { bookingId: created.id, type: "BOOKING" },
+            });
+          }
+        } catch (pushError) {
+          console.error("Push send error:", pushError);
+        }
+      })();
+
+      return res.status(201).json({
+        appointment: created,
+        payment: {
+          id: paymentRecord.id,
+          referenceId: paymentRecord.referenceId,
+          amount: paymentRecord.amount,
+          last4: paymentRecord.last4,
+        },
+      });
+    } catch (bookingError) {
+      console.error(
+        "Payment approved but appointment creation failed:",
+        bookingError,
+      );
+      return res.status(502).json({
+        message:
+          "The card was approved, but the appointment could not be saved. Contact support before retrying.",
+        paymentId: paymentRecord.id,
+      });
+    }
+  } catch (error: any) {
+    console.error(
+      "In-store booking payment failed:",
+      error.response?.data || error.message,
+    );
+    const terminalStatus =
+      error.response?.data?.GeneralResponse?.StatusCode;
+    if (terminalStatus === "2008") {
+      const delay =
+        error.response.data.GeneralResponse.DelayBeforeNextRequest;
+      return res.status(429).json({
+        message: `Terminal busy. Please wait ${Math.ceil(delay / 60)} min.`,
+      });
+    }
+    if (terminalStatus === "2007") {
+      return res.status(429).json({
+        message: "Timeout waiting for card swipe. Please try again.",
+      });
+    }
+    return res.status(500).json({
+      message:
+        "The terminal payment could not be completed. Verify the terminal before retrying.",
     });
   }
 };
