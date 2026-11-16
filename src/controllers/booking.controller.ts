@@ -556,7 +556,6 @@ export const bookWithStorePayment = async (req: Request, res: Response) => {
       attachments?: IncomingAttachment[];
       deposit_amount: number;
       quote_amount: number;
-      slug?: string;
     };
   };
 
@@ -587,9 +586,17 @@ export const bookWithStorePayment = async (req: Request, res: Response) => {
   if (!employee || employee.role !== "employee") {
     return res.status(404).json({ message: "Employee not found" });
   }
-  const assignee = booking.slug
-    ? await prisma.user.findFirst({ where: { slug: booking.slug } })
-    : null;
+  const authenticatedUserId = (req as any).user?.userId as string | undefined;
+  if (!authenticatedUserId) {
+    return res.status(401).json({ message: "Authenticated user not found" });
+  }
+  const assignedBy = await prisma.user.findUnique({
+    where: { id: authenticatedUserId },
+    select: { id: true },
+  });
+  if (!assignedBy) {
+    return res.status(401).json({ message: "Authenticated user not found" });
+  }
 
   const start = dayjs(booking.startTime);
   const end = dayjs(booking.endTime);
@@ -624,7 +631,7 @@ export const bookWithStorePayment = async (req: Request, res: Response) => {
       .json({ message: "Missing in-store terminal credentials" });
   }
 
-  const totalAmount = Number((depositAmount * 1.035).toFixed(2));
+  const chargeAmount = depositAmount;
   const dayStart = dayjs().tz(ZONE).startOf("day").toDate();
   const dayEnd = dayjs().tz(ZONE).endOf("day").toDate();
 
@@ -645,7 +652,7 @@ export const bookWithStorePayment = async (req: Request, res: Response) => {
     const terminalResponse = await axios.post(
       "https://spinpos.net/v2/Payment/Sale",
       {
-        Amount: totalAmount,
+        Amount: chargeAmount,
         PaymentType: "Credit",
         ReferenceId: referenceId,
         Tpn,
@@ -787,7 +794,7 @@ export const bookWithStorePayment = async (req: Request, res: Response) => {
             deposit_status: "accepted",
             payment_id: paymentRecord.id,
             source_booking: "manual",
-            ...(assignee ? { assignedById: assignee.id } : {}),
+            assignedById: assignedBy.id,
           },
         });
 
