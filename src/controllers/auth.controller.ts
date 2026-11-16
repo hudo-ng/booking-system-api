@@ -191,6 +191,87 @@ export const logInByIdToken = async (req: Request, res: Response) => {
 };
 const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
+const validateBatchPaymentRequest = (req: Request): string | null => {
+  const { artist, Cash, Card, item_service, extra_data } = req.body;
+  const payments = extra_data?.payments;
+
+  if (
+    typeof artist !== "string" ||
+    !artist ||
+    item_service !== "piercing"
+  ) {
+    return "Artist and piercing service are required";
+  }
+  if (!Array.isArray(payments) || payments.length === 0) {
+    return "At least one customer payment is required";
+  }
+  if (
+    typeof Cash !== "number" ||
+    !Number.isFinite(Cash) ||
+    Cash < 0 ||
+    typeof Card !== "number" ||
+    !Number.isFinite(Card) ||
+    Card < 0 ||
+    Cash + Card <= 0
+  ) {
+    return "Cash and card amounts must be valid non-negative numbers";
+  }
+  if (typeof extra_data?.paid_by !== "string" || !extra_data.paid_by) {
+    return "Payment method is required";
+  }
+
+  let allocatedTotal = 0;
+  let allocatedCash = 0;
+  let allocatedCard = 0;
+  const paymentIds = new Set<string>();
+  const documentIds = new Set<string>();
+  for (const payment of payments) {
+    if (
+      !payment ||
+      typeof payment.id !== "string" ||
+      !payment.id ||
+      typeof payment.documentId !== "string" ||
+      !payment.documentId ||
+      typeof payment.collectionId !== "string" ||
+      !payment.collectionId ||
+      typeof payment.amount !== "number" ||
+      !Number.isFinite(payment.amount) ||
+      payment.amount <= 0 ||
+      typeof payment.cash !== "number" ||
+      !Number.isFinite(payment.cash) ||
+      payment.cash < 0 ||
+      typeof payment.card !== "number" ||
+      !Number.isFinite(payment.card) ||
+      payment.card < 0 ||
+      Math.abs(payment.amount - payment.cash - payment.card) > 0.01
+    ) {
+      return "Each customer must have valid identifiers and an allocated payment";
+    }
+    if (
+      paymentIds.has(payment.id) ||
+      documentIds.has(payment.documentId)
+    ) {
+      return "A customer cannot be included more than once";
+    }
+    paymentIds.add(payment.id);
+    documentIds.add(payment.documentId);
+
+    allocatedTotal += payment.amount;
+    allocatedCash += payment.cash;
+    allocatedCard += payment.card;
+  }
+
+  if (
+    Math.abs(allocatedTotal - Cash - Card) > 0.01 ||
+    Math.abs(allocatedCash - Cash) > 0.01 ||
+    Math.abs(allocatedCard - Card) > 0.01
+  ) {
+    return "Customer allocations must match the total cash and card amounts";
+  }
+
+  return null;
+};
+
 export const createPaymentRequest = async (req: Request, res: Response) => {
   try {
     const { artist, Cash, Card, item_service, is_cashapp, extra_data } =
@@ -450,7 +531,11 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
     }
     // UPDATE PAY IN FIREBASE DATABASE
     let is_failed = false;
-    if (extra_data?.paid_by && extra_data?.id && extra_data?.documentId) {
+    const isBatchPayment = Array.isArray(extra_data?.payments);
+    if (
+      extra_data?.paid_by &&
+      (isBatchPayment || (extra_data?.id && extra_data?.documentId))
+    ) {
       if (typeof Card === "number" && Card > 0) {
         if (
           !dejavoo?.GeneralResponse?.Message?.toLowerCase().includes("approved")
@@ -525,6 +610,55 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       }
       console.log("is_failed:", is_failed);
       if (!is_failed) {
+        const payments = isBatchPayment ? extra_data.payments : [extra_data];
+        const completedPaymentIds: string[] = [];
+        for (const payment of payments) {
+          try {
+            await axios.patch(
+              `https://hyperinkersform.com/api/${item_service}/payment`,
+              {
+                tracking_payment_id: cashRecord?.id ?? cardRecord?.id ?? "",
+                cash_id: cashRecord?.id ?? "",
+                card_id: cardRecord?.id ?? "",
+                status: "paid",
+                paid_by: extra_data?.paid_by ?? "",
+                cash: payment.cash ?? Cash ?? 0,
+                card: payment.card ?? Card ?? 0,
+                id: payment.id ?? extra_data?.id,
+                tip: dejavoo?.Amounts?.TipAmount ?? 0,
+                documentId: payment.documentId ?? extra_data?.documentId,
+                collectionId: payment.collectionId ?? extra_data?.collectionId,
+                paid_money:
+                  payment.amount ??
+                  (payment.cash ?? Cash ?? 0) + (payment.card ?? Card ?? 0),
+                deposit_has_been_used: deposit_has_been_used,
+                ...(deposit_amount > 0 && { deposit: deposit_amount }),
+                terminal: "terminal_1",
+                tip_cash: payment.tip_cash ?? extra_data?.tip_cash ?? 0,
+              },
+            );
+            completedPaymentIds.push(payment.id ?? extra_data?.id);
+          } catch (error: any) {
+            console.error(
+              "Payment sync failed:",
+              error.response?.data || error.message,
+            );
+            if (isBatchPayment) {
+              return res.status(502).json({
+                success: false,
+                partial: true,
+                error:
+                  "The terminal payment was recorded, but one or more customer records could not be updated. Do not retry until the payment is verified.",
+                completedPaymentIds,
+                failedPaymentId: payment.id,
+                cashRecord,
+                cardRecord,
+                referenceId: nextReferenceId,
+              });
+            }
+            throw error;
+          }
+        }
         if (
           item_service === "tattoo" ||
           extra_data?.item_service === "tattoo"
@@ -632,6 +766,17 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
       .status(500)
       .json({ success: false, error: err.response?.data || err.message });
   }
+};
+
+export const createBatchPaymentRequest = async (
+  req: Request,
+  res: Response,
+) => {
+  const error = validateBatchPaymentRequest(req);
+  if (error) {
+    return res.status(400).json({ success: false, error });
+  }
+  return createPaymentRequest(req, res);
 };
 
 export const markDepositHasBeenUsed = async (req: Request, res: Response) => {
@@ -999,7 +1144,11 @@ export const createAdminPaymentRequest = async (
     }
     // UPDATE PAY IN FIREBASE DATABASE
     let is_failed = false;
-    if (extra_data?.paid_by && extra_data?.id && extra_data?.documentId) {
+    const isBatchPayment = Array.isArray(extra_data?.payments);
+    if (
+      extra_data?.paid_by &&
+      (isBatchPayment || (extra_data?.id && extra_data?.documentId))
+    ) {
       if (typeof Card === "number" && Card > 0) {
         if (
           !dejavoo?.GeneralResponse?.Message?.toLowerCase().includes("approved")
@@ -1064,25 +1213,53 @@ export const createAdminPaymentRequest = async (
       }
       console.log("is_failed:", is_failed);
       if (!is_failed) {
-        await axios.patch(
-          `https://hyperinkersform.com/api/${item_service}/payment`,
-          {
-            tracking_payment_id: cashRecord?.id ?? cardRecord?.id ?? "",
-            cash_id: cashRecord?.id ?? "",
-            card_id: cardRecord?.id ?? "",
-            status: "paid",
-            paid_by: extra_data?.paid_by ?? "",
-            cash: Cash ?? 0,
-            card: Card ?? 0,
-            id: extra_data?.id,
-            tip: dejavoo?.Amounts?.TipAmount ?? 0,
-            documentId: extra_data?.documentId,
-            collectionId: extra_data?.collectionId,
-            paid_money: (Cash ?? 0) + (Card ?? 0),
-            deposit_has_been_used: deposit_has_been_used,
-            terminal: "terminal_2",
-          },
-        );
+        const payments = isBatchPayment ? extra_data.payments : [extra_data];
+        const completedPaymentIds: string[] = [];
+        for (const payment of payments) {
+          try {
+            await axios.patch(
+              `https://hyperinkersform.com/api/${item_service}/payment`,
+              {
+                tracking_payment_id: cashRecord?.id ?? cardRecord?.id ?? "",
+                cash_id: cashRecord?.id ?? "",
+                card_id: cardRecord?.id ?? "",
+                status: "paid",
+                paid_by: extra_data?.paid_by ?? "",
+                cash: payment.cash ?? Cash ?? 0,
+                card: payment.card ?? Card ?? 0,
+                id: payment.id ?? extra_data?.id,
+                tip: dejavoo?.Amounts?.TipAmount ?? 0,
+                documentId: payment.documentId ?? extra_data?.documentId,
+                collectionId: payment.collectionId ?? extra_data?.collectionId,
+                paid_money:
+                  payment.amount ??
+                  (payment.cash ?? Cash ?? 0) + (payment.card ?? Card ?? 0),
+                deposit_has_been_used: deposit_has_been_used,
+                terminal: "terminal_2",
+              },
+            );
+            completedPaymentIds.push(payment.id ?? extra_data?.id);
+          } catch (error: any) {
+            console.error(
+              "Admin payment sync failed:",
+              error.response?.data || error.message,
+            );
+            if (isBatchPayment) {
+              return res.status(502).json({
+                success: false,
+                partial: true,
+                error:
+                  "The terminal payment was recorded, but one or more customer records could not be updated. Do not retry until the payment is verified.",
+                completedPaymentIds,
+                failedPaymentId: payment.id,
+                cashRecord,
+                cardRecord,
+                referenceId: nextReferenceId,
+              });
+            }
+            throw error;
+          }
+        }
         if (
           item_service === "tattoo" ||
           extra_data?.item_service === "tattoo"
@@ -1138,6 +1315,17 @@ export const createAdminPaymentRequest = async (
       .status(500)
       .json({ success: false, error: err.response?.data || err.message });
   }
+};
+
+export const createAdminBatchPaymentRequest = async (
+  req: Request,
+  res: Response,
+) => {
+  const error = validateBatchPaymentRequest(req);
+  if (error) {
+    return res.status(400).json({ success: false, error });
+  }
+  return createAdminPaymentRequest(req, res);
 };
 
 export const verifyAdminPaymentRequest = async (

@@ -4,6 +4,7 @@ import {
   login,
   logInByIdToken,
   createPaymentRequest,
+  createBatchPaymentRequest,
   createVerification,
   validateVerification,
   getTrackingPaymentById,
@@ -11,6 +12,7 @@ import {
   createSignInCustomer,
   updateSignInCustomerByDocumentId,
   createAdminPaymentRequest,
+  createAdminBatchPaymentRequest,
   calculateTotalCapturedHourFromWorkShift,
   getPaystubForZoe,
   sendWeeklyReceptionPaystub,
@@ -44,7 +46,12 @@ router.get("/mini-photo", getAllMiniPhoto);
 router.post("/mark-check-deposit", markDepositHasBeenUsed);
 router.post("/track-deposit", trackToSeeDepositHasbeenused);
 router.post("/create-payment-request", createPaymentRequest);
+router.post("/create-payment-request/batch", createBatchPaymentRequest);
 router.post("/create-payment-request/admin", createAdminPaymentRequest);
+router.post(
+  "/create-payment-request/admin/batch",
+  createAdminBatchPaymentRequest,
+);
 router.post("/verify-payment-request/admin", verifyAdminPaymentRequest);
 router.get("/payment/:id", getTrackingPaymentById);
 // Create and send verification code
