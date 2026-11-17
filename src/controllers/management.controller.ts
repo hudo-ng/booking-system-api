@@ -1002,17 +1002,15 @@ export const requestTattooArtistPaymentByUserId = async (
     }
 
     const artistName = user.name;
-    const commRate = 0.55; // Standard commission from your example
+    const commRate = user.commission_service ?? 0.1;
 
     // 2. Get Booked Appointment IDs for Booking Fee logic (0.5%)
     const bookedAppointments = await prisma.appointment.findMany({
       where: {
-        assignedById: {
-          in: [
-            "6a0c3e58-d4e4-4f32-8585-9fbb81b08417",
-            "bab24c5b-ec93-4386-bdfb-7b0e1f25eb7f",
-            "317b8640-2920-4d1d-853f-c8552545e634",
-          ],
+        assignedBy: {
+          is: {
+            position: "receptionist",
+          },
         },
       },
       select: { id: true },

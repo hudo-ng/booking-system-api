@@ -195,11 +195,7 @@ const validateBatchPaymentRequest = (req: Request): string | null => {
   const { artist, Cash, Card, item_service, extra_data } = req.body;
   const payments = extra_data?.payments;
 
-  if (
-    typeof artist !== "string" ||
-    !artist ||
-    item_service !== "piercing"
-  ) {
+  if (typeof artist !== "string" || !artist || item_service !== "piercing") {
     return "Artist and piercing service are required";
   }
   if (!Array.isArray(payments) || payments.length === 0) {
@@ -247,10 +243,7 @@ const validateBatchPaymentRequest = (req: Request): string | null => {
     ) {
       return "Each customer must have valid identifiers and an allocated payment";
     }
-    if (
-      paymentIds.has(payment.id) ||
-      documentIds.has(payment.documentId)
-    ) {
+    if (paymentIds.has(payment.id) || documentIds.has(payment.documentId)) {
       return "A customer cannot be included more than once";
     }
     paymentIds.add(payment.id);
@@ -2679,8 +2672,8 @@ export const sendZoePaystub = async (req: Request, res: Response) => {
     const commPercent = commRate * 100;
 
     // 1. Date Range Setup (Entire Previous Month)
-    const startOfPreviousMonth = dayjs().subtract(11, "month").startOf("month");
-    const endOfPreviousMonth = dayjs().subtract(11, "month").endOf("month");
+    const startOfPreviousMonth = dayjs().subtract(1, "month").startOf("month");
+    const endOfPreviousMonth = dayjs().subtract(1, "month").endOf("month");
 
     const fromDate = startOfPreviousMonth.toDate();
     const toDate = endOfPreviousMonth.toDate();
@@ -3102,7 +3095,7 @@ export const generateZoePaystubData = async (req: Request, res: Response) => {
     });
 
     // 5. KPI Historical Peak Analysis & % KPI Calculations
-    const twelveMonthsAgo = dayjs(fromDate).subtract(12, "month").toDate();
+    const twelveMonthsAgo = dayjs(fromDate).subtract(1, "month").toDate();
     const pastPaystubs = await prisma.paystub.findMany({
       where: {
         name: { equals: artistName, mode: "insensitive" },
@@ -3228,8 +3221,8 @@ export const sendArtistPaystub = async (req: Request, res: Response) => {
     const commPercent = commRate * 100;
 
     // 1. Date Range Setup (Entire Previous Month)
-    const startOfPreviousMonth = dayjs().subtract(12, "month").startOf("month");
-    const endOfPreviousMonth = dayjs().subtract(12, "month").endOf("month");
+    const startOfPreviousMonth = dayjs().subtract(1, "month").startOf("month");
+    const endOfPreviousMonth = dayjs().subtract(1, "month").endOf("month");
 
     const fromDate = startOfPreviousMonth.toDate();
     const toDate = endOfPreviousMonth.toDate();
@@ -4191,8 +4184,8 @@ export const sendPaystubArtistNicole = async (req: Request, res: Response) => {
     const studioFee2Amount = 50.0;
 
     // 1. Calculate Start and End dates for the ENTIRE previous month
-    const startOfPreviousMonth = dayjs().subtract(10, "month").startOf("month");
-    const endOfPreviousMonth = dayjs().subtract(10, "month").endOf("month");
+    const startOfPreviousMonth = dayjs().subtract(1, "month").startOf("month");
+    const endOfPreviousMonth = dayjs().subtract(1, "month").endOf("month");
 
     const fromDate = startOfPreviousMonth.toDate();
     const toDate = endOfPreviousMonth.toDate();
