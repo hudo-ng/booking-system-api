@@ -6,7 +6,9 @@ import { customAlphabet } from "nanoid";
 import { sendSMS } from "../utils/sms";
 import dayjs from "dayjs";
 import axios from "axios";
+import puppeteer from "puppeteer";
 import { normalizeName, normalizePhone } from "../utils/utils";
+import { imageKit } from "../utils/imagekit";
 
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
@@ -981,6 +983,18 @@ export const getListOfBookedAppointmentsByFormId = async (
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const escapeHtml = (value: string) =>
+  value.replace(/[&<>"']/g, (character) => {
+    const entities: Record<string, string> = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    };
+    return entities[character];
+  });
+
 export const requestTattooArtistPaymentByUserId = async (
   req: Request,
   res: Response,
@@ -1020,8 +1034,19 @@ export const requestTattooArtistPaymentByUserId = async (
     // 3. Setup Date Loop
     const fromDate = dayjs(start_date);
     const toDate = dayjs(end_date);
+    if (!fromDate.isValid() || !toDate.isValid() || fromDate.isAfter(toDate)) {
+      return res.status(400).json({ error: "Invalid date range" });
+    }
+
     const dailyLogs: any[] = [];
     const bookingFeeDetails: any[] = [];
+    const receiptRows: Array<{
+      date: string;
+      name: string;
+      deposit: number;
+      total: number;
+      tip: number;
+    }> = [];
 
     let cursor = fromDate;
 
@@ -1058,16 +1083,26 @@ export const requestTattooArtistPaymentByUserId = async (
               : parseFloat(i?.deposit) || 0;
           const tip = parseFloat(i?.tip) || 0;
           const volume = paid + deposit;
+          const customerName =
+            `${i?.firstName ?? ""} ${i?.lastName ?? ""}`.trim() ||
+            "Unknown customer";
 
           dayPaidMoney += paid;
           dayDeposit += deposit;
           dayTips += tip;
+          receiptRows.push({
+            date: cursor.format("MMM DD, YYYY"),
+            name: customerName,
+            deposit,
+            total: volume,
+            tip,
+          });
 
           // Check for Booking Fee (0.5%)
           if (bookedIds.includes(i.appointment_id)) {
             bookingFeeDetails.push({
               date: cursor.format("MMM DD, YYYY"),
-              customer: `${i?.firstName} ${i?.lastName}`,
+              customer: customerName,
               volume: volume,
               fee: volume * 0.005,
             });
@@ -1085,7 +1120,8 @@ export const requestTattooArtistPaymentByUserId = async (
           subtotal: dailyComm + dayTips,
         });
       } catch (err) {
-        console.error(`Error fetching for ${formattedDate}`);
+        console.error(`Error fetching artist payments for ${formattedDate}:`, err);
+        throw err;
       }
 
       // Add a small delay to prevent rate limiting during the loop
@@ -1106,9 +1142,117 @@ export const requestTattooArtistPaymentByUserId = async (
     );
     const netPay = totalCommission + totalTips - totalBookingFees;
 
+    const money = (value: number) => `$${value.toFixed(2)}`;
+    const printableRows = receiptRows
+      .map(
+        (row) => `
+          <section class="entry">
+            <div class="date">${escapeHtml(row.date)}</div>
+            <div class="name">${escapeHtml(row.name)}</div>
+            <div class="amounts">
+              <div><small>Deposit</small><strong>${money(row.deposit)}</strong></div>
+              <div><small>Total*</small><strong>${money(row.total)}</strong></div>
+              <div><small>Tip</small><strong>${money(row.tip)}</strong></div>
+            </div>
+          </section>
+        `,
+      )
+      .join("");
+    const receiptHtml = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            @page { size: 80mm auto; margin: 4mm; }
+            * { box-sizing: border-box; }
+            body { width: 72mm; margin: 0; color: #000; font: 10px Arial, sans-serif; }
+            h1 { margin: 0 0 3px; font-size: 15px; text-align: center; }
+            .subtitle { margin-bottom: 2px; text-align: center; font-size: 9px; }
+            .rule { border-top: 1px dashed #000; margin: 5px 0; }
+            .entry { padding: 4px 0; border-bottom: 1px dashed #888; }
+            .date { font-size: 9px; }
+            .name { margin: 2px 0 4px; font-size: 11px; font-weight: bold; overflow-wrap: anywhere; }
+            .amounts { display: flex; justify-content: space-between; gap: 2px; }
+            .amounts div { min-width: 0; }
+            .amounts small, .amounts strong { display: block; }
+            .amounts small { font-size: 8px; }
+            .amounts strong { margin-top: 2px; font-size: 10px; }
+            .note { margin: 4px 0; font-size: 8px; }
+            .totals div { display: flex; justify-content: space-between; padding: 2px 0; }
+            .total { margin-top: 3px; border-top: 1px solid #000; padding-top: 4px !important; font-size: 12px; font-weight: bold; }
+          </style>
+        </head>
+        <body>
+          <h1>HYPER INKER STUDIO</h1>
+          <div class="subtitle">TATTOO ARTIST RECEIPT</div>
+          <div class="subtitle">${escapeHtml(artistName)}</div>
+          <div class="subtitle">${escapeHtml(fromDate.format("MMM DD, YYYY"))} - ${escapeHtml(toDate.format("MMM DD, YYYY"))}</div>
+          <div class="rule"></div>
+          ${
+            printableRows ||
+            '<div class="subtitle">No paid appointments for this period.</div>'
+          }
+          <div class="note">*Total includes deposit.</div>
+          <div class="rule"></div>
+          <div class="totals">
+            <div><span>Commission (${(commRate * 100).toFixed(1)}%)</span><span>${money(totalCommission)}</span></div>
+            <div><span>Tips</span><span>${money(totalTips)}</span></div>
+            ${
+              totalBookingFees > 0
+                ? `<div><span>Booking fee deduction</span><span>-${money(totalBookingFees)}</span></div>`
+                : ""
+            }
+            <div class="total"><span>FINAL PAYOUT</span><span>${money(netPay)}</span></div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const safeArtistName =
+      artistName.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") ||
+      user.id;
+    const browser = await puppeteer.launch({
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+    let pdfBuffer: Uint8Array;
+    try {
+      const page = await browser.newPage();
+      await page.setViewport({ width: 302, height: 100 });
+      await page.setContent(receiptHtml, { waitUntil: "networkidle0" });
+      const contentHeightPx = await page.evaluate(
+        () => document.body.scrollHeight,
+      );
+      const receiptHeightMm = Math.ceil((contentHeightPx * 25.4) / 96 + 8);
+      pdfBuffer = await page.pdf({
+        width: "80mm",
+        height: `${receiptHeightMm}mm`,
+        printBackground: true,
+        margin: { top: "4mm", right: "4mm", bottom: "4mm", left: "4mm" },
+      });
+    } finally {
+      await browser.close();
+    }
+
+    const upload = await imageKit.upload({
+      file: Buffer.from(pdfBuffer),
+      fileName: `tattoo_receipt_${safeArtistName}_${fromDate.format("YYYYMMDD")}_${toDate.format("YYYYMMDD")}_${Date.now()}.pdf`,
+      folder: "/tattoo-artist-paystub-prints",
+    });
+    const savedReceipt = await prisma.tattooArtistPaystubPrint.create({
+      data: {
+        start_date: fromDate.toDate(),
+        end_date: toDate.toDate(),
+        artist: artistName,
+        pdf: upload.url,
+      },
+    });
+
     // 6. Return Data for Client-Side Rendering
     return res.json({
       success: true,
+      receiptPdfUrl: savedReceipt.pdf,
+      receiptRows,
       artist: {
         id: user.id,
         name: artistName,

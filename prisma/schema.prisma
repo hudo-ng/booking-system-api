@@ -282,6 +282,14 @@ model Paystub {
   paystub_month     Int?
 }
 
+model TattooArtistPaystubPrint {
+  id         String   @id @default(uuid())
+  start_date DateTime
+  end_date   DateTime
+  artist     String
+  pdf        String
+}
+
 model WorkShift {
   id        String    @id @default(uuid())
   userId    String
