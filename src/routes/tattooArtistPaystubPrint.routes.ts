@@ -1,8 +1,12 @@
 import { Router } from "express";
-import { getLatestTattooArtistPaystubPrints } from "../controllers/tattooArtistPaystubPrint.controller";
+import {
+  deleteTattooArtistPaystubPrint,
+  getLatestTattooArtistPaystubPrints,
+} from "../controllers/tattooArtistPaystubPrint.controller";
 
 const router = Router();
 
 router.post("/latest", getLatestTattooArtistPaystubPrints);
+router.delete("/:id", deleteTattooArtistPaystubPrint);
 
 export default router;

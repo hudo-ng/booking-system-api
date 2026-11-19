@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "crypto";
 import { PrismaClient } from "@prisma/client";
 import { Request, Response } from "express";
+import { imageKit } from "../utils/imagekit";
 
 const prisma = new PrismaClient();
 const TATTOO_PAYSTUB_PASSWORD = process.env.TATTOO_PAYSTUB_PASSWORD;
@@ -8,14 +9,12 @@ const MAX_FAILED_ATTEMPTS = 5;
 const FAILED_ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
 const failedAttempts = new Map<string, { count: number; expiresAt: number }>();
 
-export const getLatestTattooArtistPaystubPrints = async (
-  req: Request,
-  res: Response,
-) => {
+const authorizePaystubRequest = (req: Request, res: Response): boolean => {
   if (!TATTOO_PAYSTUB_PASSWORD) {
-    return res.status(503).json({
+    res.status(503).json({
       message: "Tattoo paystub access is not configured.",
     });
+    return false;
   }
 
   const now = Date.now();
@@ -26,14 +25,16 @@ export const getLatestTattooArtistPaystubPrints = async (
   const clientIp = req.ip || req.socket.remoteAddress || "unknown";
   const attempt = failedAttempts.get(clientIp);
   if (attempt && attempt.count >= MAX_FAILED_ATTEMPTS) {
-    return res.status(429).json({
+    res.status(429).json({
       message: "Too many incorrect password attempts. Try again later.",
     });
+    return false;
   }
 
   const submittedPassword = req.body?.password;
   if (typeof submittedPassword !== "string") {
-    return res.status(400).json({ message: "Password is required." });
+    res.status(400).json({ message: "Password is required." });
+    return false;
   }
 
   const expectedHash = createHash("sha256")
@@ -46,11 +47,42 @@ export const getLatestTattooArtistPaystubPrints = async (
       count: (attempt?.count ?? 0) + 1,
       expiresAt: attempt?.expiresAt ?? now + FAILED_ATTEMPT_WINDOW_MS,
     });
-    return res.status(401).json({ message: "Incorrect password." });
+    res.status(401).json({ message: "Incorrect password." });
+    return false;
   }
 
   failedAttempts.delete(clientIp);
+  return true;
+};
 
+const findImageKitFileIdByUrl = async (pdfUrl: string) => {
+  const limit = 1000;
+  let skip = 0;
+
+  while (true) {
+    const files = await imageKit.listFiles({
+      path: "/tattoo-artist-paystub-prints",
+      limit,
+      skip,
+    });
+    const matchingFile = files.find(
+      (file) => "fileId" in file && "url" in file && file.url === pdfUrl,
+    );
+
+    if (matchingFile && "fileId" in matchingFile) {
+      return matchingFile.fileId;
+    }
+    if (files.length < limit) return null;
+
+    skip += limit;
+  }
+};
+
+export const getLatestTattooArtistPaystubPrints = async (
+  req: Request,
+  res: Response,
+) => {
+  if (!authorizePaystubRequest(req, res)) return;
   try {
     const paystubs = await prisma.tattooArtistPaystubPrint.findMany({
       orderBy: [{ end_date: "desc" }, { start_date: "desc" }],
@@ -69,6 +101,38 @@ export const getLatestTattooArtistPaystubPrints = async (
     console.error("Error fetching tattoo artist paystub prints:", error);
     return res.status(500).json({
       message: "Failed to fetch tattoo artist paystub prints.",
+    });
+  }
+};
+
+export const deleteTattooArtistPaystubPrint = async (
+  req: Request,
+  res: Response,
+) => {
+  if (!authorizePaystubRequest(req, res)) return;
+
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ message: "Paystub ID is required." });
+
+  try {
+    const paystub = await prisma.tattooArtistPaystubPrint.findUnique({
+      where: { id },
+      select: { id: true, pdf: true },
+    });
+    if (!paystub) {
+      return res.status(404).json({ message: "Paystub not found." });
+    }
+
+    const fileId = await findImageKitFileIdByUrl(paystub.pdf);
+    if (fileId) await imageKit.deleteFile(fileId);
+
+    await prisma.tattooArtistPaystubPrint.delete({ where: { id } });
+
+    return res.json({ success: true, deletedId: id });
+  } catch (error) {
+    console.error("Error deleting tattoo artist paystub print:", error);
+    return res.status(500).json({
+      message: "Failed to delete tattoo artist paystub print.",
     });
   }
 };
