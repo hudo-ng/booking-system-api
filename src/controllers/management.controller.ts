@@ -1144,17 +1144,32 @@ export const requestTattooArtistPaymentByUserId = async (
     const netPay = totalCommission + totalTips - totalBookingFees;
 
     const money = (value: number) => `$${value.toFixed(2)}`;
-    const printableRows = receiptRows
+    const receiptRowsByDate = receiptRows.reduce<
+      Record<string, typeof receiptRows>
+    >((groups, row) => {
+      (groups[row.date] ??= []).push(row);
+      return groups;
+    }, {});
+    const printableRows = Object.entries(receiptRowsByDate)
       .map(
-        (row) => `
-          <section class="entry">
-            <div class="date">${escapeHtml(row.date)}</div>
-            <div class="name">${escapeHtml(row.name)}</div>
-            <div class="amounts">
-              <div><small>Deposit</small><strong>${money(row.deposit)}</strong></div>
-              <div><small>Total*</small><strong>${money(row.total)}</strong></div>
-              <div><small>Tip</small><strong>${money(row.tip)}</strong></div>
+        ([date, rows]) => `
+          <section class="day-group">
+            <div class="date">${escapeHtml(date)}</div>
+            <div class="receipt-grid column-headings">
+              <span>Name</span><span>Deposit</span><span>Total*</span><span>Tip</span>
             </div>
+            ${rows
+              .map(
+                (row) => `
+                  <div class="receipt-grid entry">
+                    <span class="name">${escapeHtml(row.name)}</span>
+                    <span>${money(row.deposit)}</span>
+                    <span>${money(row.total)}</span>
+                    <span>${money(row.tip)}</span>
+                  </div>
+                `,
+              )
+              .join("")}
           </section>
         `,
       )
@@ -1171,14 +1186,13 @@ export const requestTattooArtistPaymentByUserId = async (
             h1 { margin: 0 0 3px; font-size: 15px; text-align: center; }
             .subtitle { margin-bottom: 2px; text-align: center; font-size: 9px; }
             .rule { border-top: 1px dashed #000; margin: 5px 0; }
-            .entry { padding: 4px 0; border-bottom: 1px dashed #888; }
-            .date { font-size: 9px; }
-            .name { margin: 2px 0 4px; font-size: 11px; font-weight: bold; overflow-wrap: anywhere; }
-            .amounts { display: flex; justify-content: space-between; gap: 2px; }
-            .amounts div { min-width: 0; }
-            .amounts small, .amounts strong { display: block; }
-            .amounts small { font-size: 8px; }
-            .amounts strong { margin-top: 2px; font-size: 10px; }
+            .day-group { padding: 3px 0; border-bottom: 1px dashed #888; }
+            .date { margin-bottom: 3px; font-size: 9px; font-weight: bold; }
+            .receipt-grid { display: grid; grid-template-columns: 1.45fr 1fr 1fr 1fr; gap: 2px; align-items: start; }
+            .column-headings { padding-bottom: 2px; font-size: 7px; font-weight: bold; text-transform: uppercase; }
+            .column-headings span:not(:first-child), .entry span:not(:first-child) { text-align: right; }
+            .entry { padding: 2px 0; font-size: 8px; }
+            .name { overflow-wrap: anywhere; }
             .note { margin: 4px 0; font-size: 8px; }
             .totals div { display: flex; justify-content: space-between; padding: 2px 0; }
             .total { margin-top: 3px; border-top: 1px solid #000; padding-top: 4px !important; font-size: 12px; font-weight: bold; }
