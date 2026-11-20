@@ -18,6 +18,7 @@ import { getReceptionWeekData } from "../services/paystub.service";
 import minMax from "dayjs/plugin/minMax";
 import { imageKit } from "../utils/imagekit";
 import customParseFormat from "dayjs/plugin/customParseFormat";
+import { getPiercingPaymentBreakdown } from "../utils/piercingPaymentBreakdown";
 
 const ST_TIMEZONE = "America/Chicago";
 // This line is crucial for both JS logic and TS types
@@ -3546,7 +3547,10 @@ export const generateYenPaystubData = async (req: Request, res: Response) => {
         dayTips = 0,
         dayHours = 0;
       let dayCash = 0,
-        dayCard = 0;
+        dayCashApp = 0,
+        dayCard = 0,
+        daySaleTax = 0,
+        dayCashSaleTax = 0;
 
       try {
         const response = await axios.post(
@@ -3567,10 +3571,9 @@ export const generateYenPaystubData = async (req: Request, res: Response) => {
           artistItems.forEach((i: any) => {
             const fullName = `${i?.firstName} ${i?.lastName}`;
             const price = Number(i?.price) || 0;
-            let recordCash = Number(i?.cash) || 0;
-            const recordCard = Number(i?.card) || 0;
             const pJewelry = Number(i?.priceJewelry) || 0;
             const pSaline = Number(i?.priceSaline) || 0;
+            const payment = getPiercingPaymentBreakdown(i);
 
             // Logic: Asterisk separates "Service" from "Piercing"
             if (fullName.includes("*")) {
@@ -3583,24 +3586,11 @@ export const generateYenPaystubData = async (req: Request, res: Response) => {
             daySaline += pSaline;
             dayTips += Number(i?.tip) || 0;
 
-            // Handle zero-record edge case from your logic
-            if (recordCash + recordCard === 0) {
-              recordCash = pJewelry + pSaline + price;
-            }
-
-            if (i?.paid_by?.includes("card")) {
-              dayCard += recordCard;
-            }
-            if (
-              !i?.paid_by ||
-              i?.paid_by === undefined ||
-              i.paid_by?.toLowerCase().includes("cash")
-            ) {
-              if (recordCash === 0) {
-                recordCash = pJewelry + pSaline + price;
-              }
-              dayCash += recordCash;
-            }
+            dayCash += payment.cash;
+            dayCashApp += payment.cashApp;
+            dayCard += payment.card;
+            daySaleTax += payment.saleTax;
+            dayCashSaleTax += payment.cashSaleTax;
           });
 
           // Hour Calculation based on signedDate timestamps
@@ -3646,7 +3636,10 @@ export const generateYenPaystubData = async (req: Request, res: Response) => {
         saline: daySaline,
         tips: dayTips,
         cash: dayCash,
+        cashApp: dayCashApp,
         card: dayCard,
+        saleTax: daySaleTax,
+        cashSaleTax: dayCashSaleTax,
         subtotal: dayNet,
       });
 
@@ -3661,6 +3654,16 @@ export const generateYenPaystubData = async (req: Request, res: Response) => {
     const totalS = dailyLogs.reduce((acc, d) => acc + d.saline, 0);
     const totalTips = dailyLogs.reduce((acc, d) => acc + d.tips, 0);
     const totalCash = dailyLogs.reduce((acc, d) => acc + d.cash, 0);
+    const totalCashApp = dailyLogs.reduce((acc, d) => acc + d.cashApp, 0);
+    const totalCard = dailyLogs.reduce((acc, d) => acc + d.card, 0);
+    const totalSaleTax = Number(
+      dailyLogs.reduce((acc, d) => acc + d.saleTax, 0).toFixed(2),
+    );
+    const totalCashSaleTax = Number(
+      dailyLogs.reduce((acc, d) => acc + d.cashSaleTax, 0).toFixed(2),
+    );
+    const totalSales = totalPiercing + totalService + totalJ + totalS;
+    const totalCollected = totalCash + totalCashApp + totalCard;
     const laborPay = isHourlyPaid ? totalHours * hourlyRate : 0;
     const piercingComm = isHourlyPaid ? 0 : totalPiercing * commRate;
     const totalCommission =
@@ -3681,8 +3684,36 @@ export const generateYenPaystubData = async (req: Request, res: Response) => {
         netPay,
         totalWorkDays: dailyLogs.filter((d) => d.subtotal > 0).length,
         totalCash: totalCash,
+        totalCashApp,
+        totalCard,
+        totalSaleTax,
+        totalCashSaleTax,
+        totalSales,
+        paymentReconciliation: {
+          cash: totalCash,
+          cashApp: totalCashApp,
+          card: totalCard,
+          saleTax: totalSaleTax,
+          collected: totalCollected,
+          sales: totalSales,
+          salesBreakdown: {
+            piercing: totalPiercing,
+            replaceBuy: totalService,
+            jewelry: totalJ,
+            saline: totalS,
+          },
+          difference: Number(
+            (totalCollected - totalSaleTax - totalSales).toFixed(2),
+          ),
+        },
+        paymentReconciliationDifference: Number(
+          (totalCollected - totalSaleTax - totalSales).toFixed(2),
+        ),
       },
-      dailyLogs: dailyLogs.filter((d) => d.subtotal > 0),
+      dailyLogs: dailyLogs.filter(
+        (d) =>
+          d.subtotal > 0 || d.cash > 0 || d.cashApp > 0 || d.card > 0,
+      ),
     });
   } catch (error: any) {
     console.error(error);
@@ -4475,8 +4506,6 @@ export const generateNicolePaystubData = async (
   try {
     const { start_date, end_date } = req.body;
     const artistName = "Nicole";
-    const TAX_RATE = 0.085; // 8.5% tax rate for jewelry and saline
-
     // Fee Effective Dates
     const feeChangeDateMay = dayjs("2026-05-10");
     const feeChangeDateJune = dayjs("2026-06-26");
@@ -4500,13 +4529,19 @@ export const generateNicolePaystubData = async (
         sZoe = 0;
       let piercing = 0,
         service = 0,
+        grossPiercing = 0,
+        grossService = 0,
+        grossJewelry = 0,
+        grossSaline = 0,
         tips = 0,
         studioFeeOne = 0,
         studioFeeTwo = 0;
       let totalPiercingForFee = 0;
       let dayCash = 0,
         dayCard = 0,
-        dayTax = 0;
+        dayCashApp = 0,
+        dayTax = 0,
+        dayCashTax = 0;
 
       try {
         const response = await axios.post(
@@ -4531,10 +4566,21 @@ export const generateNicolePaystubData = async (
           const pJ = parseFloat(i.priceJewelry) || 0;
           const pS = parseFloat(i.priceSaline) || 0;
           const pT = parseFloat(i.tip) || 0;
+          const payment = getPiercingPaymentBreakdown(i);
 
           if (p > 0) totalPiercingForFee += p;
 
           if (artist === "nicole") {
+            dayCash += payment.cash;
+            dayCard += payment.card;
+            dayCashApp += payment.cashApp;
+            dayTax += payment.saleTax;
+            dayCashTax += payment.cashSaleTax;
+            if (isService) grossService += p;
+            else grossPiercing += p;
+            grossJewelry += pJ;
+            grossSaline += pS;
+
             if (isService)
               service += p * 0.6; // 60% Service
             else piercing += p * 0.6; // 60% Piercing
@@ -4542,31 +4588,6 @@ export const generateNicolePaystubData = async (
             sDirect += pS * 1.0; // 100% Saline
             tips += pT; // 100% Tips
 
-            // Cash/Card Tracking
-            let rCash = parseFloat(i.cash) || 0;
-            let rCard = parseFloat(i.card) || 0;
-            const totalItemAmount = p + pJ + pS + pT;
-
-            if (rCash + rCard === 0) {
-              // Fallback if neither field is populated: default to cash if paid_by is cash or empty
-              if (!i?.paid_by || i.paid_by?.toLowerCase().includes("cash")) {
-                rCash = totalItemAmount;
-              } else {
-                rCard = totalItemAmount;
-              }
-            }
-
-            dayCash += rCash;
-            dayCard += rCard;
-
-            // Calculate percentage of this specific transaction paid via Cash
-            const totalPaid = rCash + rCard;
-            const cashRatio = totalPaid > 0 ? rCash / totalPaid : 0;
-
-            // Tax applies only to Jewelry & Saline, proportioned by the cash ratio
-            const itemTax = (pJ + pS) * TAX_RATE;
-            const cashTaxPortion = itemTax * cashRatio;
-            dayTax += cashTaxPortion;
           } else if (artist === "yen") {
             jYen += pJ * 0;
             sYen += pS * 0.5; // 50% Saline from Yen
@@ -4616,11 +4637,18 @@ export const generateNicolePaystubData = async (
         sZoe,
         piercing,
         service,
+        grossPiercing,
+        grossService,
+        grossJewelry,
+        grossSaline,
         tips,
         studioFeeOne,
         studioFeeTwo,
         cash: dayCash,
-        tax: dayTax, // Tracked tax to be paid back from cash
+        cashApp: dayCashApp,
+        card: dayCard,
+        saleTax: dayTax,
+        cashSaleTax: dayCashTax,
         subtotal: daySubtotal,
         dailyNet: daySubtotal,
         direct: jDirect + sDirect + piercing + service,
@@ -4637,7 +4665,15 @@ export const generateNicolePaystubData = async (
       totalFeesOne: dailyLogs.reduce((acc, d) => acc + d.studioFeeOne, 0),
       totalFeesTwo: dailyLogs.reduce((acc, d) => acc + d.studioFeeTwo, 0),
       totalCash: dailyLogs.reduce((acc, d) => acc + d.cash, 0),
-      totalTaxToPayback: dailyLogs.reduce((acc, d) => acc + d.tax, 0), // Total tax collected in cash to return
+      totalCashApp: dailyLogs.reduce((acc, d) => acc + d.cashApp, 0),
+      totalCard: dailyLogs.reduce((acc, d) => acc + d.card, 0),
+      totalTaxToPayback: dailyLogs.reduce((acc, d) => acc + d.saleTax, 0),
+      totalSaleTax: Number(
+        dailyLogs.reduce((acc, d) => acc + d.saleTax, 0).toFixed(2),
+      ),
+      totalCashSaleTax: Number(
+        dailyLogs.reduce((acc, d) => acc + d.cashSaleTax, 0).toFixed(2),
+      ),
       netPay: 0,
       totalWorkDays: dailyLogs.filter((d) => d.direct > 0).length,
       totalOpenDays: dailyLogs.filter((d) => d.studioFeeOne > 0).length,
@@ -4648,7 +4684,31 @@ export const generateNicolePaystubData = async (
       stats.totalPassive +
       stats.totalTips -
       (stats.totalFeesOne + stats.totalFeesTwo);
-
+    const salesBreakdown = {
+      piercing: dailyLogs.reduce((sum, day) => sum + day.grossPiercing, 0),
+      replaceBuy: dailyLogs.reduce((sum, day) => sum + day.grossService, 0),
+      jewelry: dailyLogs.reduce((sum, day) => sum + day.grossJewelry, 0),
+      saline: dailyLogs.reduce((sum, day) => sum + day.grossSaline, 0),
+    };
+    const totalSales = Object.values(salesBreakdown).reduce(
+      (sum, value) => sum + value,
+      0,
+    );
+    const totalSaleTax = stats.totalSaleTax;
+    const totalCollected =
+      stats.totalCash + stats.totalCashApp + stats.totalCard;
+    const paymentReconciliation = {
+      cash: stats.totalCash,
+      cashApp: stats.totalCashApp,
+      card: stats.totalCard,
+      saleTax: totalSaleTax,
+      collected: totalCollected,
+      sales: totalSales,
+      salesBreakdown,
+      difference: Number(
+        (totalCollected - totalSaleTax - totalSales).toFixed(2),
+      ),
+    };
     return res.json({
       success: true,
       artist: { name: artistName },
@@ -4656,7 +4716,14 @@ export const generateNicolePaystubData = async (
         formatted: `${dayjs(start_date).format("MMM DD")} - ${dayjs(end_date).format("MMM DD, YYYY")}`,
       },
       stats,
-      dailyLogs: dailyLogs.filter((d) => d.subtotal !== 0 || d.cash > 0),
+      paymentReconciliation,
+      dailyLogs: dailyLogs.filter(
+        (d) =>
+          d.subtotal !== 0 ||
+          d.cash > 0 ||
+          d.cashApp > 0 ||
+          d.card > 0,
+      ),
     });
   } catch (error: any) {
     return res.status(500).json({ error: error.message });

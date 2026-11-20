@@ -9,6 +9,7 @@ import axios from "axios";
 import puppeteer from "puppeteer";
 import { normalizeName, normalizePhone } from "../utils/utils";
 import { imageKit } from "../utils/imagekit";
+import { getPiercingPaymentBreakdown } from "../utils/piercingPaymentBreakdown";
 
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
@@ -2691,7 +2692,11 @@ export const generatePaystubForNormalPiercing = async (
         dayJewelry = 0,
         daySaline = 0,
         dayTips = 0,
-        dayHours = 0;
+        dayHours = 0,
+        dayCash = 0,
+        dayCashApp = 0,
+        dayCard = 0,
+        daySaleTax = 0;
 
       try {
         const [salesRes, promoRes] = await Promise.all([
@@ -2709,7 +2714,8 @@ export const generatePaystubForNormalPiercing = async (
         const artistItems = items.filter(
           (i: any) =>
             i.artist?.toLowerCase() === artistName.toLowerCase() &&
-            ["paid", "done"].includes(i.status?.toLowerCase()),
+            ["paid", "done"].includes(i.status?.toLowerCase()) &&
+            (i.color ?? "piercing") === "piercing",
         );
 
         if (artistItems.length > 0) {
@@ -2729,6 +2735,7 @@ export const generatePaystubForNormalPiercing = async (
           artistItems.forEach((i: any) => {
             const fullName = `${i?.firstName} ${i?.lastName}`;
             const price = Number(i?.price) || 0;
+            const payment = getPiercingPaymentBreakdown(i);
 
             if (fullName.includes("*")) {
               dayServiceTotal += price;
@@ -2739,6 +2746,10 @@ export const generatePaystubForNormalPiercing = async (
             dayJewelry += Number(i?.priceJewelry) || 0;
             daySaline += Number(i?.priceSaline) || 0;
             dayTips += Number(i?.tip) || 0;
+            dayCash += payment.cash;
+            dayCashApp += payment.cashApp;
+            dayCard += payment.card;
+            daySaleTax += payment.saleTax;
           });
 
           const clockInStr =
@@ -2777,6 +2788,10 @@ export const generatePaystubForNormalPiercing = async (
         saline: daySaline,
         piercingPrice: dayPiercingTotal,
         servicePrice: dayServiceTotal,
+        cash: dayCash,
+        cashApp: dayCashApp,
+        card: dayCard,
+        saleTax: daySaleTax,
         tips: dayTips,
         commission: dComm,
         subtotal: dLabor + dComm + dayTips,
@@ -2796,6 +2811,14 @@ export const generatePaystubForNormalPiercing = async (
     );
     const totalService = dailyLogs.reduce((acc, d) => acc + d.servicePrice, 0);
     const totalTips = dailyLogs.reduce((acc, d) => acc + d.tips, 0);
+    const totalCash = dailyLogs.reduce((acc, d) => acc + d.cash, 0);
+    const totalCashApp = dailyLogs.reduce((acc, d) => acc + d.cashApp, 0);
+    const totalCard = dailyLogs.reduce((acc, d) => acc + d.card, 0);
+    const totalSaleTax = Number(
+      dailyLogs.reduce((acc, d) => acc + d.saleTax, 0).toFixed(2),
+    );
+    const totalCollected = totalCash + totalCashApp + totalCard;
+    const totalSales = totalPiercing + totalService + totalJ + totalS;
 
     const piercingComm = totalPiercing * piercingCommRate;
     const jewelryComm = totalJ * jewelryCommRate;
@@ -2906,6 +2929,23 @@ export const generatePaystubForNormalPiercing = async (
         totalCommission,
         breakdown: { piercingComm, jewelryComm, serviceComm, salineComm },
         totalTips,
+        paymentReconciliation: {
+          cash: totalCash,
+          cashApp: totalCashApp,
+          card: totalCard,
+          saleTax: totalSaleTax,
+          collected: totalCollected,
+          sales: totalSales,
+          salesBreakdown: {
+            piercing: totalPiercing,
+            replaceBuy: totalService,
+            jewelry: totalJ,
+            saline: totalS,
+          },
+          difference: Number(
+            (totalCollected - totalSaleTax - totalSales).toFixed(2),
+          ),
+        },
         kpiMetrics: {
           piercingService: {
             current: currentPiercingServiceTotal,
@@ -2930,7 +2970,10 @@ export const generatePaystubForNormalPiercing = async (
         netPay,
         totalWorkDays,
       },
-      dailyLogs: dailyLogs.filter((d) => d.subtotal > 0),
+      dailyLogs: dailyLogs.filter(
+        (d) =>
+          d.subtotal > 0 || d.cash > 0 || d.cashApp > 0 || d.card > 0,
+      ),
     });
   } catch (error: any) {
     console.error(error);
