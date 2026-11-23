@@ -60,6 +60,8 @@ model User {
   WorkShift                WorkShift[]
   workingHours             WorkingHours[]
   Notification             Notification[]
+  courses                  Course[]
+  coursePractices          CoursePractice[]
 }
 
 model ContentBonus {
@@ -787,4 +789,64 @@ model DemoPhoto {
   updatedAt   DateTime          @updatedAt
   categories  JewelryCategory[]
   items       JewelryItem[]
+}
+
+model Course {
+  id        String          @id @default(uuid())
+  userId    String
+  name      String
+  image     String?
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questions CourseQuestion[]
+  practices CoursePractice[]
+
+  @@index([userId, createdAt])
+}
+
+model CourseQuestion {
+  id             String                    @id @default(uuid())
+  courseId       String
+  question       String
+  question_image String?
+  options        Json
+  correct_answer String
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  course         Course                    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  practiceItems  CoursePracticeQuestion[]
+
+  @@index([courseId, createdAt])
+}
+
+model CoursePractice {
+  id          String                    @id @default(uuid())
+  userId      String
+  courseId    String
+  currentIndex Int                      @default(0)
+  startedAt   DateTime                  @default(now())
+  updatedAt   DateTime                  @updatedAt
+  completedAt DateTime?
+  user        User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  course      Course                    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  questions   CoursePracticeQuestion[]
+
+  @@index([userId, startedAt])
+  @@index([courseId, startedAt])
+}
+
+model CoursePracticeQuestion {
+  id              String         @id @default(uuid())
+  practiceId      String
+  questionId      String
+  position        Int
+  selectedAnswer  String?
+  isCorrect       Boolean?
+  answeredAt      DateTime?
+  practice        CoursePractice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  question        CourseQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([practiceId, position])
+  @@unique([practiceId, questionId])
 }

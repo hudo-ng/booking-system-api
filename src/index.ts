@@ -19,6 +19,7 @@ import laserRoutes from "./routes/laser.routes";
 import giftCardsRouter from "./routes/giftCards.routes";
 import jewelryRouter from "./routes/jewelry.routes";
 import tattooArtistPaystubPrintRoutes from "./routes/tattooArtistPaystubPrint.routes";
+import coursesRoutes from "./routes/courses.routes";
 
 const app = express();
 
@@ -69,6 +70,7 @@ app.use("/laser", laserRoutes);
 app.use("/gift-cards", giftCardsRouter);
 app.use("/jewelry", jewelryRouter);
 app.use("/tattoo-artist-paystubs", tattooArtistPaystubPrintRoutes);
+app.use("/courses", coursesRoutes);
 app.get("/", (req: Request, res: Response) => {
   res.send("Hello from express");
 });
