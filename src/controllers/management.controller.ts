@@ -996,6 +996,50 @@ const escapeHtml = (value: string) =>
     return entities[character];
   });
 
+const receiptAmount = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const amount = Number(value);
+    return Number.isFinite(amount) ? amount : null;
+  }
+  return null;
+};
+
+const getReceiptActivityCounts = (
+  value: unknown,
+): { cash: number; card: number } => {
+  const entries = Array.isArray(value)
+    ? value
+    : value && typeof value === "object"
+      ? Object.values(value)
+      : [];
+
+  return entries.reduce(
+    (counts, transaction) => {
+      if (
+        typeof transaction !== "object" ||
+        transaction === null ||
+        Array.isArray(transaction) ||
+        (transaction as Record<string, unknown>).voided === true
+      ) {
+        return counts;
+      }
+
+      const payment = transaction as Record<string, unknown>;
+      if ((receiptAmount(payment.cash) ?? 0) > 0) {
+        counts.cash += 1;
+      }
+      if ((receiptAmount(payment.card) ?? 0) > 0) {
+        counts.card += 1;
+      }
+      return counts;
+    },
+    { cash: 0, card: 0 },
+  );
+};
+
 export const requestTattooArtistPaymentByUserId = async (
   req: Request,
   res: Response,
@@ -1045,8 +1089,11 @@ export const requestTattooArtistPaymentByUserId = async (
       date: string;
       name: string;
       deposit: number;
+      depositCategory: string;
       total: number;
       tip: number;
+      cashActivityCount: number;
+      cardActivityCount: number;
     }> = [];
 
     let cursor = fromDate;
@@ -1087,6 +1134,11 @@ export const requestTattooArtistPaymentByUserId = async (
           const customerName =
             `${i?.firstName ?? ""} ${i?.lastName ?? ""}`.trim() ||
             "Unknown customer";
+          const depositCategory =
+            typeof i?.deposit_category === "string"
+              ? i.deposit_category.trim()
+              : "";
+          const activityCounts = getReceiptActivityCounts(i?.transactions);
 
           dayPaidMoney += paid;
           dayDeposit += deposit;
@@ -1095,8 +1147,11 @@ export const requestTattooArtistPaymentByUserId = async (
             date: cursor.format("MMM DD, YYYY"),
             name: customerName,
             deposit,
+            depositCategory,
             total: volume,
             tip,
+            cashActivityCount: activityCounts.cash,
+            cardActivityCount: activityCounts.card,
           });
 
           // Check for Booking Fee (0.5%)
@@ -1144,6 +1199,10 @@ export const requestTattooArtistPaymentByUserId = async (
     const netPay = totalCommission + totalTips - totalBookingFees;
 
     const money = (value: number) => `$${value.toFixed(2)}`;
+    const cashIcon =
+      '<svg class="payment-icon" viewBox="0 0 24 16" role="img" aria-label="Cash"><rect x="1" y="1" width="22" height="14" rx="1.5"/><circle cx="12" cy="8" r="3"/><path d="M4 4c1 0 1.5-.5 1.5-1M20 12c-1 0-1.5.5-1.5 1"/></svg>';
+    const cardIcon =
+      '<svg class="payment-icon" viewBox="0 0 24 16" role="img" aria-label="Card"><rect x="1" y="1" width="22" height="14" rx="1.5"/><path d="M1 5h22M4 11h6"/></svg>';
     const receiptRowsByDate = receiptRows.reduce<
       Record<string, typeof receiptRows>
     >((groups, row) => {
@@ -1160,14 +1219,28 @@ export const requestTattooArtistPaymentByUserId = async (
             </div>
             ${rows
               .map(
-                (row) => `
-                  <div class="receipt-grid entry">
-                    <span class="name">${escapeHtml(row.name)}</span>
-                    <span>${money(row.deposit)}</span>
-                    <span>${money(row.total)}</span>
-                    <span>${money(row.tip)}</span>
-                  </div>
-                `,
+                (row) => {
+                  const depositLabel = row.depositCategory
+                    ? `${money(row.deposit)} (${escapeHtml(row.depositCategory)})`
+                    : money(row.deposit);
+                  const hideSingleCardIcon =
+                    row.cashActivityCount === 0 && row.cardActivityCount === 1;
+                  const paymentIcons = hideSingleCardIcon
+                    ? ""
+                    : `${cashIcon.repeat(row.cashActivityCount)}${cardIcon.repeat(row.cardActivityCount)}`;
+
+                  return `
+                    <div class="receipt-grid entry">
+                      <span class="name">${escapeHtml(row.name)}</span>
+                      <span>${depositLabel}</span>
+                      <span class="total-cell">
+                        <span>${money(row.total)}</span>
+                        <span class="payment-icons">${paymentIcons}</span>
+                      </span>
+                      <span>${money(row.tip)}</span>
+                    </div>
+                  `;
+                },
               )
               .join("")}
           </section>
@@ -1188,11 +1261,14 @@ export const requestTattooArtistPaymentByUserId = async (
             .rule { border-top: 1px dashed #000; margin: 5px 0; }
             .day-group { padding: 3px 0; border-bottom: 1px dashed #888; }
             .date { margin-bottom: 3px; font-size: 9px; font-weight: bold; }
-            .receipt-grid { display: grid; grid-template-columns: 1.45fr 1fr 1fr 1fr; gap: 2px; align-items: start; }
+            .receipt-grid { display: grid; grid-template-columns: 1.35fr 1.25fr 0.8fr 0.8fr; gap: 2px; align-items: start; }
             .column-headings { padding-bottom: 2px; font-size: 7px; font-weight: bold; text-transform: uppercase; }
             .column-headings span:not(:first-child), .entry span:not(:first-child) { text-align: right; }
             .entry { padding: 2px 0; font-size: 8px; }
             .name { overflow-wrap: anywhere; }
+            .total-cell { display: flex; justify-content: flex-end; align-items: center; gap: 2px; flex-wrap: wrap; }
+            .payment-icons { display: inline-flex; align-items: center; gap: 1px; }
+            .payment-icon { width: 9px; height: 7px; fill: none; stroke: #000; stroke-width: 1.5; flex: 0 0 auto; }
             .note { margin: 4px 0; font-size: 8px; }
             .totals div { display: flex; justify-content: space-between; padding: 2px 0; }
             .total { margin-top: 3px; border-top: 1px solid #000; padding-top: 4px !important; font-size: 12px; font-weight: bold; }
