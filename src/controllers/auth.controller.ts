@@ -684,48 +684,6 @@ export const createPaymentRequest = async (req: Request, res: Response) => {
             console.error("Tattoo payment update sign in:", error);
           }
         }
-        await axios.patch(
-          `https://hyperinkersform.com/api/${item_service}/payment`,
-          {
-            tracking_payment_id: cashRecord?.id ?? cardRecord?.id ?? "",
-            cash_id: cashRecord?.id ?? "",
-            card_id: cardRecord?.id ?? "",
-            status: "paid",
-            paid_by: extra_data?.paid_by ?? "",
-            cash: Cash ?? 0,
-            card: Card ?? 0,
-            id: extra_data?.id,
-            tip: dejavoo?.Amounts?.TipAmount ?? 0,
-            documentId: extra_data?.documentId,
-            collectionId: extra_data?.collectionId,
-            paid_money: (Cash ?? 0) + (Card ?? 0),
-            deposit_has_been_used: deposit_has_been_used,
-            ...(deposit_amount > 0 && { deposit: deposit_amount }),
-            terminal: "terminal_1",
-            tip_cash: extra_data?.tip_cash ?? 0,
-          },
-        );
-        if (
-          item_service === "tattoo" ||
-          extra_data?.item_service === "tattoo"
-        ) {
-          const newPaymentAmount = (Cash ?? 0) + (Card ?? 0);
-          try {
-            await prisma.signInCustomer.update({
-              where: {
-                document_id: extra_data?.documentId,
-              },
-              data: {
-                spending_amount: {
-                  increment: newPaymentAmount,
-                },
-                spending_artist: artist,
-              },
-            });
-          } catch (error) {
-            console.error("Tattoo payment update sign in:", error);
-          }
-        }
       }
     }
     return res.json({
