@@ -85,11 +85,7 @@ export const getLatestTattooArtistPaystubPrints = async (
   if (!authorizePaystubRequest(req, res)) return;
   try {
     const paystubs = await prisma.tattooArtistPaystubPrint.findMany({
-      orderBy: [
-        { createdAt: "desc" },
-        { end_date: "desc" },
-        { start_date: "desc" },
-      ],
+      orderBy: [{ end_date: "desc" }, { start_date: "desc" }],
       take: 20,
       select: {
         id: true,
@@ -98,7 +94,6 @@ export const getLatestTattooArtistPaystubPrints = async (
         artist: true,
         pdf: true,
         status: true,
-        createdAt: true,
       },
     });
 
