@@ -85,7 +85,11 @@ export const getLatestTattooArtistPaystubPrints = async (
   if (!authorizePaystubRequest(req, res)) return;
   try {
     const paystubs = await prisma.tattooArtistPaystubPrint.findMany({
-      orderBy: [{ end_date: "desc" }, { start_date: "desc" }],
+      orderBy: [
+        { createdAt: "desc" },
+        { end_date: "desc" },
+        { start_date: "desc" },
+      ],
       take: 20,
       select: {
         id: true,
@@ -93,6 +97,8 @@ export const getLatestTattooArtistPaystubPrints = async (
         end_date: true,
         artist: true,
         pdf: true,
+        status: true,
+        createdAt: true,
       },
     });
 
@@ -101,6 +107,42 @@ export const getLatestTattooArtistPaystubPrints = async (
     console.error("Error fetching tattoo artist paystub prints:", error);
     return res.status(500).json({
       message: "Failed to fetch tattoo artist paystub prints.",
+    });
+  }
+};
+
+export const markTattooArtistPaystubPrintPaid = async (
+  req: Request,
+  res: Response,
+) => {
+  if (!authorizePaystubRequest(req, res)) return;
+
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ message: "Paystub ID is required." });
+  if (req.body?.status !== "paid") {
+    return res.status(400).json({ message: 'Status must be "paid".' });
+  }
+
+  try {
+    const paystub = await prisma.tattooArtistPaystubPrint.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!paystub) {
+      return res.status(404).json({ message: "Paystub not found." });
+    }
+
+    const updatedPaystub = await prisma.tattooArtistPaystubPrint.update({
+      where: { id },
+      data: { status: "paid" },
+      select: { id: true, status: true },
+    });
+
+    return res.json({ success: true, data: updatedPaystub });
+  } catch (error) {
+    console.error("Error marking tattoo artist paystub as paid:", error);
+    return res.status(500).json({
+      message: "Failed to update tattoo artist paystub status.",
     });
   }
 };

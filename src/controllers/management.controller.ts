@@ -1253,23 +1253,24 @@ export const requestTattooArtistPaymentByUserId = async (
         <head>
           <meta charset="utf-8" />
           <style>
-            @page { size: 80mm auto; margin: 4mm; }
+            @page { margin: 0; }
             * { box-sizing: border-box; }
-            body { width: 72mm; margin: 0; color: #000; font: 10px Arial, sans-serif; }
-            h1 { margin: 0 0 3px; font-size: 15px; text-align: center; }
-            .subtitle { margin-bottom: 2px; text-align: center; font-size: 9px; }
+            body { width: 80mm; margin: 0; padding: 1.5mm; color: #000; font: 11px Arial, sans-serif; }
+            h1 { margin: 0 0 3px; font-size: 16px; text-align: center; }
+            .subtitle { margin-bottom: 2px; text-align: center; font-size: 10px; }
             .rule { border-top: 1px dashed #000; margin: 5px 0; }
             .day-group { padding: 3px 0; border-bottom: 1px dashed #888; }
-            .date { margin-bottom: 3px; font-size: 9px; font-weight: bold; }
+            .date { margin-bottom: 3px; font-size: 10px; font-weight: bold; }
             .receipt-grid { display: grid; grid-template-columns: 1.35fr 1.25fr 0.8fr 0.8fr; gap: 2px; align-items: start; }
-            .column-headings { padding-bottom: 2px; font-size: 7px; font-weight: bold; text-transform: uppercase; }
+            .receipt-grid > span { min-width: 0; overflow-wrap: anywhere; }
+            .column-headings { padding-bottom: 2px; font-size: 8px; font-weight: bold; text-transform: uppercase; }
             .column-headings span:not(:first-child), .entry span:not(:first-child) { text-align: right; }
-            .entry { padding: 2px 0; font-size: 8px; }
-            .name { overflow-wrap: anywhere; }
+            .entry { padding: 2px 0; font-size: 9px; }
+            .name { min-width: 0; overflow-wrap: anywhere; }
             .total-cell { display: flex; justify-content: flex-end; align-items: center; gap: 2px; flex-wrap: wrap; }
             .payment-icons { display: inline-flex; align-items: center; gap: 1px; }
             .payment-icon { width: 9px; height: 7px; fill: none; stroke: #000; stroke-width: 1.5; flex: 0 0 auto; }
-            .note { margin: 4px 0; font-size: 8px; }
+            .note { margin: 4px 0; font-size: 9px; }
             .totals div { display: flex; justify-content: space-between; padding: 2px 0; }
             .total { margin-top: 3px; border-top: 1px solid #000; padding-top: 4px !important; font-size: 12px; font-weight: bold; }
           </style>
@@ -1314,12 +1315,12 @@ export const requestTattooArtistPaymentByUserId = async (
       const contentHeightPx = await page.evaluate(
         () => document.body.scrollHeight,
       );
-      const receiptHeightMm = Math.ceil((contentHeightPx * 25.4) / 96 + 8);
+      const receiptHeightMm = Math.ceil((contentHeightPx * 25.4) / 96 + 2);
       pdfBuffer = await page.pdf({
         width: "80mm",
         height: `${receiptHeightMm}mm`,
         printBackground: true,
-        margin: { top: "4mm", right: "4mm", bottom: "4mm", left: "4mm" },
+        margin: { top: "0", right: "0", bottom: "0", left: "0" },
       });
     } finally {
       await browser.close();

@@ -290,6 +290,8 @@ model TattooArtistPaystubPrint {
   end_date   DateTime
   artist     String
   pdf        String
+  status     String   @default("pending")
+  createdAt  DateTime @default(now())
 }
 
 model WorkShift {
